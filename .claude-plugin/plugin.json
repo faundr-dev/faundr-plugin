@@ -1,0 +1,9 @@
+{
+  "name": "faundr",
+  "version": "0.37.0",
+  "description": "Conecta suas sessões do Claude Code à plataforma Faundr.",
+  "author": {
+    "name": "Faundr"
+  },
+  "homepage": "https://faundr.palasbusinessstrategy.workers.dev"
+}

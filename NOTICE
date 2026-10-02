@@ -1,0 +1,50 @@
+Faundr — plugin e motor do grafo de conhecimento
+
+O motor do grafo (engine/, empacotado em dist/graph.mjs) é um porte próprio em TypeScript,
+derivado do projeto graphify:
+
+  Graphify
+  Copyright 2026 Safi Shamsi and the Graphify contributors.
+  Licenciado sob a Apache License, Version 2.0 (licenses/graphify-LICENSE);
+  partes anteriores sob a licença MIT (licenses/graphify-LICENSE-MIT).
+
+Mudanças em relação ao original: reescrito em TypeScript; parsing via web-tree-sitter (WebAssembly)
+em vez de py-tree-sitter; comunidades via Louvain (graphology) em vez de Leiden; relatório e
+consultas traduzidos para português; integração com a plataforma Faundr.
+
+Componentes empacotados:
+  web-tree-sitter e gramáticas tree-sitter-wasms (MIT), graphology e módulos (MIT), ignore (MIT).
+
+Checagem de segurança (bin/security.mjs):
+  As regras de chaves e senhas (dist/secret-rules.mjs) são convertidas para JavaScript, por
+  engine/secret-rules.mjs, a partir do Betterleaks (config/betterleaks.toml):
+  Copyright (c) 2026 Zachary Rice. Licença MIT (licenses/betterleaks-LICENSE).
+  Mudanças: regex convertidas de RE2 para JavaScript; dos filtros, só o limite de entropia e as listas
+  de valores de exemplo; sem a validação ativa de chaves; regras genéricas removidas.
+  Dados de vulnerabilidades consultados na API pública do OSV.dev (https://osv.dev); os avisos do
+  GitHub Advisory Database são CC-BY 4.0 e cada achado traz o link do aviso original.
+  O catálogo da revisão com IA (skills/security/catalog/) foi destilado das skills de conhecimento do
+  Strix (usestrix/strix, Copyright Strix contributors, Apache License 2.0), reescrito em português e
+  adaptado para revisão estática de código.
+  Ideias de fluxo (filtro de ruído, ignorar com prazo, correção por estratégia, contraevidência) vêm dos
+  estudos do GitGuard, Snyk CLI (Apache-2.0) e Strix (Apache-2.0) em docs/research/; nenhum código deles
+  foi copiado.
+
+Checagem de qualidade do código (bin/quality-rules.mjs, engine/src/quality.ts):
+  Critérios destilados do Ponytail (DietrichGebert/ponytail, Copyright 2026 DietrichGebert, licença MIT),
+  em especial a tabela de dependências que a plataforma já resolve, e dos plugins oficiais da Anthropic
+  para o Claude Code (anthropics/claude-plugins-official, Apache License 2.0: code-review, pr-review-toolkit,
+  code-simplifier, claude-md-management). Textos reescritos em português; nenhum código copiado.
+  Estudos em docs/research/qualidade-*.md.
+
+Seção Testes (bin/tests.mjs):
+  Lê os relatórios JSON do Vitest (MIT) e do Jest (MIT), o JSON do Playwright (Apache-2.0) e o JUnit do
+  node --test; formatos e comandos estudados em docs/research/testes-vitest-playwright.md. Ideias de cobertura
+  da mudança e de teste instável vêm do estudo do Codecov (docs/research/testes-mutacao-cobertura.md), só como
+  conceito: a licença FSL do Codecov não permite reaproveitar código, telas ou textos, e nada foi copiado.
+  O guia das skills tests e tests-fix (skills/tests/guia.md) adapta a skill TDD de Matt Pocock (MIT) e o
+  pr-test-analyzer e o test-engineer dos plugins oficiais da Anthropic (Apache-2.0), reescritos em português.
+  Teste de mutação (bin/mutation.mjs): roda o Stryker (stryker-mutator/stryker-js, Apache-2.0) instalado no projeto
+  do usuário e lê o relatório JSON (mutation-testing-report-schema, Apache-2.0); nenhum código do Stryker é empacotado. O catálogo da revisão com IA (skills/quality/catalog.md) e as
+  skills quality e quality-fix adaptam a régua de confiança e os checklists do code-review e do pr-review-toolkit,
+  as regras do code-simplifier e as 5 etiquetas de corte do Ponytail, reescritos em português.

@@ -1,0 +1,8 @@
+{
+  "name": "faundr-cli",
+  "version": "0.37.0",
+  "private": true,
+  "type": "module",
+  "bin": { "faundr": "bin/faundr.mjs" },
+  "engines": { "node": ">=20" }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "faundr",
+  "owner": {
+    "name": "Faundr"
+  },
+  "plugins": [
+    {
+      "name": "faundr",
+      "source": "./",
+      "description": "Conecta suas sessões do Claude Code à plataforma Faundr."
+    }
+  ],
+  "description": "Plugin do Faundr para o Claude Code: memória, funcionalidades, design, segurança, qualidade, testes e erros do seu projeto num painel."
+}
