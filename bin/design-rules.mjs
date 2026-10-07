@@ -8,8 +8,9 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { allDeps, isClaudePlugin } from './parts.mjs'
 
-const SKIP = /(^|\/)(node_modules|\.git|\.faundr|dist|build|out|coverage|\.claude|\.remember|\.wrangler|\.next|\.nuxt|\.svelte-kit|\.tanstack|\.vercel|\.output|plugin)(\/|$)/
+const SKIP = /(^|\/)(node_modules|\.git|\.faundr|dist|build|out|coverage|\.claude|\.remember|\.wrangler|\.next|\.nuxt|\.svelte-kit|\.tanstack|\.vercel|\.output)(\/|$)/
 const NOT_APP = /(^|\/)(__tests__|__mocks__|fixtures?|mocks?|stories|test|tests|e2e)(\/|$)|\.(test|spec|stories)\.|\.gen\./
 
 // Identificação, tipo e gravidade de cada regra. A explicação vai no detalhe do achado.
@@ -74,7 +75,7 @@ function walk(root) {
     for (const e of entries) {
       const abs = path.join(dir, e.name)
       const rel = path.relative(root, abs).split(path.sep).join('/')
-      if (SKIP.test(rel)) continue
+      if (SKIP.test(rel) || (e.isDirectory() && isClaudePlugin(abs))) continue
       if (e.isDirectory()) visit(abs, depth + 1)
       else out.push(rel)
     }
@@ -110,11 +111,8 @@ function loadProject(root, uiExt) {
   const ui = all.filter((f) => uiExt.test(f) && !NOT_APP.test(f))
   const css = all.filter((f) => /\.(css|scss)$/.test(f) && !NOT_APP.test(f))
   const head = all.filter((f) => HEAD_FILES.some((re) => re.test(f)))
-  let pkg = {}
-  try {
-    pkg = JSON.parse(read(root, 'package.json'))
-  } catch {}
-  const deps = { ...pkg.dependencies, ...pkg.devDependencies }
+  // Dependências da raiz e das partes (um Next em frontend/ também conta).
+  const deps = allDeps(root)
   return {
     all,
     ui: ui.map((rel) => ({ rel, text: read(root, rel) })),

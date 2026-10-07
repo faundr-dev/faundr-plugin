@@ -119,9 +119,11 @@ export function normalizeMessage(message) {
     .slice(0, 400)
 }
 
-function relFile(file, root) {
+function relFile(file, root, cwd = root) {
   if (!file) return null
   let f = String(file).trim().replace(/^file:\/\/\/?/, '').replace(/\\/g, '/')
+  // Caminho relativo à pasta em que o comando rodou (ex.: `cd frontend && vitest` → "src/a.test.ts").
+  if (!path.isAbsolute(f) && root && cwd && path.resolve(cwd) !== path.resolve(root)) f = path.resolve(cwd, f)
   const r = String(root ?? '').replace(/\\/g, '/').replace(/\/$/, '')
   if (r && f.toLowerCase().startsWith(r.toLowerCase() + '/')) f = f.slice(r.length + 1)
   else if (path.isAbsolute(f) && r) {
@@ -278,7 +280,14 @@ function genericError(lines, kind) {
 // Um comando pode misturar checagens (`npm run build` roda o tsc): o tipo do erro vem de quem o escreveu.
 const TOOL_KIND = { tsc: 'typecheck', eslint: 'lint', vitest: 'test', jest: 'test', pytest: 'test', esbuild: 'build', vite: 'build' }
 
-export function parseErrors(output, { kind, root, failed = true } = {}) {
+/** A pasta em que o comando roda: a do terminal, mais o `cd <pasta> &&` do começo, se houver. */
+export function commandCwd(command, base) {
+  const sub = String(command ?? '').match(/^\s*cd\s+(?:"([^"]+)"|'([^']+)'|([^\s&;|]+))\s*(?:&&|;)/)
+  const dir = sub ? (sub[1] ?? sub[2] ?? sub[3]) : null
+  return dir ? path.resolve(base, dir) : base
+}
+
+export function parseErrors(output, { kind, root, failed = true, cwd = root } = {}) {
   const text = stripAnsi(output)
   if (/^(Command timed out|Command was interrupted)/i.test(text.trim())) return []
   const lines = text.split('\n')
@@ -299,7 +308,7 @@ export function parseErrors(output, { kind, root, failed = true } = {}) {
   const seen = new Set()
   const issues = []
   for (const e of found) {
-    const file = relFile(e.file, root)
+    const file = relFile(e.file, root, cwd)
     const message = maskSecrets(e.message).slice(0, 2000)
     const identity = e.key ?? message
     const fingerprint = `${TOOL_KIND[e.tool] ?? kind}|${e.tool}|${e.code ?? ''}|${file ?? ''}|${normalizeMessage(identity)}`.slice(0, 600)

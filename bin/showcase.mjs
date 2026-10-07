@@ -6,12 +6,13 @@
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+import { inNodeModules, isClaudePlugin } from './parts.mjs'
 
 export const SHOWCASE_FILE = '.faundr/showcase.json'
 // Marca que o painel troca pelo endereço das fontes (/api/showcase-font/<projeto>).
 export const FONT_BASE = '__FAUNDR_FONT__'
 
-const SKIP = /(^|\/)(node_modules|\.git|\.faundr|dist|build|out|coverage|\.claude|\.remember|\.wrangler|\.next|\.nuxt|\.svelte-kit|\.tanstack|\.vercel|\.output|plugin)(\/|$)/
+const SKIP = /(^|\/)(node_modules|\.git|\.faundr|dist|build|out|coverage|\.claude|\.remember|\.wrangler|\.next|\.nuxt|\.svelte-kit|\.tanstack|\.vercel|\.output)(\/|$)/
 const FONT_EXT = { woff2: 'font/woff2', woff: 'font/woff', ttf: 'font/ttf', otf: 'font/otf' }
 const MAX_CSS = 500_000
 const MAX_FONTS = 3_000_000
@@ -21,7 +22,8 @@ const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex')
 /** Como o CSS do projeto roda: pelo Tailwind instalado (4 ou 3) ou CSS puro. */
 export function detectRuntime(root) {
   try {
-    const { version } = JSON.parse(fs.readFileSync(path.join(root, 'node_modules/tailwindcss/package.json'), 'utf8'))
+    // Na raiz ou numa parte do projeto (ex.: frontend/node_modules).
+    const { version } = JSON.parse(fs.readFileSync(inNodeModules(root, 'tailwindcss/package.json'), 'utf8'))
     const major = Number(String(version).split('.')[0])
     if (major >= 4) return 'tailwind4'
     if (major === 3) return 'tailwind3'
@@ -42,7 +44,7 @@ function cssFiles(root) {
     for (const e of entries) {
       const abs = path.join(dir, e.name)
       const rel = path.relative(root, abs).split(path.sep).join('/')
-      if (SKIP.test(rel)) continue
+      if (SKIP.test(rel) || (e.isDirectory() && isClaudePlugin(abs))) continue
       if (e.isDirectory()) walk(abs, depth + 1)
       else if (/\.css$/.test(e.name) && !/\.module\.css$/.test(e.name)) out.push(rel)
     }
@@ -53,8 +55,13 @@ function cssFiles(root) {
 
 /** Arquivo CSS de um pacote importado pelo nome (@import "@fontsource-variable/inter"). */
 function packageCss(root, spec) {
-  const direct = path.join(root, 'node_modules', spec)
-  if (/\.css$/.test(spec) && fs.existsSync(direct)) return direct
+  if (/\.css$/.test(spec)) {
+    const css = inNodeModules(root, spec)
+    if (css) return css
+  }
+  const manifest = inNodeModules(root, `${spec}/package.json`)
+  if (!manifest) return null
+  const direct = path.dirname(manifest)
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(direct, 'package.json'), 'utf8'))
     const entry = pkg.style ?? (/\.css$/.test(pkg.main ?? '') ? pkg.main : 'index.css')

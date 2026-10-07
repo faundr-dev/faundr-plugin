@@ -16,6 +16,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { SECRET_RULES } from '../dist/secret-rules.mjs'
 import { LOCKFILE, parseLockfile } from './lockfiles.mjs'
+import { allDeps, partWith, projectParts } from './parts.mjs'
 
 const SEVERITIES = ['critical', 'high', 'medium', 'low']
 const lower = (s) => SEVERITIES[Math.min(SEVERITIES.indexOf(s) + 1, SEVERITIES.length - 1)]
@@ -931,8 +932,9 @@ function scanConfig(root, files) {
   const out = []
   const code = files.filter((f) => CODE_FILE.test(f) && !TEST_PATH.test(f) && !/\.d\.ts$/.test(f))
   const routes = code.filter((f) => SERVER_ROUTE.test(f))
-  const pkg = JSON.parse(readText(root, 'package.json') ?? '{}')
-  const deps = { ...pkg.dependencies, ...pkg.devDependencies }
+  // Dependências da raiz e das partes (num projeto dividido, o React fica em frontend/package.json).
+  const parts = projectParts(root)
+  const deps = allDeps(root, parts)
   const texts = new Map()
   const read = (f) => {
     if (!texts.has(f)) texts.set(f, readText(root, f) ?? '')
@@ -971,8 +973,9 @@ function scanConfig(root, files) {
   }
 
   // Cabeçalhos de segurança do site.
-  const isWeb = ['react', 'next', 'vue', 'svelte', '@sveltejs/kit', 'astro', 'nuxt', 'solid-js', 'vite'].some((d) => deps[d])
-  if (isWeb) {
+  const webDep = ['react', 'next', 'vue', 'svelte', '@sveltejs/kit', 'astro', 'nuxt', 'solid-js', 'vite'].find((d) => deps[d])
+  if (webDep) {
+    const sitePkg = [partWith(root, webDep, parts)?.dir, 'package.json'].filter(Boolean).join('/')
     const headerText = files.filter((f) => HEADER_FILES.test(f)).map(read).join('\n') + code.filter((f) => /middleware|headers|security/i.test(f)).map(read).join('\n')
     // O cabeçalho precisa estar sendo definido (nome seguido de valor), não só citado num texto.
     const sets = (name) => new RegExp(`(^|['"\\s])(${name})['"]?\\s*[:,=]\\s*['"]?[\\w'-]`, 'im')
@@ -984,7 +987,7 @@ function scanConfig(root, files) {
     ].filter(([re]) => !re.test(headerText))
     if (missing.length >= 2)
       out.push(
-        configFinding('missing-security-headers', 'medium', 'package.json', {
+        configFinding('missing-security-headers', 'medium', sitePkg, {
           title: 'Cabeçalhos de segurança do site ausentes',
           detail: `Não encontrei estes cabeçalhos de segurança na configuração do site: ${missing.map(([, n]) => n).join(', ')}.`,
           impact: 'Sem eles, fica mais fácil explorar uma falha de XSS, abrir o seu site escondido dentro de outro para enganar cliques (clickjacking) ou forçar conexão sem HTTPS.',
@@ -1143,16 +1146,31 @@ const STACK_SIGNS = [
   ['Express', (d) => d.express],
   ['Hono', (d) => d.hono],
   ['Fastify', (d) => d.fastify],
-  ['Supabase', (d, f) => d['@supabase/supabase-js'] || d['@supabase/ssr'] || f.some((x) => x.startsWith('supabase/'))],
+  ['FastAPI', (d) => d.fastapi],
+  ['Django', (d) => d.django],
+  ['Flask', (d) => d.flask],
+  ['Supabase', (d, f) => d['@supabase/supabase-js'] || d['@supabase/ssr'] || d.supabase || f.some((x) => x.startsWith('supabase/'))],
   ['Firebase', (d, f) => d.firebase || d['firebase-admin'] || f.some((x) => /(^|\/)(firebase\.json|firestore\.rules)$/.test(x))],
   ['Stripe', (d) => d.stripe || d['@stripe/stripe-js']],
   ['Prisma', (d) => d.prisma || d['@prisma/client']],
   ['Drizzle', (d) => d['drizzle-orm']],
   ['Cloudflare Workers', (d, f) => d.wrangler || f.some((x) => /(^|\/)wrangler\.(jsonc?|toml)$/.test(x))],
-  ['IA / LLM', (d) => d.openai || d['@anthropic-ai/sdk'] || d.ai || d['@ai-sdk/openai'] || d.langchain || d['@langchain/core'] || d['@google/generative-ai']],
+  ['IA / LLM', (d) => d.openai || d['@anthropic-ai/sdk'] || d.ai || d['@ai-sdk/openai'] || d.langchain || d['@langchain/core'] || d['@google/generative-ai'] || d.anthropic],
   ['Auth.js / NextAuth', (d) => d['next-auth'] || d['@auth/core']],
   ['Clerk', (d) => d['@clerk/nextjs'] || d['@clerk/clerk-react']],
 ]
+
+// Pacotes Python citados em requirements*.txt e pyproject.toml (só os nomes, em minúsculas).
+function pythonDeps(root, files) {
+  const out = {}
+  for (const f of files.filter((x) => /(^|\/)(requirements[\w.-]*\.txt|pyproject\.toml)$/.test(x)).slice(0, 20)) {
+    const text = readText(root, f) ?? ''
+    // pyproject: os nomes entre aspas das listas de dependências ("fastapi>=0.110"); requirements: o começo da linha.
+    const names = f.endsWith('.toml') ? [...text.matchAll(/["']([A-Za-z][\w.-]*)\s*(?:[<>=~!\[;]|["'])/g)] : [...text.matchAll(/^\s*([A-Za-z][\w.-]*)/gm)]
+    for (const m of names) out[m[1].toLowerCase().replace(/_/g, '-')] = true
+  }
+  return out
+}
 
 // Temas do catálogo (plugin/skills/security/catalog/<tema>.md) e quando cada um vale.
 const TOPICS = [
@@ -1171,8 +1189,7 @@ const TOPICS = [
 /** O que a revisão com IA precisa saber para começar: stack, onde estão as portas de entrada e que temas ler. */
 export function projectMap(root) {
   const { files } = projectFiles(root)
-  const pkg = JSON.parse(readText(root, 'package.json') ?? '{}')
-  const deps = { ...pkg.dependencies, ...pkg.devDependencies }
+  const deps = { ...pythonDeps(root, files), ...allDeps(root) }
   const stack = STACK_SIGNS.filter(([, test]) => test(deps, files)).map(([name]) => name)
   const code = files.filter((f) => CODE_FILE.test(f) && !TEST_PATH.test(f) && !/\.d\.ts$/.test(f))
   const pick = (re) => code.filter((f) => re.test(f)).slice(0, 60)

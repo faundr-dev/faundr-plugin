@@ -32,7 +32,7 @@ para o que ele escolher. Registre a resposta com `faundr tests-map "<funcionalid
    `waitForTimeout(2000)` é a principal causa de teste instável.
 9. **Pirâmide.** Muitos testes pequenos e rápidos (uma função), alguns de integração (rota + banco de teste), poucos
    de ponta a ponta no navegador (2 a 5 fluxos críticos: entrar, comprar, cadastrar).
-10. **Use o que o projeto já tem.** Mesmo executor (Vitest, Jest, Playwright, node --test), mesma pasta e mesmo
+10. **Use o que o projeto já tem.** Mesmo executor (Vitest, Jest, Playwright, node --test, pytest), mesma pasta e mesmo
     jeito dos testes vizinhos. Não instale executor novo sem o OK do dono.
 11. **Fatias verticais.** Um teste, rode, passe para o próximo. Não escreva vinte testes de uma vez sem rodar.
 12. **Não peça teste para o trivial** (um getter, uma constante). Esforço onde há decisão: if, laço, conta, dinheiro,

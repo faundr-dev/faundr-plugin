@@ -35,6 +35,7 @@ Para cada funcionalidade crítica (e as outras, se der tempo), descubra com Grep
 Comece pela funcionalidade crítica `sem-testes` ou `parcial`, depois as linhas "mudou e sem teste" do contexto.
 
 - Fatias verticais: **um teste, rode, próximo**. Rode só o arquivo: `faundr tests-run --files <arquivo de teste>` (ou `--changed`).
+- Sempre pelo `faundr tests-run`, nunca direto pelo `npx vitest` ou `pytest`: só assim a rodada aparece no painel. Ele acha os executores das subpastas (ex.: `frontend/`) e roda o pytest. Se não achar o Python, passe `--python <caminho do python do venv>` uma vez (fica guardado). Teste que grava no banco de verdade: deixe de fora com `--exclude <arquivo>`.
 - Para cada teste novo de código que já existe, **veja ele falhar uma vez**: quebre a linha de propósito, rode, confira o vermelho e **desfaça a quebra**. Diga ao dono que fez isso.
 - Siga as 12 regras do guia. Nada de recalcular o esperado como o código calcula; nada de simular módulo do próprio projeto.
 - Se achar um bug de verdade enquanto testa (o teste certo falha), **não mude o teste para passar**: pare, explique ao dono o que encontrou e pergunte se corrige.

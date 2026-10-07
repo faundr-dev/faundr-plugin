@@ -1592,8 +1592,8 @@ var require_graphology_communities_louvain = __commonJS({
           resolution: options.resolution
         };
       }
-      var fn3 = type === "undirected" ? undirectedLouvain : directedLouvain;
-      var results = fn3(detailed, graph, options);
+      var fn4 = type === "undirected" ? undirectedLouvain : directedLouvain;
+      var results = fn4(detailed, graph, options);
       var index = results.index;
       if (!detailed) {
         if (assign2) {
@@ -1619,11 +1619,11 @@ var require_graphology_communities_louvain = __commonJS({
       output.communities = index.collect();
       return output;
     }
-    var fn2 = louvain2.bind(null, false, false);
-    fn2.assign = louvain2.bind(null, true, false);
-    fn2.detailed = louvain2.bind(null, false, true);
-    fn2.defaults = DEFAULTS2;
-    module2.exports = fn2;
+    var fn3 = louvain2.bind(null, false, false);
+    fn3.assign = louvain2.bind(null, true, false);
+    fn3.detailed = louvain2.bind(null, false, true);
+    fn3.defaults = DEFAULTS2;
+    module2.exports = fn3;
   }
 });
 
@@ -5428,15 +5428,15 @@ function createEdgeIterator(graph, type) {
   };
 }
 function forEachEdgeForNode(breakable, multi, type, direction, nodeData, callback) {
-  const fn2 = multi ? forEachMulti : forEachSimple;
+  const fn3 = multi ? forEachMulti : forEachSimple;
   let found;
   if (type !== "undirected") {
     if (direction !== "out") {
-      found = fn2(breakable, nodeData.in, callback);
+      found = fn3(breakable, nodeData.in, callback);
       if (breakable && found) return found;
     }
     if (direction !== "in") {
-      found = fn2(
+      found = fn3(
         breakable,
         nodeData.out,
         callback,
@@ -5446,7 +5446,7 @@ function forEachEdgeForNode(breakable, multi, type, direction, nodeData, callbac
     }
   }
   if (type !== "directed") {
-    found = fn2(breakable, nodeData.undirected, callback);
+    found = fn3(breakable, nodeData.undirected, callback);
     if (breakable && found) return found;
   }
   return;
@@ -5475,21 +5475,21 @@ function createEdgeIteratorForNode(type, direction, nodeData) {
   return iterator;
 }
 function forEachEdgeForPath(breakable, type, multi, direction, sourceData, target, callback) {
-  const fn2 = multi ? forEachForKeyMulti : forEachForKeySimple;
+  const fn3 = multi ? forEachForKeyMulti : forEachForKeySimple;
   let found;
   if (type !== "undirected") {
     if (typeof sourceData.in !== "undefined" && direction !== "out") {
-      found = fn2(breakable, sourceData.in, target, callback);
+      found = fn3(breakable, sourceData.in, target, callback);
       if (breakable && found) return found;
     }
     if (typeof sourceData.out !== "undefined" && direction !== "in" && (direction || sourceData.key !== target)) {
-      found = fn2(breakable, sourceData.out, target, callback);
+      found = fn3(breakable, sourceData.out, target, callback);
       if (breakable && found) return found;
     }
   }
   if (type !== "directed") {
     if (typeof sourceData.undirected !== "undefined") {
-      found = fn2(breakable, sourceData.undirected, target, callback);
+      found = fn3(breakable, sourceData.undirected, target, callback);
       if (breakable && found) return found;
     }
   }
@@ -8343,10 +8343,10 @@ if (typeof Symbol !== "undefined")
 EDGE_ADD_METHODS.forEach((method) => {
   ["add", "merge", "update"].forEach((verb) => {
     const name2 = method.name(verb);
-    const fn2 = verb === "add" ? addEdge : mergeEdge;
+    const fn3 = verb === "add" ? addEdge : mergeEdge;
     if (method.generateKey) {
       Graph.prototype[name2] = function(source, target, attributes) {
-        return fn2(
+        return fn3(
           this,
           name2,
           true,
@@ -8360,7 +8360,7 @@ EDGE_ADD_METHODS.forEach((method) => {
       };
     } else {
       Graph.prototype[name2] = function(edge2, source, target, attributes) {
-        return fn2(
+        return fn3(
           this,
           name2,
           false,
@@ -9668,7 +9668,7 @@ async function extractCode(rel, source, cfg, resolver) {
     const p = n.parent;
     return p?.type === "program" || p?.type === "export_statement" && p.parent?.type === "program";
   }
-  function unwrap(v) {
+  function unwrap2(v) {
     while ((v.type === "as_expression" || v.type === "satisfies_expression" || v.type === "parenthesized_expression") && v.namedChildren[0]) v = v.namedChildren[0];
     return v;
   }
@@ -9681,7 +9681,7 @@ async function extractCode(rel, source, cfg, resolver) {
         if (nameNode?.type !== "identifier" || !value) continue;
         const name2 = nameNode.text;
         const nid = makeId(stem, name2);
-        const v = unwrap(value);
+        const v = unwrap2(value);
         if (JS_FUNCTION_VALUES.has(v.type)) {
           addNode2(nid, `${name2}()`, d);
           addEdge2(fileNid, nid, "contains", d);
@@ -9702,12 +9702,12 @@ async function extractCode(rel, source, cfg, resolver) {
     if ((n.type === "field_definition" || n.type === "public_field_definition") && parentClass) {
       const value = n.childForFieldName("value");
       const name2 = (n.childForFieldName("name") ?? n.childForFieldName("property"))?.text;
-      if (value && name2 && JS_FUNCTION_VALUES.has(unwrap(value).type)) {
+      if (value && name2 && JS_FUNCTION_VALUES.has(unwrap2(value).type)) {
         const nid = makeId(parentClass, name2);
         addNode2(nid, `.${name2}()`, n);
         addEdge2(parentClass, nid, "method", n);
         callable.add(nid);
-        track(nid, unwrap(value).childForFieldName("body"));
+        track(nid, unwrap2(value).childForFieldName("body"));
         return true;
       }
     }
@@ -9804,25 +9804,25 @@ async function extractCode(rel, source, cfg, resolver) {
       if (nm?.type !== "identifier" || /^[a-z]/.test(nm.text)) return null;
       return { name: nm.text, member: false };
     }
-    let fn2 = n.type === "new_expression" ? n.childForFieldName("constructor") : cfg.name === "java" && n.type === "object_creation_expression" ? n.childForFieldName("type") : cfg.callFunctionField ? n.childForFieldName(cfg.callFunctionField) : n.namedChildren[0];
-    if (!fn2) return null;
+    let fn3 = n.type === "new_expression" ? n.childForFieldName("constructor") : cfg.name === "java" && n.type === "object_creation_expression" ? n.childForFieldName("type") : cfg.callFunctionField ? n.childForFieldName(cfg.callFunctionField) : n.namedChildren[0];
+    if (!fn3) return null;
     if (cfg.name === "java" && n.type === "method_invocation") {
       const obj = n.childForFieldName("object");
-      return { name: fn2.text, member: !!obj, receiver: obj?.text };
+      return { name: fn3.text, member: !!obj, receiver: obj?.text };
     }
-    if (fn2.type === "identifier" || fn2.type === "type_identifier" || fn2.type === "simple_identifier" || fn2.type === "name") {
-      return { name: fn2.text, member: false };
+    if (fn3.type === "identifier" || fn3.type === "type_identifier" || fn3.type === "simple_identifier" || fn3.type === "name") {
+      return { name: fn3.text, member: false };
     }
-    if (cfg.accessorTypes.has(fn2.type)) {
-      const prop = cfg.accessorField ? fn2.childForFieldName(cfg.accessorField) : fn2.namedChildren[fn2.namedChildCount - 1];
-      const obj = cfg.accessorObjectField ? fn2.childForFieldName(cfg.accessorObjectField) : fn2.namedChildren[0];
-      const name2 = (prop ?? fn2.namedChildren[fn2.namedChildCount - 1])?.text.replace(/^\./, "");
+    if (cfg.accessorTypes.has(fn3.type)) {
+      const prop = cfg.accessorField ? fn3.childForFieldName(cfg.accessorField) : fn3.namedChildren[fn3.namedChildCount - 1];
+      const obj = cfg.accessorObjectField ? fn3.childForFieldName(cfg.accessorObjectField) : fn3.namedChildren[0];
+      const name2 = (prop ?? fn3.namedChildren[fn3.namedChildCount - 1])?.text.replace(/^\./, "");
       if (!name2) return null;
       if (obj?.type === "member_expression" && obj.childForFieldName("object")?.type === "this") {
         return { name: name2, member: true, receiver: obj.childForFieldName("property")?.text, thisField: true };
       }
-      if (fn2.type === "scoped_identifier" || fn2.type === "qualified_identifier") {
-        const path15 = fn2.childForFieldName("path") ?? fn2.childForFieldName("scope");
+      if (fn3.type === "scoped_identifier" || fn3.type === "qualified_identifier") {
+        const path15 = fn3.childForFieldName("path") ?? fn3.childForFieldName("scope");
         return { name: name2, member: true, receiver: path15?.text };
       }
       return { name: name2, member: true, receiver: obj?.type === "identifier" || obj?.type === "this" || obj?.type === "self" ? obj.text : obj?.text.slice(0, 40) };
@@ -10740,6 +10740,118 @@ function shortestPath(json, from, to, opts = {}) {
 ${line2}`;
 }
 
+// engine/src/quality-python.ts
+var BRANCHES = /* @__PURE__ */ new Set(["if_statement", "elif_clause", "for_statement", "while_statement", "except_clause", "conditional_expression", "case_clause", "boolean_operator", "if_clause"]);
+var NESTING = /* @__PURE__ */ new Set(["if_statement", "for_statement", "while_statement", "try_statement", "with_statement", "match_statement"]);
+var FUNCTIONS = /* @__PURE__ */ new Set(["function_definition", "lambda"]);
+var MOCK_MODULE = /(^|\.)(mocks?|fixtures?|fakes?|stubs?)(\.|$)/i;
+var CHECKS = /\bassert\b|pytest\.(raises|warns|approx|fail)\b|self\.assert\w*\(|\.assert_\w+\(|\bexpect\(/;
+var statements = (block) => (block?.namedChildren ?? []).filter((n) => n.type !== "comment");
+var hasComment = (block) => (block?.namedChildren ?? []).some((n) => n.type === "comment");
+var blockOf = (node) => node.namedChildren.filter((c) => c.type === "block").at(-1) ?? null;
+var callee = (n) => n?.type === "call" ? n.childForFieldName("function")?.text ?? "" : "";
+var isPrintOnly = (n) => n.type === "expression_statement" && callee(n.namedChildren[0]) === "print";
+var isEmptyValue = (n) => !n || ["none", "false"].includes(n.type) || /^(\[\s*\]|\{\s*\}|\(\s*\)|""|''|0)$/.test(n.text);
+async function analyzePython(source, { test = false } = {}) {
+  const tree = await parse("python", source);
+  const hits = [];
+  const functions = [];
+  const add = (rule, node, ctx) => hits.push({ rule, line: node.startPosition.row + 1, ctx: { ...ctx, py: 1 } });
+  const visit = (node) => {
+    const t = node.type;
+    if (test) {
+      if (t === "function_definition" && /^test/.test(node.childForFieldName("name")?.text ?? "")) testFunction(node, add);
+      if (t === "call" && /^(time\.)?sleep$/.test(callee(node))) add("testes/espera-fixa", node, { call: "time.sleep" });
+    } else {
+      if (t === "except_clause") exceptClause(node, add);
+      else if (t === "call" && /^(breakpoint|i?pdb\.set_trace)$/.test(callee(node))) add("limpeza/debugger", node, { call: `${callee(node)}()` });
+      else if (t === "conditional_expression" && node.parent?.type !== "conditional_expression" && hasNestedConditional(node)) add("complexidade/ternario-aninhado", node);
+      else if (t === "import_from_statement") {
+        const from = node.childForFieldName("module_name")?.text ?? "";
+        if (MOCK_MODULE.test(from)) add("falha/mock-em-producao", node, { from });
+      }
+      if (t === "function_definition") fn(node, add, functions);
+    }
+    for (const child of node.namedChildren) visit(child);
+  };
+  visit(tree.rootNode);
+  commentedCode(tree.rootNode, source.split("\n"), hits);
+  tree.delete();
+  return { hits, functions, module: { imports: [], exports: [], commonjs: false } };
+}
+function exceptClause(node, add) {
+  const body2 = blockOf(node);
+  const list = statements(body2);
+  const explained = hasComment(body2) || hasComment(node);
+  if (list.every((s) => s.type === "pass_statement")) return explained ? void 0 : add("falha/catch-vazio", node);
+  if (list.every(isPrintOnly)) return add("falha/catch-so-loga", node);
+  if (list.length === 1 && list[0].type === "return_statement" && isEmptyValue(list[0].namedChildren[0]) && !explained) add("falha/catch-devolve-nulo", node);
+}
+var unwrap = (n) => {
+  while (n?.type === "parenthesized_expression") n = n.namedChildren[0];
+  return n;
+};
+var hasNestedConditional = (node) => node.namedChildren.some((c) => unwrap(c)?.type === "conditional_expression");
+function testFunction(node, add) {
+  const name2 = node.childForFieldName("name")?.text ?? "test";
+  const decorated = node.parent?.type === "decorated_definition" ? node.parent : null;
+  const skip = decorated?.namedChildren.find((d) => d.type === "decorator" && /pytest\.mark\.(skip|skipif|xfail)\b|unittest\.skip/.test(d.text));
+  if (skip) return add("testes/pulado", skip, { call: skip.text.replace(/\(.*$/s, "").slice(0, 40) });
+  const body2 = node.childForFieldName("body");
+  if (body2 && /\bpytest\.skip\(/.test(body2.text)) return add("testes/pulado", node, { call: "pytest.skip()" });
+  if (body2 && !CHECKS.test(body2.text)) add("testes/sem-conferencia", node, { name: name2.slice(0, 80) });
+}
+function fn(node, add, functions) {
+  const body2 = node.childForFieldName("body");
+  if (!body2) return;
+  let complexity = 1;
+  let deepest = { depth: 0, node: body2 };
+  const walk = (n, depth) => {
+    for (const c of n.namedChildren) {
+      if (FUNCTIONS.has(c.type)) continue;
+      let d = depth;
+      if (BRANCHES.has(c.type)) complexity++;
+      if (NESTING.has(c.type)) {
+        d = depth + 1;
+        if (d > deepest.depth) deepest = { depth: d, node: c };
+      }
+      walk(c, d);
+    }
+  };
+  walk(body2, 0);
+  const name2 = node.childForFieldName("name")?.text ?? "(an\xF4nima)";
+  const lines = node.endPosition.row - node.startPosition.row + 1;
+  functions.push({ name: name2, line: node.startPosition.row + 1, complexity, lines });
+  if (complexity > LIMITS.complexity) add("complexidade/funcao", node, { name: name2, complexity });
+  if (lines > LIMITS.functionLines) add("complexidade/funcao-longa", node, { name: name2, lines });
+  if (deepest.depth > LIMITS.nesting) add("complexidade/aninhamento", deepest.node, { name: name2, depth: deepest.depth });
+}
+var CODE_LINE = /^\s*(def|class|import|from|return|if|elif|else|for|while|try|except|with|raise|yield|print|await|async)\b|^\s*[\w.[\]]+\s*=[^=]|^\s*[\w.]+\(.*\)\s*$/;
+function commentedCode(root, lines, hits) {
+  let run2 = null;
+  let lastRow = -2;
+  const flush = () => {
+    if (run2 && run2.code >= 4 && run2.code / run2.total >= 0.75) hits.push({ rule: "demais/codigo-comentado", line: run2.start + 1, ctx: { lines: run2.total, py: 1 } });
+    run2 = null;
+  };
+  const visit = (n) => {
+    for (const c of n.namedChildren) {
+      const row = c.startPosition.row;
+      const alone = !(lines[row] ?? "").slice(0, c.startPosition.column).trim();
+      if (c.type === "comment" && alone && !c.text.startsWith("#!")) {
+        if (row !== lastRow + 1) flush();
+        run2 ??= { start: row, code: 0, total: 0 };
+        run2.total++;
+        const body2 = c.text.replace(/^#\s?/, "");
+        if (CODE_LINE.test(body2) && !/faundr-ignore|noqa|type:\s*ignore|pragma/.test(body2)) run2.code++;
+        lastRow = row;
+      } else visit(c);
+    }
+  };
+  visit(root);
+  flush();
+}
+
 // engine/src/quality.ts
 var GRAMMAR = {
   ".ts": "typescript",
@@ -10749,9 +10861,10 @@ var GRAMMAR = {
   ".js": "javascript",
   ".jsx": "javascript",
   ".mjs": "javascript",
-  ".cjs": "javascript"
+  ".cjs": "javascript",
+  ".py": "python"
 };
-var FUNCTIONS = /* @__PURE__ */ new Set([
+var FUNCTIONS2 = /* @__PURE__ */ new Set([
   "function_declaration",
   "function_expression",
   "function",
@@ -10760,7 +10873,7 @@ var FUNCTIONS = /* @__PURE__ */ new Set([
   "arrow_function",
   "method_definition"
 ]);
-var BRANCHES = /* @__PURE__ */ new Set([
+var BRANCHES2 = /* @__PURE__ */ new Set([
   "if_statement",
   "for_statement",
   "for_in_statement",
@@ -10769,7 +10882,7 @@ var BRANCHES = /* @__PURE__ */ new Set([
   "catch_clause",
   "ternary_expression"
 ]);
-var NESTING = /* @__PURE__ */ new Set(["if_statement", "for_statement", "for_in_statement", "while_statement", "do_statement", "switch_statement", "try_statement"]);
+var NESTING2 = /* @__PURE__ */ new Set(["if_statement", "for_statement", "for_in_statement", "while_statement", "do_statement", "switch_statement", "try_statement"]);
 var MOCK_IMPORT = /(^|\/)(__mocks__|mocks?|fixtures?|fakes?|stubs?)(\/|$)|[./-](mock|fake|stub)s?(\.[jt]sx?)?$/i;
 var LIMITS = { complexity: 20, complexityHigh: 40, functionLines: 150, nesting: 4, nonNull: 10 };
 function qualityGrammar(rel) {
@@ -10780,6 +10893,7 @@ async function analyzeQuality(rel, source, { test = false } = {}) {
   const grammar = qualityGrammar(rel);
   const module2 = { imports: [], exports: [], commonjs: false };
   if (!grammar) return { hits: [], functions: [], module: module2 };
+  if (grammar === "python") return analyzePython(source, { test });
   const tree = await parse(grammar, source);
   const hits = [];
   const functions = [];
@@ -10801,7 +10915,7 @@ async function analyzeQuality(rel, source, { test = false } = {}) {
         const from = node.childForFieldName("source")?.text.slice(1, -1) ?? "";
         if (MOCK_IMPORT.test(from)) add("falha/mock-em-producao", node, { from });
       }
-      if (FUNCTIONS.has(t)) fn(node, add, functions);
+      if (FUNCTIONS2.has(t)) fn2(node, add, functions);
     }
     if (t === "comment") comment(node, add);
     if (t === "import_statement" || t === "export_statement") moduleEdge(node, module2);
@@ -10811,52 +10925,52 @@ async function analyzeQuality(rel, source, { test = false } = {}) {
   };
   visit(tree.rootNode);
   if (nonNull >= LIMITS.nonNull) hits.push({ rule: "tipos/non-null-em-excesso", line: 1, ctx: { count: nonNull } });
-  commentedCode(tree.rootNode, source.split("\n"), hits);
+  commentedCode2(tree.rootNode, source.split("\n"), hits);
   tree.delete();
   return { hits, functions, module: module2 };
 }
-var statements = (block) => (block?.namedChildren ?? []).filter((n) => n.type !== "comment");
-var hasComment = (block) => (block?.namedChildren ?? []).some((n) => n.type === "comment");
+var statements2 = (block) => (block?.namedChildren ?? []).filter((n) => n.type !== "comment");
+var hasComment2 = (block) => (block?.namedChildren ?? []).some((n) => n.type === "comment");
 var isConsoleCall = (n) => n.type === "expression_statement" && n.namedChildren[0]?.type === "call_expression" && /^console\.\w+$/.test(n.namedChildren[0].childForFieldName("function")?.text ?? "");
-var isEmptyValue = (n) => !n || ["null", "undefined", "false"].includes(n.type) || n.text === "undefined" || /^(\[\s*\]|\{\s*\})$/.test(n.text);
+var isEmptyValue2 = (n) => !n || ["null", "undefined", "false"].includes(n.type) || n.text === "undefined" || /^(\[\s*\]|\{\s*\})$/.test(n.text);
 function catchClause(node, add) {
   const body2 = node.childForFieldName("body");
-  const list = statements(body2);
-  if (!list.length) return hasComment(body2) ? void 0 : add("falha/catch-vazio", node);
+  const list = statements2(body2);
+  if (!list.length) return hasComment2(body2) ? void 0 : add("falha/catch-vazio", node);
   if (list.every(isConsoleCall)) return add("falha/catch-so-loga", node);
-  if (list.length === 1 && list[0].type === "return_statement" && isEmptyValue(list[0].namedChildren[0]) && !hasComment(body2))
+  if (list.length === 1 && list[0].type === "return_statement" && isEmptyValue2(list[0].namedChildren[0]) && !hasComment2(body2))
     add("falha/catch-devolve-nulo", node);
 }
 function call(node, add) {
-  const callee = node.childForFieldName("function");
-  if (!callee) return;
-  if (callee.type === "member_expression" && callee.childForFieldName("property")?.text === "catch") {
+  const callee2 = node.childForFieldName("function");
+  if (!callee2) return;
+  if (callee2.type === "member_expression" && callee2.childForFieldName("property")?.text === "catch") {
     const handler = node.childForFieldName("arguments")?.namedChildren[0];
     if (handler && (handler.type === "arrow_function" || handler.type === "function_expression" || handler.type === "function")) {
       const body2 = handler.childForFieldName("body");
       if (body2?.type === "statement_block") {
-        if (!statements(body2).length && !hasComment(body2)) add("falha/catch-vazio", node);
-      } else if (isEmptyValue(body2)) add("falha/catch-devolve-nulo", node);
+        if (!statements2(body2).length && !hasComment2(body2)) add("falha/catch-vazio", node);
+      } else if (isEmptyValue2(body2)) add("falha/catch-devolve-nulo", node);
     }
   }
-  if (/^console\.(log|debug)$/.test(callee.text)) add("limpeza/console-log", node);
+  if (/^console\.(log|debug)$/.test(callee2.text)) add("limpeza/console-log", node);
 }
-var CHECKS = /\b(expect|assert)\b|\.should\b|\bt\.(is|true|false|deepEqual|throws)\b|toMatch(Inline)?Snapshot/;
+var CHECKS2 = /\b(expect|assert)\b|\.should\b|\bt\.(is|true|false|deepEqual|throws)\b|toMatch(Inline)?Snapshot/;
 function testCall(node, add) {
-  const callee = node.childForFieldName("function")?.text ?? "";
-  if (/(^|\.)waitForTimeout$/.test(callee) || callee === "setTimeout" && /^\d+$/.test(node.childForFieldName("arguments")?.namedChildren[1]?.text ?? ""))
-    add("testes/espera-fixa", node, { call: callee });
-  const m = callee.match(/^(it|test|describe|context)\.(skip|only|todo)$/) ?? callee.match(/^(x|f)(it|describe|test)$/);
+  const callee2 = node.childForFieldName("function")?.text ?? "";
+  if (/(^|\.)waitForTimeout$/.test(callee2) || callee2 === "setTimeout" && /^\d+$/.test(node.childForFieldName("arguments")?.namedChildren[1]?.text ?? ""))
+    add("testes/espera-fixa", node, { call: callee2 });
+  const m = callee2.match(/^(it|test|describe|context)\.(skip|only|todo)$/) ?? callee2.match(/^(x|f)(it|describe|test)$/);
   if (m) {
     const only = m[2] === "only" || m[1] === "f";
-    add(only ? "testes/only" : "testes/pulado", node, { call: callee });
+    add(only ? "testes/only" : "testes/pulado", node, { call: callee2 });
     return;
   }
-  if (!/^(it|test)(\.(concurrent|serial))?$/.test(callee)) return;
+  if (!/^(it|test)(\.(concurrent|serial))?$/.test(callee2)) return;
   const args2 = node.childForFieldName("arguments")?.namedChildren ?? [];
-  const body2 = args2.find((a) => FUNCTIONS.has(a.type));
-  const name2 = args2[0]?.type === "string" || args2[0]?.type === "template_string" ? args2[0].text.slice(1, -1) : callee;
-  if (body2 && !CHECKS.test(body2.text)) add("testes/sem-conferencia", node, { name: name2.slice(0, 80) });
+  const body2 = args2.find((a) => FUNCTIONS2.has(a.type));
+  const name2 = args2[0]?.type === "string" || args2[0]?.type === "template_string" ? args2[0].text.slice(1, -1) : callee2;
+  if (body2 && !CHECKS2.test(body2.text)) add("testes/sem-conferencia", node, { name: name2.slice(0, 80) });
 }
 var isTernaryChild = (node) => {
   let p = node.parent;
@@ -10879,19 +10993,19 @@ function functionName(node) {
   if (holder?.type === "variable_declarator") return holder.childForFieldName("name")?.text ?? "(an\xF4nima)";
   return "(an\xF4nima)";
 }
-function fn(node, add, functions) {
+function fn2(node, add, functions) {
   const body2 = node.childForFieldName("body");
   if (!body2) return;
   let complexity = 1;
   let deepest = { depth: 0, node: body2 };
   const walk = (n, depth) => {
     for (const c of n.namedChildren) {
-      if (FUNCTIONS.has(c.type)) continue;
+      if (FUNCTIONS2.has(c.type)) continue;
       let d = depth;
-      if (BRANCHES.has(c.type)) complexity++;
+      if (BRANCHES2.has(c.type)) complexity++;
       else if (c.type === "switch_case") complexity++;
       else if (c.type === "binary_expression" && /^(&&|\|\|)$/.test(c.childForFieldName("operator")?.text ?? "")) complexity++;
-      if (NESTING.has(c.type) && !(c.type === "if_statement" && c.parent?.type === "else_clause")) {
+      if (NESTING2.has(c.type) && !(c.type === "if_statement" && c.parent?.type === "else_clause")) {
         d = depth + 1;
         if (d > deepest.depth) deepest = { depth: d, node: c };
       }
@@ -10913,8 +11027,8 @@ function comment(node, add) {
   const es = text.match(/eslint-disable(-next-line|-line)?\b(.*)/);
   if (es && !/--\s*\S/.test(es[2])) add("tipos/eslint-disable-sem-motivo", node);
 }
-var CODE_LINE = /[;{}]\s*$|^\s*(const|let|var|if|for|while|return|import|export|function|await|async|try|catch|switch|case|throw|class)\b|^\s*[\w.$\]]+\s*\(.*\)\s*;?\s*$|^\s*[\w.$]+\s*=[^=]|^\s*<\/?[A-Za-z][\w.]*[\s>/]/;
-function commentedCode(root, lines, hits) {
+var CODE_LINE2 = /[;{}]\s*$|^\s*(const|let|var|if|for|while|return|import|export|function|await|async|try|catch|switch|case|throw|class)\b|^\s*[\w.$\]]+\s*\(.*\)\s*;?\s*$|^\s*[\w.$]+\s*=[^=]|^\s*<\/?[A-Za-z][\w.]*[\s>/]/;
+function commentedCode2(root, lines, hits) {
   let run2 = null;
   let lastRow = -2;
   const flush = () => {
@@ -10930,7 +11044,7 @@ function commentedCode(root, lines, hits) {
         run2 ??= { start: row, code: 0, total: 0 };
         run2.total++;
         const body2 = c.text.slice(2);
-        if (CODE_LINE.test(body2) && !/faundr-ignore|eslint|@ts-|prettier-ignore/.test(body2)) run2.code++;
+        if (CODE_LINE2.test(body2) && !/faundr-ignore|eslint|@ts-|prettier-ignore/.test(body2)) run2.code++;
         lastRow = row;
       } else visit(c);
     }
@@ -10972,8 +11086,8 @@ function moduleEdge(node, m) {
   }
 }
 function dynamicImport(node, m) {
-  const callee = node.childForFieldName("function");
-  if (callee?.type !== "import" && callee?.text !== "require") return;
+  const callee2 = node.childForFieldName("function");
+  if (callee2?.type !== "import" && callee2?.text !== "require") return;
   const arg = node.childForFieldName("arguments")?.namedChildren[0];
   if (arg?.type === "string") m.imports.push({ spec: unquote(arg), names: ["*"] });
 }

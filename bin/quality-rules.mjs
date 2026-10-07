@@ -11,10 +11,11 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { analyzeQuality, qualityGrammar, unusedCode } from '../dist/graph.mjs'
 import { ignoreSet } from './design-rules.mjs'
+import { projectParts } from './parts.mjs'
 import { projectFiles } from './security.mjs'
 
 const MAX_FILE = 400_000
-const TEST_PATH = /(^|\/)(__tests__|__mocks__|tests?|e2e|spec)(\/|$)|\.(test|spec)\.[cm]?[jt]sx?$/
+const TEST_PATH = /(^|\/)(__tests__|__mocks__|tests?|e2e|spec)(\/|$)|\.(test|spec)\.[cm]?[jt]sx?$|(^|\/)(test_[^/]*|[^/]*_test|conftest)\.py$/
 const GENERATED = /\.(d\.ts|min\.js)$|\.gen\.[jt]sx?$|(^|\/)(dist|build|out|vendor|generated|\.output)\//
 const GENERATED_HEADER = /^(\/\/|\/\*)[^\n]*(@generated|auto-?generated|gerado por|do not edit|não edite)/i
 // Telas: onde console.log é esquecimento (em CLI e servidor ele é a saída normal).
@@ -89,20 +90,20 @@ const IMPLICIT = /^(@types\/|typescript$|tslib$|react-dom$|@tailwindcss\/|tailwi
 
 const TEXT = {
   'falha/catch-vazio': (c, n) => [
-    n > 1 ? `${n} erros engolidos em silêncio (catch vazio)` : 'Erro engolido em silêncio (catch vazio)',
-    'Um bloco catch (ou .catch) não faz nada com o erro.',
+    n > 1 ? `${n} erros engolidos em silêncio (${c.py ? 'except: pass' : 'catch vazio'})` : `Erro engolido em silêncio (${c.py ? 'except: pass' : 'catch vazio'})`,
+    c.py ? 'Um bloco except só tem pass: não faz nada com o erro.' : 'Um bloco catch (ou .catch) não faz nada com o erro.',
     'Quando algo falha aqui, ninguém fica sabendo: o app segue como se tivesse dado certo e o problema aparece depois, longe da causa.',
     'Trate o erro (avise a pessoa, tente de novo, registre) ou, se ignorar for de propósito, deixe um comentário dentro do bloco dizendo por quê.',
   ],
   'falha/catch-so-loga': (c, n) => [
     n > 1 ? `${n} erros que só vão para o console` : 'Erro que só vai para o console',
-    'O catch só chama console.log/console.error e o código segue em frente.',
-    'No site publicado ninguém olha o console: a pessoa vê a tela parada ou um dado errado, sem aviso.',
+    c.py ? 'O except só chama print() e o código segue em frente.' : 'O catch só chama console.log/console.error e o código segue em frente.',
+    c.py ? 'O print some no meio da saída do servidor: quem chamou recebe um resultado como se tivesse dado certo.' : 'No site publicado ninguém olha o console: a pessoa vê a tela parada ou um dado errado, sem aviso.',
     'Mostre um aviso para a pessoa, devolva o erro para quem chamou, ou registre num serviço de erros (o Faundr recebe pelo SDK do Sentry).',
   ],
   'falha/catch-devolve-nulo': (c, n) => [
     n > 1 ? `${n} erros trocados por valor vazio` : 'Erro trocado por valor vazio',
-    'O catch devolve null, undefined, [] ou {} sem registrar o erro.',
+    c.py ? 'O except devolve None, [], {} ou False sem registrar o erro.' : 'O catch devolve null, undefined, [] ou {} sem registrar o erro.',
     'Quem chamou não consegue diferenciar "não tem dados" de "deu erro": a tela mostra vazio quando, na verdade, falhou.',
     'Registre o erro antes de devolver o valor vazio, ou devolva o erro para quem chamou decidir.',
   ],
@@ -161,8 +162,8 @@ const TEXT = {
     'Use retorno antecipado (if (!x) return), extraia o miolo para uma função, ou junte condições.',
   ],
   'complexidade/ternario-aninhado': (c, n) => [
-    `${n} ternário${n > 1 ? 's' : ''} aninhado${n > 1 ? 's' : ''} (a ? b : c ? d : e)`,
-    'Um "condição ? sim : não" dentro de outro.',
+    `${n} ternário${n > 1 ? 's' : ''} aninhado${n > 1 ? 's' : ''} ${c.py ? '(a if x else b if y else c)' : '(a ? b : c ? d : e)'}`,
+    c.py ? 'Um "valor if condição else outro" dentro de outro.' : 'Um "condição ? sim : não" dentro de outro.',
     'É difícil de ler e de ver qual caso cai em qual valor.',
     'Use if/else, um switch, ou um objeto que mapeia cada caso ao seu valor.',
   ],
@@ -197,9 +198,9 @@ const TEXT = {
     'Apague os que eram para teste. Para erros de verdade, use um aviso na tela ou o serviço de erros.',
   ],
   'limpeza/debugger': (c, n) => [
-    `${n} debugger esquecido${n > 1 ? 's' : ''}`,
-    'A instrução debugger para o código quando o DevTools está aberto.',
-    'É sobra de depuração; não deveria ir para o site publicado.',
+    `${n} ${c.py ? 'breakpoint()' : 'debugger'} esquecido${n > 1 ? 's' : ''}`,
+    c.py ? `${c.call ?? 'breakpoint()'} para o programa esperando alguém digitar no terminal.` : 'A instrução debugger para o código quando o DevTools está aberto.',
+    c.py ? 'É sobra de depuração; no servidor, o pedido fica travado esperando.' : 'É sobra de depuração; não deveria ir para o site publicado.',
     'Apague a linha.',
   ],
   'limpeza/todo-antigo': (c, n) => [
@@ -389,10 +390,12 @@ async function analyzeFiles(root, files, c, errors) {
       out.shortcuts.push({ file: rel, ...s })
       if (!s.trigger) add('limpeza/atalho-sem-prazo', s.line, { text: s.text.slice(0, 80) })
     }
-    const codeLines = text.split('\n').filter((l) => l.trim() && !/^\s*(\/\/|\*|\/\*)/.test(l)).length
+    const py = rel.endsWith('.py')
+    const codeLines = text.split('\n').filter((l) => l.trim() && !(py ? /^\s*#/ : /^\s*(\/\/|\*|\/\*)/).test(l)).length
     out.lines += codeLines
     out.texts.set(rel, text)
-    out.modules.set(rel, result.module)
+    // Código sem uso entre arquivos só sabe ler os imports do JS/TS.
+    if (!py) out.modules.set(rel, result.module)
     if (test) {
       // Data e hora reais sem relógio falso: o teste muda de resultado conforme o dia.
       const clock = text.search(/\bnew Date\(\s*\)|\bDate\.now\(\)/)
@@ -483,19 +486,25 @@ const ENTRY = [
   /\.d\.ts$/,
 ]
 
+// Em cada parte do projeto: o que o package.json declara (main, bin, exports) e os arquivos citados nos scripts
+// e no wrangler, com os caminhos relativos à parte.
 function entryPoints(root) {
-  const pkg = packageJson(root) ?? {}
   const declared = new Set()
-  const addPath = (v) => typeof v === 'string' && declared.add(v.replace(/^\.\//, ''))
-  addPath(pkg.main)
-  addPath(pkg.module)
-  if (typeof pkg.bin === 'string') addPath(pkg.bin)
-  else Object.values(pkg.bin ?? {}).forEach(addPath)
-  const walkExports = (v) => (typeof v === 'string' ? addPath(v) : v && typeof v === 'object' && Object.values(v).forEach(walkExports))
-  walkExports(pkg.exports)
-  // Arquivos citados nos scripts ("node engine/build.mjs") e no wrangler (main).
-  const cited = Object.values(pkg.scripts ?? {}).join(' ') + ' ' + (read(root, 'wrangler.jsonc') ?? read(root, 'wrangler.toml') ?? '')
-  return (rel) => declared.has(rel) || cited.includes(rel) || ENTRY.some((re) => re.test(rel))
+  const cited = []
+  for (const { dir, pkg } of projectParts(root)) {
+    const addPath = (v) => typeof v === 'string' && declared.add([dir, v.replace(/^\.\//, '')].filter(Boolean).join('/'))
+    addPath(pkg.main)
+    addPath(pkg.module)
+    if (typeof pkg.bin === 'string') addPath(pkg.bin)
+    else Object.values(pkg.bin ?? {}).forEach(addPath)
+    const walkExports = (v) => (typeof v === 'string' ? addPath(v) : v && typeof v === 'object' && Object.values(v).forEach(walkExports))
+    walkExports(pkg.exports)
+    // Arquivos citados nos scripts ("node engine/build.mjs") e no wrangler (main).
+    const wrangler = read(root, path.join(dir, 'wrangler.jsonc')) ?? read(root, path.join(dir, 'wrangler.toml')) ?? ''
+    cited.push({ dir, text: `${Object.values(pkg.scripts ?? {}).join(' ')} ${wrangler}` })
+  }
+  const inPart = (rel, dir) => (!dir ? rel : rel.startsWith(`${dir}/`) ? rel.slice(dir.length + 1) : null)
+  return (rel) => declared.has(rel) || cited.some(({ dir, text }) => inPart(rel, dir) && text.includes(inPart(rel, dir))) || ENTRY.some((re) => re.test(rel))
 }
 
 // ---------- trechos duplicados ----------
@@ -503,7 +512,7 @@ function entryPoints(root) {
 const DUP_WINDOW = 8
 const DUP_MIN_CHARS = 280
 // Linhas que não contam (vazias, comentários, imports, só fechamento).
-const TRIVIAL = /^(\/\/|\/\*|\*|import\b|export \{|[)\]}>;,]+$|<\/[\w.]+>$)/
+const TRIVIAL = /^(\/\/|\/\*|\*|#|import\b|from\s+\S+\s+import\b|export \{|[)\]}>;,:]+$|<\/[\w.]+>$)/
 
 /** Blocos de 8+ linhas iguais (ignorando espaços) em dois lugares do projeto. Um item por bloco. */
 function duplicates(texts) {
@@ -567,67 +576,75 @@ function duplicates(texts) {
 
 const TOOL_TIMEOUT = 180_000
 
-/** Roda o tsc e o ESLint que o projeto já tem instalados. Devolve quais rodaram. */
+/**
+ * Roda o tsc e o ESLint que o projeto já tem instalados, em cada parte que tem a configuração deles (a raiz e,
+ * num projeto dividido, frontend/ etc.). O executável pode estar na parte ou na raiz (monorepo). Devolve quais
+ * rodaram ("tsc", "eslint em frontend/"…).
+ */
 function projectTools(root, c, errors) {
   const ran = []
-  const tsc = path.join(root, 'node_modules', 'typescript', 'bin', 'tsc')
-  if (fs.existsSync(path.join(root, 'tsconfig.json')) && fs.existsSync(tsc)) {
-    const r = spawnSync(process.execPath, [tsc, '--noEmit', '--pretty', 'false', '-p', '.'], { cwd: root, encoding: 'utf8', windowsHide: true, timeout: TOOL_TIMEOUT, maxBuffer: 32 * 1024 * 1024 })
-    if (r.error) errors.push(`tsc: ${r.error.message}`)
-    else {
-      ran.push('tsc')
-      for (const m of r.stdout.matchAll(/^(.+?)\((\d+),\d+\): error (TS\d+): (.+)$/gm))
-        c.add('ts/erro-de-tipo', m[1].replace(/\\/g, '/'), Number(m[2]), { code: m[3], message: m[4] })
-    }
-  }
-  const eslint = path.join(root, 'node_modules', 'eslint', 'bin', 'eslint.js')
-  const hasConfig = fs.readdirSync(root).some((f) => /^(eslint\.config\.[cm]?[jt]s|\.eslintrc(\.\w+)?)$/.test(f))
-  if (hasConfig && fs.existsSync(eslint)) {
-    const r = spawnSync(process.execPath, [eslint, '.', '-f', 'json'], { cwd: root, encoding: 'utf8', windowsHide: true, timeout: TOOL_TIMEOUT, maxBuffer: 64 * 1024 * 1024 })
-    try {
-      for (const file of JSON.parse(r.stdout)) {
-        const rel = path.relative(root, file.filePath).split(path.sep).join('/')
-        for (const msg of file.messages ?? [])
-          c.add(msg.severity === 2 ? 'eslint/erro' : 'eslint/aviso', rel, msg.line ?? null, { rule: msg.ruleId ?? 'sintaxe', message: msg.message })
+  const parts = projectParts(root)
+  const binIn = (dir, rel) => [path.join(root, dir, 'node_modules', rel), path.join(root, 'node_modules', rel)].find((f) => fs.existsSync(f))
+  const label = (tool, dir) => (dir ? `${tool} em ${dir}/` : tool)
+  for (const { dir } of parts) {
+    const cwd = path.join(root, dir)
+    const tsc = binIn(dir, 'typescript/bin/tsc')
+    if (fs.existsSync(path.join(cwd, 'tsconfig.json')) && tsc) {
+      const r = spawnSync(process.execPath, [tsc, '--noEmit', '--pretty', 'false', '-p', '.'], { cwd, encoding: 'utf8', windowsHide: true, timeout: TOOL_TIMEOUT, maxBuffer: 32 * 1024 * 1024 })
+      if (r.error) errors.push(`${label('tsc', dir)}: ${r.error.message}`)
+      else {
+        ran.push(label('tsc', dir))
+        // O tsc escreve os caminhos relativos à pasta em que rodou.
+        for (const m of r.stdout.matchAll(/^(.+?)\((\d+),\d+\): error (TS\d+): (.+)$/gm))
+          c.add('ts/erro-de-tipo', [dir, m[1].replace(/\\/g, '/')].filter(Boolean).join('/'), Number(m[2]), { code: m[3], message: m[4] })
       }
-      ran.push('eslint')
-    } catch {
-      errors.push(`eslint: ${(r.stderr || r.error?.message || 'saída inválida').split('\n')[0].slice(0, 200)}`)
+    }
+    const eslint = binIn(dir, 'eslint/bin/eslint.js')
+    const hasConfig = fs.readdirSync(cwd).some((f) => /^(eslint\.config\.[cm]?[jt]s|\.eslintrc(\.\w+)?)$/.test(f))
+    if (hasConfig && eslint) {
+      const r = spawnSync(process.execPath, [eslint, '.', '-f', 'json'], { cwd, encoding: 'utf8', windowsHide: true, timeout: TOOL_TIMEOUT, maxBuffer: 64 * 1024 * 1024 })
+      try {
+        for (const file of JSON.parse(r.stdout)) {
+          const rel = path.relative(root, file.filePath).split(path.sep).join('/')
+          for (const msg of file.messages ?? [])
+            c.add(msg.severity === 2 ? 'eslint/erro' : 'eslint/aviso', rel, msg.line ?? null, { rule: msg.ruleId ?? 'sintaxe', message: msg.message })
+        }
+        ran.push(label('eslint', dir))
+      } catch {
+        errors.push(`${label('eslint', dir)}: ${(r.stderr || r.error?.message || 'saída inválida').split('\n')[0].slice(0, 200)}`)
+      }
     }
   }
   return ran
 }
 
-function packageJson(root) {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
-  } catch {
-    // Sem package.json (ou inválido): as regras de pacotes ficam de fora.
-    return null
-  }
-}
-
+// Pacotes de cada parte (a raiz e subpastas com package.json, como frontend/), cada uma com os próprios
+// arquivos; e as instruções da IA de cada parte, conferidas contra os scripts de todas as partes.
 function projectRules(root, files, c) {
-  const pkg = packageJson(root)
-  if (pkg) {
+  const parts = projectParts(root)
+  for (const { dir, pkg } of parts) {
+    const manifest = [dir, 'package.json'].filter(Boolean).join('/')
     const deps = Object.keys(pkg.dependencies ?? {})
-    const allDeps = [...deps, ...Object.keys(pkg.devDependencies ?? {})]
-    for (const name of allDeps)
-      if (NATIVE[name]) c.add('demais/dependencia-dispensavel', 'package.json', null, { pkg: name, native: NATIVE[name][0], where: NATIVE[name][1] })
-    // Monorepo: cada pacote tem o seu package.json; fica para depois.
-    if (!pkg.workspaces) {
-      const unused = unusedDependencies(root, files, deps, pkg)
-      if (unused.length) c.add('demais/dependencia-sem-uso', 'package.json', null, { pkg: unused[0], list: unused.join(', ') })
-    }
+    for (const name of [...deps, ...Object.keys(pkg.devDependencies ?? {})])
+      if (NATIVE[name]) c.add('demais/dependencia-dispensavel', manifest, null, { pkg: name, native: NATIVE[name][0], where: NATIVE[name][1] })
+    // Raiz de monorepo (workspaces): os pacotes de verdade estão nas partes.
+    if (pkg.workspaces) continue
+    // Os arquivos da parte; os da raiz são todos menos os das outras partes.
+    const others = parts.filter((p) => p.dir && p.dir !== dir && (!dir || !p.dir.startsWith(`${dir}/`))).map((p) => `${p.dir}/`)
+    const own = files.filter((f) => (!dir || f.startsWith(`${dir}/`)) && !others.some((o) => f.startsWith(o)))
+    const unused = unusedDependencies(root, own, deps, pkg, dir)
+    if (unused.length) c.add('demais/dependencia-sem-uso', manifest, null, { pkg: unused[0], list: unused.join(', ') })
   }
-  for (const doc of ['CLAUDE.md', 'AGENTS.md', '.claude/CLAUDE.md']) instructionRules(root, doc, pkg, c)
+  const scripts = new Set(parts.flatMap((p) => Object.keys(p.pkg.scripts ?? {})))
+  const docs = parts.flatMap(({ dir }) => (dir ? ['CLAUDE.md', 'AGENTS.md'] : ['CLAUDE.md', 'AGENTS.md', '.claude/CLAUDE.md']).map((d) => [dir, d].filter(Boolean).join('/')))
+  for (const doc of docs) instructionRules(root, doc, scripts, c)
 }
 
-function unusedDependencies(root, files, deps, pkg) {
+function unusedDependencies(root, files, deps, pkg, dir = '') {
   const candidates = deps.filter((d) => !IMPLICIT.test(d))
   if (!candidates.length) return []
-  // Código + configuração + CSS + HTML: onde um pacote pode ser citado pelo nome.
-  const extra = projectFiles(root).files.filter((f) => /\.(css|scss|html|json|jsonc|vue|svelte|astro|toml|ya?ml)$/.test(f) && !/package(-lock)?\.json$/.test(f))
+  // Código + configuração + CSS + HTML da mesma parte: onde um pacote pode ser citado pelo nome.
+  const extra = projectFiles(root).files.filter((f) => (!dir || f.startsWith(`${dir}/`)) && /\.(css|scss|html|json|jsonc|vue|svelte|astro|toml|ya?ml)$/.test(f) && !/package(-lock)?\.json$/.test(f))
   const used = new Set()
   const scripts = Object.values(pkg.scripts ?? {}).join('\n')
   const quoted = (name) => new RegExp(`['"\`]${name.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}(/[^'"\`]*)?['"\`]`)
@@ -642,7 +659,8 @@ function unusedDependencies(root, files, deps, pkg) {
 
 const PATH_LIKE = /^(\.{0,2}\/)?[\w@.-]+(\/[\w@.$[\]-]+)+\/?$|^[\w-]+\.(md|json|ts|tsx|js|mjs|jsonc|toml|ya?ml|sql|css)$/
 
-function instructionRules(root, doc, pkg, c) {
+// `scripts`: os nomes dos scripts de todas as partes ("npm run dev" pode ser o de frontend/).
+function instructionRules(root, doc, scripts, c) {
   const text = read(root, doc)
   if (!text) return
   const missing = new Set()
@@ -653,8 +671,7 @@ function instructionRules(root, doc, pkg, c) {
     if (!fs.existsSync(path.join(root, path.dirname(doc), rel)) && !fs.existsSync(path.join(root, rel))) missing.add(p)
   }
   if (missing.size) c.add('instrucoes/arquivo-inexistente', doc, null, { doc, list: [...missing].slice(0, 10).join(', ') })
-  if (!pkg?.scripts) return
-  const scripts = new Set(Object.keys(pkg.scripts))
+  if (!scripts.size) return
   const builtin = new Set(['install', 'i', 'ci', 'test', 'start', 'init', 'add', 'remove', 'uninstall', 'update', 'exec', 'dlx', 'create', 'publish', 'link', 'audit', 'outdated', 'why', 'x'])
   const bad = new Set()
   for (const m of text.matchAll(/\b(?:npm run|pnpm(?: run)?|yarn(?: run)?|bun run)\s+([\w:.-]+)/g)) {
@@ -666,7 +683,7 @@ function instructionRules(root, doc, pkg, c) {
 
 // TODO/FIXME antigos: data pela autoria da linha no git (git blame), só nas linhas marcadas.
 function oldTodos(root, c) {
-  const grep = spawnSync('git', ['grep', '-n', '-I', '-E', '(//|/\\*|\\*|#)\\s*(TODO|FIXME|HACK|XXX)\\b', '--', '*.ts', '*.tsx', '*.js', '*.jsx', '*.mjs', '*.cjs'], {
+  const grep = spawnSync('git', ['grep', '-n', '-I', '-E', '(//|/\\*|\\*|#)\\s*(TODO|FIXME|HACK|XXX)\\b', '--', '*.ts', '*.tsx', '*.js', '*.jsx', '*.mjs', '*.cjs', '*.py'], {
     cwd: root,
     encoding: 'utf8',
     windowsHide: true,

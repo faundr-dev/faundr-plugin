@@ -12,10 +12,11 @@ const PREV_FILE = path.join('.faundr', 'tests', 'coverage-prev.json')
 const NOT_CODE = /(^|\/)(node_modules|dist|build|coverage|\.faundr)\/|\.(test|spec)\.[cm]?[jt]sx?$|\.d\.ts$/
 
 /** Argumentos extras para ligar a cobertura sem mexer na configuração do projeto (null = não dá). */
-export function coverageArgs(runner, root) {
-  const dir = COVERAGE_DIR.split(path.sep).join('/')
+export function coverageArgs(runner, root, sub = '') {
+  // Executor numa subpasta (ex.: frontend/): o relatório vai para a pasta do Faundr na raiz, pelo caminho completo.
+  const dir = (sub ? path.join(root, COVERAGE_DIR) : COVERAGE_DIR).split(path.sep).join('/')
   // Sem "include", só aparecem arquivos que algum teste importou; com src/, aparece também o que não tem teste nenhum.
-  const src = fs.existsSync(path.join(root, 'src'))
+  const src = fs.existsSync(path.join(root, sub, 'src'))
   if (runner === 'vitest')
     return ['--coverage.enabled', '--coverage.reporter=json', `--coverage.reportsDirectory=${dir}`, '--coverage.reportOnFailure', ...(src ? ['--coverage.include=src/**'] : [])]
   if (runner === 'jest') return ['--coverage', '--coverageReporters=json', `--coverageDirectory=${dir}`, ...(src ? ['--collectCoverageFrom=src/**/*.{js,jsx,ts,tsx,mjs}'] : [])]

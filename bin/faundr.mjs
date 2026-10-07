@@ -58,7 +58,7 @@
 //   faundr quality-rule "<nome>" --pattern …   cria uma regra da casa em .faundr-regras/ (padrão + mensagem)
 //   faundr quality-ladder on|off               liga/desliga o lembrete de qualidade no início das sessões
 //   faundr tests-scan                          inventário dos testes sem rodar nada (executores, arquivos, resultado no disco)
-//   faundr tests-run [--changed] [--coverage] [--files a,b] [--runner vitest|jest|playwright|node] [--confirm-db]  roda os testes (só quando pedido)
+//   faundr tests-run [--changed] [--coverage] [--files a,b] [--exclude a,b] [--runner vitest|jest|playwright|node|pytest] [--python <caminho>] [--confirm-db]  roda os testes (só quando pedido)
 //   faundr tests-show                          última rodada, testes falhando e instáveis
 //   faundr tests-context [--fix]               contexto para o agente escrever ou consertar testes (skills "tests" e "tests-fix")
 //   faundr tests-map "<funcionalidade>" …      mapa testes × funcionalidades (--status, --tests, --critical)
@@ -86,7 +86,8 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { findDesignMd, isUiFile, lintProject, uiFiles } from './design.mjs'
 import { buildShowcase, detectRuntime, readShowcase, SHOWCASE_FILE, showcaseHashes, showcaseStatus } from './showcase.mjs'
-import { classify, isPartial, maskCommand, parseErrors, toolOutput } from './errors.mjs'
+import { classify, commandCwd, isPartial, maskCommand, parseErrors, toolOutput } from './errors.mjs'
+import { allScripts } from './parts.mjs'
 import { findSecrets, guardContent, mask, projectFiles, projectMap, scanProject } from './security.mjs'
 import { parseImport, supabaseAdvisors } from './security-import.mjs'
 import { contextLines, findMap, resolvePosition } from './sourcemap.mjs'
@@ -970,7 +971,7 @@ async function captureErrors(payload, root, projectId, config) {
   // Com pipe, o código de saída é o do último comando (`npm run build | tail`): a saída diz se falhou.
   let failed = payload.hook_event_name === 'PostToolUseFailure'
   if (!failed && piped && /\b(error|failed|fail)\b|✘|✖/i.test(output)) failed = true
-  const issues = parseErrors(output, { kind: c.kind, root, failed })
+  const issues = parseErrors(output, { kind: c.kind, root, failed, cwd: commandCwd(command, payload.cwd ?? root) })
   const passed = !failed && !issues.length
   if (passed && filtered) return // saída filtrada vazia não prova nada
   if (!passed && !issues.length) return
@@ -1833,6 +1834,10 @@ function coverageReady(runner, info) {
     console.log('  Cobertura: o Playwright (testes no navegador) não mede cobertura; rodando sem.')
     return false
   }
+  if (runner === 'pytest') {
+    console.log('  Cobertura: o Faundr ainda não lê a cobertura do pytest; rodando sem.')
+    return false
+  }
   if (runner === 'vitest' && !info?.coverage) {
     console.log('  Cobertura: falta a ferramenta no projeto. Peça ao usuário para aprovar: npm install -D @vitest/coverage-v8 (depois rode de novo com --coverage). Rodando sem cobertura.')
     return false
@@ -1840,7 +1845,7 @@ function coverageReady(runner, info) {
   return true
 }
 
-async function coverageReport(root, runner) {
+async function coverageReport(root, runner, dir = '') {
   const { changedLines, lostCoverage, readCoverage, sessionCoverage, summarize } = await import('./coverage.mjs')
   const files = readCoverage(root)
   if (!files) return null
@@ -1851,7 +1856,7 @@ async function coverageReport(root, runner) {
   const changed = changedLines(root, base)
   const summary = summarize(files)
   // node --test (e projetos sem src/) só medem os arquivos que algum teste carregou: o painel avisa.
-  const onlyLoaded = runner === 'node' || !fs.existsSync(path.join(root, 'src'))
+  const onlyLoaded = runner === 'node' || !fs.existsSync(path.join(root, dir, 'src'))
   return { total: summary.total, files: summary.files.slice(0, 2000), session: sessionCoverage(files, changed), lost: lostCoverage(root, summary, changed), base: base === 'HEAD' ? null : base.slice(0, 12), onlyLoaded }
 }
 
@@ -1860,52 +1865,64 @@ async function testsScan(args) {
   const { root } = linkedProject()
   const { detectRunners, inventory, passiveResults, productionDbSignals } = await import('./tests.mjs')
   const { files } = projectFiles(root)
-  const { runners, others } = detectRunners(root)
-  const inv = { ...inventory(root, files), runners, others, productionDb: productionDbSignals(root, files) }
+  const { runners, others } = detectRunners(root, { files, python: readState(root).python })
+  // O caminho do Python fica só no computador (state.json); o painel recebe o resto.
+  const inv = { ...inventory(root, files), runners: runners.map(({ python, args, ...r }) => r), others, productionDb: productionDbSignals(root, files) }
   await testsApi({ action: 'scan', inventory: inv, passive: passiveResults(root) })
-  if (args.includes('--quiet')) return log(`tests: ${inv.testFiles} arquivos de teste, ~${inv.cases} testes, executores: ${runners.map((r) => r.runner).join(', ') || '-'}`)
+  if (args.includes('--quiet')) return log(`tests: ${inv.testFiles} arquivos de teste, ~${inv.cases} testes, executores: ${runners.map(runnerLabel).join(', ') || '-'}`)
   if (!runners.length && !inv.testFiles) return console.log('Este projeto ainda não tem testes.')
-  console.log(`Executores: ${runners.map((r) => `${r.runner}${r.installed ? '' : ' (não instalado: rode npm install)'}`).join(', ') || 'nenhum suportado'}${others.length ? ` · também: ${others.join(', ')} (ainda não suportados)` : ''}`)
+  console.log(`Executores: ${runners.map((r) => `${runnerLabel(r)}${r.installed ? '' : ` (${notInstalled(r)})`}`).join(', ') || 'nenhum suportado'}${others.length ? ` · também: ${others.join(', ')} (ainda não suportados)` : ''}`)
   console.log(`${inv.testFiles} arquivos de teste, cerca de ${inv.cases} testes (${inv.skipped} pulados no código, ${inv.e2eFiles} arquivos de ponta a ponta).`)
   for (const r of inv.productionDb) console.log(`Atenção: ${r}`)
 }
 
+const runnerLabel = (r) => `${r.runner}${r.dir ? ` em ${r.dir}/` : ''}`
+const notInstalled = (r) => (r.runner === 'pytest' ? 'Python não encontrado: rode com --python <caminho do python>' : `não instalado: rode npm install${r.dir ? ` em ${r.dir}/` : ''}`)
+const listArg = (args, name) => flag(args, name)?.split(',').map((f) => f.trim().replace(/\\/g, '/').replace(/^\.\//, '')).filter(Boolean) ?? null
+
 // Roda os testes quando pedido (nunca sozinho). Banco de produção à vista: só com --confirm-db.
 async function testsRun(args) {
   const { root } = linkedProject()
-  const { detectRunners, productionDbSignals, runTests } = await import('./tests.mjs')
-  const { runners } = detectRunners(root)
+  const { detectRunners, insideDir, productionDbSignals, runTests } = await import('./tests.mjs')
+  // --python: o Python do projeto fora da pasta (ex.: um venv em outro lugar); fica guardado para as próximas rodadas.
+  const pythonArg = flag(args, '--python')
+  if (pythonArg) {
+    const abs = path.resolve(process.cwd(), pythonArg)
+    if (!fs.existsSync(abs)) throw new Error(`Não achei o Python em ${pythonArg}.`)
+    writeState(root, { python: abs })
+  }
+  const { runners } = detectRunners(root, { python: readState(root).python })
   const wanted = flag(args, '--runner')
-  const chosen = wanted
-    ? runners.filter((r) => r.runner === wanted)
-    : runners.filter((r) => r.script || r.config).length
-      ? runners.filter((r) => r.script || r.config)
-      : runners
-  if (!chosen.length) throw new Error(wanted ? `${wanted} não foi encontrado neste projeto.` : 'Nenhum executor de testes suportado (Vitest, Jest ou Playwright) neste projeto.')
-  const signals = productionDbSignals(root)
+  const runnable = (r) => r.script || r.config || r.runner === 'pytest'
+  const chosen = wanted ? runners.filter((r) => r.runner === wanted) : runners.filter(runnable).length ? runners.filter(runnable) : runners
+  if (!chosen.length) throw new Error(wanted ? `${wanted} não foi encontrado neste projeto.` : 'Nenhum executor de testes suportado (Vitest, Jest, Playwright, node --test ou pytest) neste projeto, nem nas subpastas.')
+  const exclude = listArg(args, '--exclude') ?? []
+  const signals = productionDbSignals(root, undefined, { exclude })
   if (signals.length && !args.includes('--confirm-db')) {
     console.log('Não rodei: os testes parecem usar o banco de dados de verdade (produção) e podem mudar ou apagar dados.')
     for (const s of signals) console.log(`  - ${s}`)
-    console.log('Pergunte ao usuário. Se ele confirmar, rode de novo com --confirm-db. O jeito seguro é criar um .env.test apontando para um banco de teste.')
+    console.log('Pergunte ao usuário. Se ele confirmar, rode de novo com --confirm-db. Para deixar esses arquivos de fora, use --exclude a,b. O jeito seguro é criar um .env.test apontando para um banco de teste.')
     process.exitCode = 2
     return
   }
-  const files = flag(args, '--files')?.split(',').map((f) => f.trim()).filter(Boolean) ?? null
+  const files = listArg(args, '--files')
   const changed = args.includes('--changed')
   const wantCoverage = args.includes('--coverage')
   const minutes = Number(flag(args, '--timeout'))
   const git = (a) => spawnSync('git', a, { cwd: root, encoding: 'utf8', windowsHide: true }).stdout?.trim() || null
   // Repositório sem commit: o git devolve o texto "HEAD"; só vale um hash de verdade.
   const commit = /^[0-9a-f]{40}$/.test(git(['rev-parse', 'HEAD']) ?? '') ? git(['rev-parse', 'HEAD']) : null
-  for (const { runner } of chosen) {
-    if (runner === 'node' && changed) {
-      console.log('node --test não sabe rodar só o que mudou: rodando todos os testes dele.')
+  for (const info of chosen) {
+    const { runner, dir } = info
+    // --files de outra parte do projeto: este executor não tem o que rodar.
+    if (files && !insideDir(dir, files).length) continue
+    if ((runner === 'node' || runner === 'pytest') && changed) {
+      console.log(`${runner === 'node' ? 'node --test' : 'pytest'} não sabe rodar só o que mudou: rodando todos os testes dele.`)
     }
-    console.log(`Rodando ${runner}${changed ? ' (só o que mudou)' : files ? ` (${files.length} arquivo(s))` : ''}…`)
-    const info = chosen.find((c) => c.runner === runner)
+    console.log(`Rodando ${runnerLabel(info)}${changed ? ' (só o que mudou)' : files ? ` (${files.length} arquivo(s))` : ''}…`)
     const coverage = wantCoverage && coverageReady(runner, info)
-    const r = runTests(root, runner, { changed, files, coverage, nodeArgs: info?.args, ...(minutes > 0 ? { timeout: minutes * 60_000 } : {}) })
-    const cov = coverage ? await coverageReport(root, runner) : null
+    const r = runTests(root, runner, { dir, python: info.python, changed, files, exclude, coverage, nodeArgs: info.args, ...(minutes > 0 ? { timeout: minutes * 60_000 } : {}) })
+    const cov = coverage ? await coverageReport(root, runner, dir) : null
     const sent = await testsApi({
       action: 'run',
       runner,
@@ -1941,9 +1958,9 @@ async function testsContext(args) {
   const { root } = linkedProject()
   const { detectRunners, productionDbSignals } = await import('./tests.mjs')
   const guide = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'skills', 'tests', 'guia.md')
-  const { runners, others } = detectRunners(root)
+  const { runners, others } = detectRunners(root, { python: readState(root).python })
   const out = ['# Contexto dos testes', `Guia (leia antes, com a ferramenta Read): ${guide}`, '']
-  out.push('## Executores', ...(runners.length ? runners.map((r) => `- ${r.runner}${r.script ? ` (npm run ${r.script})` : ''}${r.installed ? '' : ' — não instalado'}${r.runner === 'vitest' && !r.coverage ? ' — sem a ferramenta de cobertura (@vitest/coverage-v8)' : ''}`) : ['- nenhum (Vitest, Jest, Playwright ou node --test)']))
+  out.push('## Executores', ...(runners.length ? runners.map((r) => `- ${runnerLabel(r)}${r.script ? ` (npm run ${r.script})` : ''}${r.installed ? '' : ` — ${notInstalled(r)}`}${r.runner === 'vitest' && !r.coverage ? ' — sem a ferramenta de cobertura (@vitest/coverage-v8)' : ''}`) : ['- nenhum (Vitest, Jest, Playwright, node --test ou pytest)']))
   if (others.length) out.push(`- também no projeto, não lidos pelo Faundr: ${others.join(', ')}`)
   for (const s of productionDbSignals(root)) out.push(`- ATENÇÃO, banco de produção: ${s}`)
   out.push('')
@@ -1997,10 +2014,11 @@ async function testsMutation(args) {
   const { detectRunners, productionDbSignals } = await import('./tests.mjs')
   const { mutateTargets, mutationFindings, mutationSetup, runMutation } = await import('./mutation.mjs')
   const { changedLines } = await import('./coverage.mjs')
-  const { runners } = detectRunners(root)
+  // O Stryker roda a partir da raiz: só os executores dela.
+  const runners = detectRunners(root).runners.filter((r) => !r.dir)
   const pick = flag(args, '--runner')
   const runner = pick ? runners.find((r) => r.runner === pick) : (runners.find((r) => r.runner === 'vitest' || r.runner === 'jest') ?? runners.find((r) => r.runner === 'node'))
-  if (!runner) throw new Error('A mutação precisa de testes de unidade (Vitest, Jest ou node --test); o Playwright (navegador) não serve.')
+  if (!runner || runner.runner === 'pytest') throw new Error('A mutação precisa de testes de unidade de JavaScript na raiz do projeto (Vitest, Jest ou node --test); o Playwright (navegador) e o pytest não servem.')
   const setup = mutationSetup(root, runner.runner)
   if (setup.incompatible) {
     console.log(`Não rodei: ${setup.incompatible}`)
@@ -2222,10 +2240,13 @@ function takeDesignDirty(projectId, payload) {
   return true
 }
 
+// O script "dev" da raiz ou, num projeto dividido, o de uma parte (ex.: frontend/package.json).
 function devServerUrl(root) {
-  const dev = readJson(path.join(root, 'package.json'))?.scripts?.dev ?? ''
-  const port = dev.match(/--port[= ](\d+)/)?.[1] ?? (/next/.test(dev) ? '3000' : /vite/.test(dev) ? '5173' : null)
-  return port ? `http://localhost:${port}` : null
+  for (const { cmd } of allScripts(root).filter((s) => s.name === 'dev')) {
+    const port = cmd.match(/--port[= ](\d+)/)?.[1] ?? (/next/.test(cmd) ? '3000' : /vite/.test(cmd) ? '5173' : null)
+    if (port) return `http://localhost:${port}`
+  }
+  return null
 }
 
 // Pacote de contexto que o agente lê para criar o design.md ou auditar as telas (skill "design").

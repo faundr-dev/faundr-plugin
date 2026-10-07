@@ -6,8 +6,9 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { inNodeModules, isClaudePlugin } from './parts.mjs'
 
-const SKIP = /(^|\/)(node_modules|\.git|\.faundr|dist|build|out|coverage|\.claude|\.remember|\.wrangler|\.next|\.nuxt|\.svelte-kit|\.tanstack|\.vercel|\.output|plugin)(\/|$)/
+const SKIP = /(^|\/)(node_modules|\.git|\.faundr|dist|build|out|coverage|\.claude|\.remember|\.wrangler|\.next|\.nuxt|\.svelte-kit|\.tanstack|\.vercel|\.output)(\/|$)/
 const COLOR_VALUE = /^(#[0-9a-f]{3,8}|(rgb|rgba|hsl|hsla|oklch|oklab|lab|lch|color)\(.+\))$/i
 const HEX = /#(?:[0-9a-f]{6}|[0-9a-f]{3})\b/i
 const TW_COLORS =
@@ -34,7 +35,7 @@ function cssFiles(root) {
     for (const e of entries) {
       const abs = path.join(dir, e.name)
       const rel = path.relative(root, abs).split(path.sep).join('/')
-      if (SKIP.test(rel)) continue
+      if (SKIP.test(rel) || (e.isDirectory() && isClaudePlugin(abs))) continue
       if (e.isDirectory()) walk(abs, depth + 1)
       else if (/\.(css|scss)$/.test(e.name)) out.push(rel)
     }
@@ -124,7 +125,8 @@ export function extractTokens(root, designMdPath) {
   }
   let twVars = new Map()
   try {
-    twVars = cssVars(fs.readFileSync(path.join(root, 'node_modules/tailwindcss/theme.css'), 'utf8'))
+    // Na raiz ou numa parte do projeto (ex.: frontend/node_modules).
+    twVars = cssVars(fs.readFileSync(inNodeModules(root, 'tailwindcss/theme.css'), 'utf8'))
   } catch {}
   const allVars = new Map([...twVars, ...projectVars])
   const value = (name) => (allVars.has(name) ? resolveValue(allVars.get(name), allVars) : null)

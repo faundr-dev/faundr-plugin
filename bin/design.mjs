@@ -7,6 +7,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { isClaudePlugin, projectParts } from './parts.mjs'
 import { extractTokens } from './design-tokens.mjs'
 import { runRules } from './design-rules.mjs'
 
@@ -18,7 +19,10 @@ const DESIGN_DIRS = ['', 'docs', 'doc', 'design', '.faundr', '.claude', 'src']
 
 /** Caminho relativo do design.md (ou null). */
 export function findDesignMd(root) {
-  for (const dir of DESIGN_DIRS) {
+  // A raiz primeiro; depois cada parte do projeto (ex.: frontend/DESIGN.md, frontend/docs/design.md).
+  const parts = projectParts(root).slice(1).map((p) => p.dir)
+  const dirs = [...DESIGN_DIRS, ...parts.flatMap((p) => DESIGN_DIRS.filter((d) => !d.startsWith('.')).map((d) => [p, d].filter(Boolean).join('/')))]
+  for (const dir of dirs) {
     let entries = []
     try {
       entries = fs.readdirSync(path.join(root, dir))
@@ -51,7 +55,7 @@ export function uiFiles(root) {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       const abs = path.join(dir, e.name)
       const rel = path.relative(root, abs).split(path.sep).join('/')
-      if (SKIP.test(rel) || rel.startsWith('plugin/') || ignored.some((i) => rel === i || rel.startsWith(i.replace(/\/?$/, '/')))) continue
+      if (SKIP.test(rel) || (e.isDirectory() && isClaudePlugin(abs)) || ignored.some((i) => rel === i || rel.startsWith(i.replace(/\/?$/, '/')))) continue
       if (e.isDirectory()) walk(abs)
       else if (UI_EXT.test(e.name) && !GENERATED.test(e.name)) out.push(rel)
     }
