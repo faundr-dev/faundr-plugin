@@ -92,6 +92,7 @@ import { findSecrets, guardContent, mask, projectFiles, projectMap, scanProject 
 import { parseImport, supabaseAdvisors } from './security-import.mjs'
 import { contextLines, findMap, resolvePosition } from './sourcemap.mjs'
 import { detectStack } from './stack.mjs'
+import { graphFooter, transcriptUsage } from './usage.mjs'
 
 const CONFIG_DIR = path.join(os.homedir(), '.faundr')
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json')
@@ -354,7 +355,7 @@ async function hook(agent) {
   }
   // Checagem de design sem IA: no início da sessão e quando o agente mexeu em telas.
   if (event === 'SessionStart') spawnDetached(['design-lint', '--quiet', '--session', payload.session_id], path.dirname(linkFile))
-  else if (event === 'Stop' && takeDesignDirty(projectId, payload)) spawnDetached(['design-lint', '--quiet'], path.dirname(linkFile))
+  else if (event === 'Stop' && takeDesignDirty(projectId, payload)) spawnDetached(['design-lint', '--quiet', '--session', payload.session_id], path.dirname(linkFile))
   if (event === 'Stop' && takeGraphDirty(projectId)) {
     spawnDetached(['graph', '--quiet', '--agent', agent, '--session', payload.session_id], path.dirname(linkFile))
   }
@@ -383,10 +384,19 @@ async function hook(agent) {
 
   // SessionEnd: o hooks.json dá 5 s de orçamento ao hook (o padrão do Claude Code é 1,5 s).
   const timeout = event === 'SessionEnd' ? 4000 : CONTEXT_EVENTS.has(event) ? 8000 : 5000
+  // Impacto: tokens e uso da sessão, lidos da conversa no fim de cada resposta (só números).
+  let usage = null
+  if (event === 'Stop' || event === 'SessionEnd') {
+    try {
+      usage = transcriptUsage(payload.transcript_path)
+    } catch (err) {
+      log(`usage: ${err.message}`)
+    }
+  }
   const res = await fetch(`${apiUrl}/api/hooks/event`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-    body: JSON.stringify({ agent, projectId, git: { branch: gitBranch(cwd) }, currentFeatureId: readState(path.dirname(linkFile)).currentFeatureId ?? null, payload }),
+    body: JSON.stringify({ agent, projectId, git: { branch: gitBranch(cwd) }, currentFeatureId: readState(path.dirname(linkFile)).currentFeatureId ?? null, payload, usage }),
     signal: AbortSignal.timeout(timeout),
   })
   if (!res.ok) return log(`${event}: HTTP ${res.status} ${await res.text()}`)
@@ -452,7 +462,10 @@ function projectRoot() {
 // Consultas locais ao grafo: não precisam de rede nem de token.
 async function graphCommand(name, args) {
   const engine = await loadEngine()
-  console.log(await engine.runEngine([name, ...args], projectRoot()))
+  const root = projectRoot()
+  const output = await engine.runEngine([name, ...args], root)
+  // Rodapé com o tamanho da resposta e o dos arquivos citados: o Faundr soma no fim da sessão (Impacto).
+  console.log([output, graphFooter(output, root)].filter(Boolean).join('\n\n'))
 }
 
 // Gera o grafo na raiz do projeto ligado e envia graph.json + GRAPH_REPORT.md.
@@ -2173,7 +2186,7 @@ async function designLint(args) {
   if (sid && readState(root).designBaseline?.session !== sid)
     writeState(root, { designBaseline: { session: sid, fingerprints: result.findings.map((f) => f.fingerprint) } })
   if (!args.includes('--no-send')) {
-    const sent = await designApi({ action: 'report', ...result })
+    const sent = await designApi({ action: 'report', ...result, agent: 'claude', agentSessionId: sid ?? process.env.CLAUDE_CODE_SESSION_ID ?? null })
     writeState(root, { designSkip: { archived: sent.archived ?? [], disabled: sent.disabled ?? [] } })
     // Vitrine: a impressão digital atual dos arquivos das réplicas (o painel marca as desatualizadas).
     let showcase = null
