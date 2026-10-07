@@ -191,3 +191,25 @@ export function graphFooter(output, root) {
   if (!counted) return ''
   return `[Faundr] Grafo: resposta ~${tokensOf(output.length)} tokens; arquivos citados: ${counted}, ~${tokensOf(chars)} tokens se lidos inteiros.`
 }
+
+// O último fim de resposta e o fim da sessão costumam se perder (o Claude Code fecha antes do envio terminar):
+// o plugin lembra a conversa de cada sessão e, na sessão seguinte, relê e reenvia o uso das anteriores.
+const MAX_PENDING = 20
+
+/** Lembra a conversa da sessão (as mais recentes primeiro, no máximo 20). */
+export function rememberTranscript(pending, sid, transcriptPath, now = Date.now()) {
+  const next = { ...(pending ?? {}) }
+  if (sid && transcriptPath) next[sid] = { path: transcriptPath, at: now }
+  return Object.fromEntries(
+    Object.entries(next)
+      .sort((a, b) => b[1].at - a[1].at)
+      .slice(0, MAX_PENDING),
+  )
+}
+
+/** Sessões cujo uso deve ser reenviado: todas as lembradas, menos a atual. */
+export function transcriptsToSync(pending, currentSid) {
+  return Object.entries(pending ?? {})
+    .filter(([sid]) => sid !== currentSid)
+    .map(([sid, v]) => ({ sid, path: v.path }))
+}

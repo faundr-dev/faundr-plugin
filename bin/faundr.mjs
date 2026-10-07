@@ -92,7 +92,7 @@ import { findSecrets, guardContent, mask, projectFiles, projectMap, scanProject 
 import { parseImport, supabaseAdvisors } from './security-import.mjs'
 import { contextLines, findMap, resolvePosition } from './sourcemap.mjs'
 import { detectStack } from './stack.mjs'
-import { graphFooter, transcriptUsage } from './usage.mjs'
+import { graphFooter, rememberTranscript, transcriptUsage, transcriptsToSync } from './usage.mjs'
 
 const CONFIG_DIR = path.join(os.homedir(), '.faundr')
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json')
@@ -229,12 +229,20 @@ function cleanEditedMarkers() {
   } catch {}
 }
 
-// Bilhete de passagem: pedido na primeira resposta com edições e de novo se houve edições 30 min depois do último.
+// Bilhete de passagem: só em sessão que mudou algo importante (vários arquivos, ou edições espalhadas por bastante
+// tempo); nas pequenas, o diário automático (pedidos, arquivos, commits) já basta e o bilhete custaria mais do que
+// ajuda. Depois do primeiro, de novo se houve edições 30 min depois do último.
 const HANDOFF_EVERY_MS = 30 * 60_000
+const HANDOFF_MIN_FILES = 4
+const HANDOFF_MIN_WORK_MS = 20 * 60_000
 
 function needsHandoff(root, sid) {
   const last = readState(root).lastHandoff
-  if (last?.session !== sid) return true
+  if (last?.session !== sid) {
+    const st = fs.statSync(editedFile(sid))
+    const worked = st.mtimeMs - (st.birthtimeMs || st.ctimeMs)
+    return sessionEditedFiles(sid).length >= HANDOFF_MIN_FILES || worked >= HANDOFF_MIN_WORK_MS
+  }
   const edited = fs.statSync(editedFile(sid)).mtimeMs
   const at = new Date(last.at).getTime()
   return edited > at && Date.now() - at > HANDOFF_EVERY_MS
@@ -353,30 +361,43 @@ async function hook(agent) {
     markGraphDirty(projectId)
     markSessionEdited(payload.session_id, payload.tool_input?.file_path ?? payload.tool_input?.notebook_path)
   }
+  // Trabalhos em segundo plano, todos num processo só (ver spawnBackground).
+  const background = []
   // Checagem de design sem IA: no início da sessão e quando o agente mexeu em telas.
-  if (event === 'SessionStart') spawnDetached(['design-lint', '--quiet', '--session', payload.session_id], path.dirname(linkFile))
-  else if (event === 'Stop' && takeDesignDirty(projectId, payload)) spawnDetached(['design-lint', '--quiet', '--session', payload.session_id], path.dirname(linkFile))
+  if (event === 'SessionStart') background.push(['design-lint', '--quiet', '--session', payload.session_id])
+  else if (event === 'Stop' && takeDesignDirty(projectId, payload)) background.push(['design-lint', '--quiet', '--session', payload.session_id])
   if (event === 'Stop' && takeGraphDirty(projectId)) {
-    spawnDetached(['graph', '--quiet', '--agent', agent, '--session', payload.session_id], path.dirname(linkFile))
+    background.push(['graph', '--quiet', '--agent', agent, '--session', payload.session_id])
   }
   // Segurança sem IA: checagem completa no início da sessão; no fim da resposta, só o que o agente editou.
-  if (event === 'SessionStart') spawnDetached(['security-scan', '--quiet', '--session', payload.session_id], path.dirname(linkFile))
+  if (event === 'SessionStart') background.push(['security-scan', '--quiet', '--session', payload.session_id])
   // Testes: só o inventário (sem rodar nada; os testes só rodam quando pedirem).
-  if (event === 'SessionStart') spawnDetached(['tests-scan', '--quiet'], path.dirname(linkFile))
+  if (event === 'SessionStart') background.push(['tests-scan', '--quiet'])
   // Stack sem IA: pacotes, deploy e variáveis mudam pouco; só envia quando a impressão digital muda.
-  if (event === 'SessionStart') spawnDetached(['stack-scan', '--quiet'], path.dirname(linkFile))
+  if (event === 'SessionStart') background.push(['stack-scan', '--quiet'])
+  // Impacto: lembra a conversa desta sessão e reenvia o uso das anteriores (o fim delas costuma se perder).
+  if (agent === 'claude' && CONTEXT_EVENTS.has(event) && payload.transcript_path) {
+    const root = path.dirname(linkFile)
+    const pending = readState(root).usageTranscripts ?? {}
+    if (pending[payload.session_id]?.path !== payload.transcript_path)
+      writeState(root, { usageTranscripts: rememberTranscript(pending, payload.session_id, payload.transcript_path) })
+    if (event === 'SessionStart' && transcriptsToSync(pending, payload.session_id).length)
+      background.push(['usage-sync', '--quiet', '--session', payload.session_id])
+  }
   if (event === 'Stop' && checkPending(path.dirname(linkFile), payload.session_id, 'securityChecked'))
-    spawnDetached(['security-scan', '--quiet', '--session', payload.session_id, '--edited'], path.dirname(linkFile))
+    background.push(['security-scan', '--quiet', '--session', payload.session_id, '--edited'])
   // Qualidade sem IA: completa no início da sessão; no fim da resposta, só o que o agente editou. Nunca trava.
   if (event === 'SessionStart') {
-    spawnDetached(['quality-scan', '--quiet', '--session', payload.session_id], path.dirname(linkFile))
+    background.push(['quality-scan', '--quiet', '--session', payload.session_id])
     // Commit em que a sessão começou: base do "tamanho da mudança" (uma sessão retomada mantém a base).
     const root = path.dirname(linkFile)
     const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', windowsHide: true }).stdout?.trim()
     if (head && readState(root).qualityBase?.session !== payload.session_id) writeState(root, { qualityBase: { session: payload.session_id, head } })
   }
   if (event === 'Stop' && checkPending(path.dirname(linkFile), payload.session_id, 'qualityChecked'))
-    spawnDetached(['quality-scan', '--quiet', '--session', payload.session_id, '--edited'], path.dirname(linkFile))
+    background.push(['quality-scan', '--quiet', '--session', payload.session_id, '--edited'])
+
+  if (background.length) spawnBackground(background, path.dirname(linkFile))
 
   // Erros no desenvolvimento: comando de build, tipos, testes, lint ou script que falhou (ou voltou a passar).
   if ((event === 'PostToolUse' || event === 'PostToolUseFailure') && payload.tool_name === 'Bash')
@@ -433,6 +454,56 @@ function takeGraphDirty(projectId) {
   } catch {
     return false
   }
+}
+
+// Reenvia o uso das sessões anteriores desta pasta, relido da conversa (o último fim de resposta e o fim da
+// sessão costumam se perder). O servidor só troca os números da sessão; nada entra no diário.
+async function usageSync(args) {
+  const { root, projectId, config } = linkedProject()
+  const current = flag(args, '--session') ?? null
+  const sent = []
+  for (const { sid, path: file } of transcriptsToSync(readState(root).usageTranscripts, current)) {
+    const usage = transcriptUsage(file)
+    if (usage) {
+      const res = await fetch(`${config.apiUrl}/api/hooks/event`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${config.token}` },
+        body: JSON.stringify({ agent: 'claude', projectId, payload: { hook_event_name: 'UsageSync', session_id: sid, cwd: root }, usage }),
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (!res.ok) {
+        log(`usage-sync: HTTP ${res.status} ${await res.text()}`)
+        continue
+      }
+    }
+    sent.push(sid)
+  }
+  // Relê o estado: outra sessão pode ter se lembrado de uma conversa enquanto este envio rodava.
+  const pending = { ...(readState(root).usageTranscripts ?? {}) }
+  for (const sid of sent) delete pending[sid]
+  writeState(root, { usageTranscripts: pending })
+  if (!args.includes('--quiet')) console.log(`Uso reenviado: ${sent.length} sessão(ões).`)
+}
+
+// No Windows cada processo novo leva ~1 s para nascer e o hook do início da sessão tem 10 s: com um processo por
+// checagem, o Claude Code cancelava o hook (e o "onde parou" não chegava). Um processo só abre os outros.
+function spawnBackground(jobs, cwd) {
+  if (jobs.length === 1) return spawnDetached(jobs[0], cwd)
+  spawnDetached(['background', JSON.stringify(jobs)], cwd)
+}
+
+async function runBackground(args) {
+  const jobs = JSON.parse(args[0] ?? '[]')
+  await Promise.all(
+    jobs.map(
+      (job) =>
+        new Promise((resolve) => {
+          const child = spawn(process.execPath, [fileURLToPath(import.meta.url), ...job], { stdio: 'ignore', windowsHide: true })
+          child.on('exit', resolve)
+          child.on('error', resolve)
+        }),
+    ),
+  )
 }
 
 function spawnDetached(args, cwd) {
@@ -2809,6 +2880,8 @@ async function cli() {
     else if (command === 'overview-save') await overviewSave(args)
     else if (command === 'handoff') await handoffCommand(args)
     else if (command === 'stack-scan') await stackScan(args)
+    else if (command === 'usage-sync') await usageSync(args)
+    else if (command === 'background') await runBackground(args)
     else if (command === 'stack-context') await stackContext()
     else if (command === 'stack-save') await stackSave(args)
     else if (command === 'resume') await resumeCommand()
@@ -2865,7 +2938,7 @@ async function cli() {
         'comandos: login | link | status | graph | graph-query | graph-path | graph-explain | feature | task | decision | concern | resolve | start | done | focus | board | handoff | resume | stack-scan | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | security-import | security-supabase | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
       )
   } catch (err) {
-    if (['graph', 'design-lint', 'security-scan', 'quality-scan', 'tests-scan', 'stack-scan'].includes(command) && args.includes('--quiet')) log(`${command}: ${err.message}`)
+    if (['graph', 'design-lint', 'security-scan', 'quality-scan', 'tests-scan', 'stack-scan', 'usage-sync'].includes(command) && args.includes('--quiet')) log(`${command}: ${err.message}`)
     else console.log(err.message)
     process.exit(1)
   }

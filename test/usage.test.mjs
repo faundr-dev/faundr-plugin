@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
-import { graphFooter, transcriptUsage } from '../bin/usage.mjs'
+import { graphFooter, rememberTranscript, transcriptUsage, transcriptsToSync } from '../bin/usage.mjs'
 
 const usage = (input, output, cacheRead = 0) => ({ input_tokens: input, output_tokens: output, cache_creation_input_tokens: 0, cache_read_input_tokens: cacheRead })
 const assistant = (id, u, content = [], model = 'claude-opus-5-5') => ({ type: 'assistant', message: { id, model, usage: u, content } })
@@ -95,4 +95,17 @@ test('rodapé do grafo: soma os arquivos citados que existem (até 2000 linhas c
   const out = 'NODE f() [src=src/a.ts loc=L1]\n  --> g() [calls] src/big.ts:L10\nNODE h [src=sumiu.ts]'
   assert.match(graphFooter(out, dir), /arquivos citados: 2, ~3100 tokens/)
   assert.equal(graphFooter('nada citado', dir), '')
+})
+
+test('reenvio do uso: lembra as conversas e devolve as de sessões anteriores', () => {
+  let pending = rememberTranscript(undefined, 'a', '/t/a.jsonl', 1)
+  pending = rememberTranscript(pending, 'b', '/t/b.jsonl', 2)
+  pending = rememberTranscript(pending, 'a', '/t/a.jsonl', 3)
+  assert.deepEqual(Object.keys(pending), ['a', 'b'])
+  assert.deepEqual(transcriptsToSync(pending, 'a'), [{ sid: 'b', path: '/t/b.jsonl' }])
+  assert.deepEqual(transcriptsToSync(pending, null).map((s) => s.sid), ['a', 'b'])
+  assert.deepEqual(rememberTranscript(pending, null, '/t/x.jsonl', 4), pending)
+  for (let i = 0; i < 30; i++) pending = rememberTranscript(pending, `s${i}`, `/t/${i}.jsonl`, 10 + i)
+  assert.equal(Object.keys(pending).length, 20)
+  assert.ok(pending.s29 && !pending.a)
 })
