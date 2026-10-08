@@ -51,6 +51,8 @@
 //   faundr security-review-done --areas "…"   registra o que a revisão cobriu
 //   faundr security-import <arquivo>          importa Snyk (--json), SARIF de qualquer ferramenta ou Security Advisor do Supabase
 //   faundr security-supabase [--ref <ref>]     Security Advisor do Supabase pela API (token em SUPABASE_ACCESS_TOKEN)
+//   faundr db-test [--ref <ref>] [--sql | --result <arquivo>] [--no-send]   Testa o banco como visitante e como outra pessoa (tudo desfeito)
+//   faundr launch-check [--url <site>] [--no-send]  "Pronto para lançar?": cabeçalhos, limite de pedidos, webhook de pagamento, privacidade, banco testado
 //   faundr security-report [--out arquivo.md]  relatório de segurança em Markdown (padrão: .faundr/relatorio-seguranca.md)
 //   faundr quality-scan [--files a,b]          checagem de qualidade sem IA (falha escondida, tipos, complexidade, código demais); --edited: só o editado
 //   faundr quality-show [Q-<n>]                problemas de qualidade abertos, ou os detalhes de um
@@ -106,6 +108,8 @@ import { readRules, rulesFor, rulesNote, writeRules } from './rules.mjs'
 import { installStatusline, statusFromBoard, statusLine } from './statusline.mjs'
 import { agentsBlock, removeBlock, upsertBlock } from './agents-md.mjs'
 import { editLoopNote, proofNeeded, recordCheck, recordEdit, takeLoopAlerts } from './loop.mjs'
+import { launchChecks } from './launch.mjs'
+import { anonReads, dbFindings, dbSummary, exposedTables, migrationTables, parseProbe, PROBE_SQL, probeWithToken, supabaseTarget } from './db-test.mjs'
 import { changesSince, createCheckpoint, currentTree, describeChanges, ensureSessionCheckpoint, findCheckpoint, gitRoot, listCheckpoints, restoreCheckpoint } from './checkpoints.mjs'
 
 const CONFIG_DIR = path.join(os.homedir(), '.faundr')
@@ -1678,6 +1682,82 @@ async function securitySupabase(args) {
   await sendImport(tool, findings)
 }
 
+// Teste do banco como visitante: lê com a chave pública e tenta gravar/alterar/apagar pelo SQL (sempre desfeito).
+// O SQL vai pela API de gestão (SUPABASE_ACCESS_TOKEN) ou pelo MCP do Supabase: --sql imprime, --result importa.
+async function dbTest(args) {
+  if (args.includes('--sql')) return console.log(PROBE_SQL)
+  const { root } = linkedProject()
+  const target = supabaseTarget(root)
+  const ref = flag(args, '--ref') ?? target?.ref
+  if (!target && !ref && !flag(args, '--result')) throw new Error('Não achei o Supabase deste projeto (variável *_SUPABASE_URL nos .env). Informe com --ref <ref>.')
+
+  let tables = null
+  let how = null
+  const resultFile = flag(args, '--result')
+  if (resultFile) {
+    tables = parseProbe(fs.readFileSync(path.resolve(resultFile), 'utf8'))
+    how = 'resultado do SQL importado'
+  } else if (process.env.SUPABASE_ACCESS_TOKEN && ref) {
+    tables = await probeWithToken(ref, process.env.SUPABASE_ACCESS_TOKEN)
+    how = 'API de gestão do Supabase'
+  }
+
+  let reads = []
+  if (target?.key) {
+    const names = tables?.map((t) => t.table) ?? (await exposedTables(target))
+    reads = await anonReads(target, names.length ? names : migrationTables(root))
+  }
+  if (!tables && !reads.length)
+    throw new Error(
+      'Nada para testar: falta a chave pública (*_SUPABASE_ANON_KEY ou *_SUPABASE_PUBLISHABLE_KEY) no .env e o acesso ao SQL. Para o teste completo, defina SUPABASE_ACCESS_TOKEN (https://supabase.com/dashboard/account/tokens) ou rode o SQL de "faundr db-test --sql" pelo MCP do Supabase e importe com --result <arquivo>.',
+    )
+
+  const findings = dbFindings({ reads, tables })
+  console.log(dbSummary({ target: target ?? { ref }, reads, tables, findings }))
+  if (!tables)
+    console.log(
+      '\nGravar, alterar e apagar não foram testados. Para isso: defina SUPABASE_ACCESS_TOKEN, ou rode o SQL de "faundr db-test --sql" pelo MCP do Supabase (execute_sql), salve a resposta num arquivo e rode "faundr db-test --result <arquivo>".',
+    )
+  fs.mkdirSync(path.join(root, '.faundr'), { recursive: true })
+  fs.writeFileSync(
+    path.join(root, '.faundr', 'db-test.json'),
+    JSON.stringify({ at: new Date().toISOString(), ref: ref ?? null, how, tables: new Set([...reads.map((r) => r.table), ...(tables ?? []).map((t) => t.table)]).size, full: !!tables, open: findings.length }, null, 1),
+  )
+  if (args.includes('--no-send')) return
+  // O teste completo substitui o só de leitura; o só de leitura não fecha o que o completo achou.
+  if (tables) {
+    await sendImport('faundr-banco', findings)
+    await securityApi({ action: 'report', tool: 'faundr-banco-api', scopes: [], findings: [] }).catch(() => {})
+  } else await sendImport('faundr-banco-api', findings)
+}
+
+// "Pronto para lançar?": o que só o computador confere. O painel junta com segurança, erros, testes e Stack.
+const LAUNCH_PT = { ok: 'ok', falta: 'falta', aviso: 'atenção', na: 'não se aplica', 'nao-verificado': 'não verificado' }
+const LAUNCH_NAME = {
+  'banco-testado': 'Banco testado como visitante',
+  'webhook-pagamento': 'Webhook de pagamento confere a assinatura',
+  cabecalhos: 'Cabeçalhos de segurança do site',
+  'limite-pedidos': 'Limite de pedidos nas rotas',
+  privacidade: 'Política de privacidade',
+}
+
+async function launchCheck(args) {
+  const { root, projectId, config } = linkedProject()
+  const { files } = projectFiles(root)
+  const checks = await launchChecks(root, files, flag(args, '--url') ? { url: flag(args, '--url') } : {})
+  for (const c of checks) console.log(`[${LAUNCH_PT[c.status]}] ${LAUNCH_NAME[c.key]}: ${c.detail}`)
+  if (args.includes('--no-send')) return
+  const res = await fetch(`${config.apiUrl}/api/cli/launch`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${config.token}` },
+    body: JSON.stringify({ projectId, action: 'report', checks }),
+    signal: AbortSignal.timeout(30_000),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error ?? `Erro da API (${res.status})`)
+  console.log('\nO checklist completo (com segurança, erros, testes, Stack e backup) está no painel: Visão geral → Pronto para lançar?')
+}
+
 async function securityReviewDone(args) {
   const list = (name) => flag(args, name)?.split(';').map((a) => a.trim()).filter(Boolean) ?? []
   const areas = list('--areas')
@@ -3236,6 +3316,8 @@ async function cli() {
     else if (command === 'security-import') await securityImport(args)
     else if (command === 'security-report') await securityReport(args)
     else if (command === 'security-supabase') await securitySupabase(args)
+    else if (command === 'db-test') await dbTest(args)
+    else if (command === 'launch-check') await launchCheck(args)
     else if (command === 'quality-scan') await qualityScan(args)
     else if (command === 'quality-show') await qualityShow(args)
     else if (command === 'quality-resolve') await qualityResolve(args)
@@ -3263,7 +3345,7 @@ async function cli() {
     else if (command === 'errors-uptime') await errorsUptime(args)
     else
       console.log(
-        'comandos: login | link | status | checkpoint | checkpoints | restore | graph | graph-query | graph-path | graph-explain | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | concern | resolve | start | done | focus | board | handoff | resume | stack-scan | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | security-import | security-supabase | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
+        'comandos: login | link | status | checkpoint | checkpoints | restore | graph | graph-query | graph-path | graph-explain | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | concern | resolve | start | done | focus | board | handoff | resume | stack-scan | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | security-import | security-supabase | db-test | launch-check | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
       )
   } catch (err) {
     if (['graph', 'design-lint', 'security-scan', 'quality-scan', 'tests-scan', 'stack-scan', 'usage-sync', 'checkpoints-sync'].includes(command) && args.includes('--quiet')) log(`${command}: ${err.message}`)
