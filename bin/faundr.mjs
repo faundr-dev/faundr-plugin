@@ -26,6 +26,8 @@
 //   faundr overview-save [arquivo]              valida e envia a Visão (padrão: .faundr/overview.json)
 //   faundr stack-scan [--json]                 detecta a Stack sem IA (onde roda, linguagens, serviços, variáveis) e envia
 //   faundr env-check [--hosting] [--no-send]   variáveis por ambiente: código x exemplo x .env do computador x hospedagem (só nomes)
+//   faundr handover [--out arquivo.md]          pacote de passagem: um documento para um dev assumir o projeto (padrão: .faundr/PASSAGEM.md)
+//   faundr weekly                              resumo da semana em linguagem simples (o mesmo que vai para o Slack/Discord)
 //   faundr stack-context                       contexto para o agente revisar a Stack (skill "stack")
 //   faundr stack-save [arquivo]                valida e envia a Stack revisada (padrão: .faundr/stack.json)
 //   faundr handoff "<bilhete>"                 bilhete de passagem de bastão da sessão atual
@@ -1057,6 +1059,34 @@ async function envCheck(args) {
       console.log('\n"?" no ar = não dá para saber pelos arquivos. Para conferir na hospedagem (só os nomes): faundr env-check --hosting (precisa da CLI do provedor logada).')
   }
   if (!args.includes('--no-send')) await stackApi({ action: 'env', envCheck: m })
+}
+
+// Pacote de passagem (um documento para um dev assumir o projeto) e resumo da semana (para sócios).
+async function reportApi(kind) {
+  const { projectId, config } = linkedProject()
+  const res = await fetch(`${config.apiUrl}/api/cli/report`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${config.token}` },
+    body: JSON.stringify({ projectId, kind }),
+    signal: AbortSignal.timeout(60_000),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error ?? `Erro da API (${res.status})`)
+  return data
+}
+
+async function handover(args) {
+  const { root } = linkedProject()
+  const { markdown } = await reportApi('handover')
+  const out = path.resolve(root, flag(args, '--out') ?? path.join('.faundr', 'PASSAGEM.md'))
+  fs.mkdirSync(path.dirname(out), { recursive: true })
+  fs.writeFileSync(out, markdown)
+  console.log(`Pacote de passagem salvo em ${path.relative(root, out) || out} (${markdown.split('\n').length} linhas). Também dá para baixar no painel: Atividade → Passagem para um dev.`)
+}
+
+async function weekly() {
+  const { text } = await reportApi('weekly')
+  console.log(text)
 }
 
 // Pacote de contexto que o agente lê para revisar a Stack.
@@ -3326,6 +3356,8 @@ async function cli() {
     else if (command === 'handoff') await handoffCommand(args)
     else if (command === 'stack-scan') await stackScan(args)
     else if (command === 'env-check') await envCheck(args)
+    else if (command === 'handover') await handover(args)
+    else if (command === 'weekly') await weekly(args)
     else if (command === 'usage-sync') await usageSync(args)
     else if (command === 'background') await runBackground(args)
     else if (command === 'stack-context') await stackContext()
@@ -3383,7 +3415,7 @@ async function cli() {
     else if (command === 'errors-uptime') await errorsUptime(args)
     else
       console.log(
-        'comandos: login | link | status | checkpoint | checkpoints | restore | graph | graph-query | graph-path | graph-explain | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | concern | resolve | start | done | focus | board | handoff | resume | stack-scan | env-check | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | security-import | security-supabase | db-test | launch-check | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
+        'comandos: login | link | status | checkpoint | checkpoints | restore | graph | graph-query | graph-path | graph-explain | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | concern | resolve | start | done | focus | board | handoff | handover | weekly | resume | stack-scan | env-check | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | security-import | security-supabase | db-test | launch-check | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
       )
   } catch (err) {
     if (['graph', 'design-lint', 'security-scan', 'quality-scan', 'tests-scan', 'stack-scan', 'env-check', 'usage-sync', 'checkpoints-sync'].includes(command) && args.includes('--quiet')) log(`${command}: ${err.message}`)
