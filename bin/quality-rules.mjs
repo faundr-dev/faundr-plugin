@@ -12,6 +12,7 @@ import path from 'node:path'
 import { analyzeQuality, qualityGrammar, unusedCode } from '../dist/graph.mjs'
 import { ignoreSet } from './design-rules.mjs'
 import { projectParts } from './parts.mjs'
+import { foreignKeysWithoutIndex, queriesInLoops, unboundedQueries } from './perf-rules.mjs'
 import { projectFiles } from './security.mjs'
 
 const MAX_FILE = 400_000
@@ -58,6 +59,9 @@ export const RULES = {
   'ts/erro-de-tipo': { kind: 'tool', severity: 'medium', ownLines: true },
   'eslint/erro': { kind: 'tool', severity: 'medium', ownLines: true },
   'eslint/aviso': { kind: 'tool', severity: 'low', ownLines: true },
+  'desempenho/consulta-sem-limite': { kind: 'performance', severity: 'medium' },
+  'desempenho/consulta-em-laco': { kind: 'performance', severity: 'medium' },
+  'desempenho/fk-sem-indice': { kind: 'performance', severity: 'low' },
 }
 
 // Dependências que a linguagem, o Node ou o navegador já resolvem (tabela do Ponytail, docs/platform-native.md).
@@ -89,6 +93,24 @@ const NATIVE = {
 const IMPLICIT = /^(@types\/|typescript$|tslib$|react-dom$|@tailwindcss\/|tailwindcss$|postcss|autoprefixer$|@vitejs\/|vite$|wrangler$|@cloudflare\/workers-types$|eslint|prettier|@?babel|core-js$|regenerator-runtime$|sharp$)/
 
 const TEXT = {
+  'desempenho/consulta-sem-limite': (c, n, all) => [
+    n > 1 ? `${n} listas buscadas sem limite` : `Lista buscada sem limite (${c.table})`,
+    `A consulta traz todas as linhas de ${[...new Set(all.map((x) => x.table))].join(', ')} de uma vez, sem .limit/.range (ou take no Prisma).`,
+    'Com poucos dados é rápido; quando o app cresce, a tela demora, o navegador trava e a conta do banco sobe (o Supabase devolve no máximo 1000 linhas e o resto some sem aviso).',
+    'Pagine (.range(de, até) ou .limit(n)) e mostre "carregar mais"; para contar, use count com head: true em vez de trazer as linhas.',
+  ],
+  'desempenho/consulta-em-laco': (c, n) => [
+    n > 1 ? `${n} consultas dentro de laços` : 'Consulta dentro de um laço',
+    'Um laço (for, forEach ou map) faz uma ida ao banco ou à rede a cada volta.',
+    'Com 100 itens são 100 idas e voltas: a tela ou a rota fica lenta e pode estourar o tempo limite do servidor.',
+    'Busque tudo de uma vez (.in("id", lista) ou um join) ou grave em lote (insert/upsert com a lista), e use o resultado dentro do laço.',
+  ],
+  'desempenho/fk-sem-indice': (c, n, all) => [
+    n > 1 ? `${n} chaves estrangeiras sem índice` : `Chave estrangeira sem índice (${c.table}.${c.column})`,
+    `Colunas que apontam para outra tabela, sem índice: ${all.map((x) => `${x.table}.${x.column}`).join(', ')}.`,
+    'Buscar por elas, juntar tabelas ou apagar a linha apontada faz o banco ler a tabela inteira: fica lento quando a tabela cresce.',
+    `Crie o índice numa migração nova, por exemplo: create index on public.${c.table} (${c.column});`,
+  ],
   'falha/catch-vazio': (c, n) => [
     n > 1 ? `${n} erros engolidos em silêncio (${c.py ? 'except: pass' : 'catch vazio'})` : `Erro engolido em silêncio (${c.py ? 'except: pass' : 'catch vazio'})`,
     c.py ? 'Um bloco except só tem pass: não faz nada com o erro.' : 'Um bloco catch (ou .catch) não faz nada com o erro.',
@@ -412,6 +434,7 @@ async function analyzeFiles(root, files, c, errors) {
 /** O que só dá para ver olhando o projeto inteiro: pacotes, instruções da IA, TODOs, código sem uso, duplicados. */
 function wholeProject(root, all, parsed, c, { history, errors }) {
   projectRules(root, all, c)
+  performanceRules(root, parsed.texts, c)
   if (history) {
     try {
       oldTodos(root, c)
@@ -802,4 +825,27 @@ function withBlame(root, shortcuts) {
     const author = blame.stdout?.match(/^author (.+)$/m)?.[1]
     return { ...s, author: author && author !== 'Not Committed Yet' ? author : null, days: time ? Math.max(0, Math.floor((now - time) / 86400)) : 0 }
   })
+}
+
+// Desempenho: só no código que vai para o ar (CLIs, scripts e ferramentas rodam uma vez, à mão).
+const NOT_APP = /(^|\/)(bin|scripts?|tools?|cli|plugins?|bench(marks?)?|docs?|examples?|engine)\/|\.d\.ts$/
+const MIGRATION_DIRS = ['supabase/migrations', 'migrations', 'db/migrations', 'prisma/migrations']
+
+function performanceRules(root, texts, c) {
+  for (const [rel, text] of texts) {
+    if (NOT_APP.test(rel) || TEST_PATH.test(rel)) continue
+    for (const q of unboundedQueries(rel, text)) c.add('desempenho/consulta-sem-limite', rel, q.line, { table: q.table }, text)
+    for (const q of queriesInLoops(rel, text)) c.add('desempenho/consulta-em-laco', rel, q.line, {}, text)
+  }
+  const migrations = []
+  for (const dir of MIGRATION_DIRS) {
+    let names
+    try {
+      names = fs.readdirSync(path.join(root, dir), { recursive: true }).filter((f) => String(f).endsWith('.sql')).map(String).sort()
+    } catch {
+      continue
+    }
+    for (const f of names) migrations.push({ file: `${dir}/${f.split(path.sep).join('/')}`, sql: read(root, `${dir}/${f}`) })
+  }
+  for (const fk of foreignKeysWithoutIndex(migrations)) c.add('desempenho/fk-sem-indice', fk.file, fk.line, { table: fk.table, column: fk.column })
 }

@@ -256,6 +256,39 @@ function publicEnvFinding(rel, text, index, name) {
   }
 }
 
+// Variável pública cujo VALOR é uma chave perigosa, mesmo com nome inocente (VITE_SUPABASE_KEY = service_role,
+// NEXT_PUBLIC_STRIPE_KEY = sk_live_…). O nome não denuncia; o valor sim. O valor nunca sai daqui (só mascarado).
+const PUBLIC_ENV_LINE = /^[ \t]*(?:export[ \t]+)?((?:NEXT_PUBLIC|VITE|EXPO_PUBLIC|REACT_APP|NUXT_PUBLIC|PUBLIC|GATSBY)_[A-Z0-9_]*)[ \t]*=[ \t]*(.+)$/gm
+const LOCAL_ENV_FILES = ['.env', '.env.local', '.env.development', '.env.development.local', '.env.production', '.env.production.local']
+
+export function publicSecretValueFindings(root) {
+  const out = []
+  for (const rel of LOCAL_ENV_FILES) {
+    const text = readText(root, rel)
+    if (!text) continue
+    for (const m of text.matchAll(PUBLIC_ENV_LINE)) {
+      const s = findSecrets(m[2], rel).find((x) => x.dangerous)
+      if (!s) continue
+      const p = provider(s.ruleId)
+      out.push({
+        source: 'config',
+        rule_id: 'public-env-secret-value',
+        severity: 'critical',
+        confidence: 'high',
+        title: `Chave secreta em variável pública: ${m[1]} (${p.name})`,
+        detail: `O valor de ${m[1]} em ${rel} é uma chave secreta do ${p.name}${s.ruleId === 'supabase-service-role' ? ' (service_role, que ignora todas as regras do banco)' : ''}. Pelo prefixo, ela é embutida no código que vai para o navegador.`,
+        impact: `Qualquer visitante do site lê a chave e usa o ${p.name} em seu nome${s.ruleId === 'supabase-service-role' ? ': lê, altera e apaga todo o banco' : ''}.`,
+        fix: `1. No navegador use só a chave pública (no Supabase, a anon ou publishable). 2. A chave secreta vai numa variável sem prefixo público, lida só no servidor. 3. Se o site já foi publicado com ela, troque a chave no ${p.name}${p.url ? ` (${p.url})` : ''}.`,
+        file: rel,
+        line: lineOf(text, m.index),
+        snippet: `${m[1]}=${mask(s.secret)}`,
+        fingerprint: `config|public-env-secret-value|${rel}|${m[1]}`,
+      })
+    }
+  }
+  return out
+}
+
 // Linha de .env que define a variável (NOME=valor), e não só a menciona.
 const definesVar = (text, index, name) => new RegExp(`^\\s*(export\\s+)?${name}\\s*=\\s*\\S`).test(lineText(text, index))
 
@@ -853,6 +886,60 @@ function fileRules(rel, text) {
       impact: 'Qualquer pessoa pode chamar essa rota fingindo ser o Stripe e marcar um pagamento como feito, liberar um plano ou créditos sem pagar.',
       fix: 'Leia o corpo cru (await request.text()) e use stripe.webhooks.constructEvent(corpo, request.headers.get("stripe-signature"), process.env.STRIPE_WEBHOOK_SECRET) antes de tratar o evento.',
     })
+  const verifies = /constructEvent(Async)?\s*\(/.test(text)
+  // Webhook que confere a assinatura com o corpo já transformado em objeto: a conferência falha sempre (e alguém
+  // "conserta" desligando) ou só passa porque o corpo foi remontado.
+  if (isRoute && verifies && (/constructEvent(Async)?\(\s*JSON\.stringify/.test(text) || /(req|request|c\.req)\.json\(\)/.test(text.slice(0, text.search(/constructEvent/)))))
+    out.push({
+      rule_id: 'stripe-webhook-parsed-body',
+      severity: 'medium',
+      cwe: 'CWE-345',
+      index: text.search(/constructEvent/),
+      title: 'Webhook do Stripe confere a assinatura com o corpo já convertido',
+      detail: 'A assinatura do Stripe vale para o corpo cru do pedido, byte a byte. Aqui o corpo é lido como JSON (ou remontado com JSON.stringify) antes da conferência.',
+      impact: 'A conferência falha com pagamentos de verdade (e a tentação é desligá-la) ou passa por acaso; nos dois casos o webhook fica frágil.',
+      fix: 'Leia o corpo cru (await request.text(), ou express.raw({ type: "application/json" }) só nessa rota) e passe esse texto para constructEvent; transforme em objeto depois.',
+    })
+  // Webhook de pagamento que não guarda o id do evento: o Stripe reenvia avisos e cada reenvio libera de novo.
+  if (isRoute && verifies && /checkout\.session\.completed|payment_intent\.succeeded|invoice\.(paid|payment_succeeded)/.test(text) && !/\b(event|evt)\.id\b|idempot|processed_events|webhook_events|onConflict|on conflict|upsert/i.test(text))
+    out.push({
+      rule_id: 'payment-webhook-not-idempotent',
+      severity: 'medium',
+      cwe: 'CWE-841',
+      index: text.search(/checkout\.session\.completed|payment_intent\.succeeded|invoice\./),
+      title: 'Webhook de pagamento pode liberar duas vezes',
+      detail: 'A rota trata o pagamento confirmado, mas não guarda o id do evento nem grava de forma que repetir não mude nada.',
+      impact: 'O Stripe reenvia o mesmo aviso quando a resposta demora ou falha: o cliente ganha créditos, e-mails ou pedidos em dobro.',
+      fix: 'Guarde event.id numa tabela com chave única e pare se já existir; ou grave com upsert pelo id do pagamento, para repetir não ter efeito.',
+    })
+  // Preço ou valor vindo do navegador na criação da cobrança.
+  const clientAmount = text.search(/\b(unit_amount|amount|transaction_amount)\s*:\s*(Number\(|parseInt\(|parseFloat\()?\s*(req\.|request\.|c\.req\.)?(body|data|input|params|query|payload)\??\.\w*(price|amount|valor|total|preco|preço)/i)
+  if (isRoute && clientAmount >= 0 && /stripe|mercadopago|checkout|payment|pagamento|pix/i.test(text))
+    out.push({
+      rule_id: 'payment-amount-from-client',
+      severity: 'high',
+      cwe: 'CWE-602',
+      index: clientAmount,
+      title: 'Valor da cobrança vem do navegador',
+      detail: 'A rota cria a cobrança com o preço ou valor que chegou no pedido, em vez de buscar o preço no servidor.',
+      impact: 'Qualquer pessoa pode mudar o valor no navegador e pagar R$ 0,01 por qualquer produto.',
+      fix: 'Receba só o id do produto (ou do preço do Stripe, price_…) e busque o valor no servidor ou no banco; nunca confie no valor enviado pelo navegador.',
+    })
+  // Produto liberado na página de "obrigado": quem abre o endereço sem pagar ganha o mesmo.
+  if (/(^|\/)[^/]*(success|sucesso|obrigado|thank-?you|pagamento-aprovado|payment-success)[^/]*\.[cm]?[jt]sx?$/i.test(rel) || /(success|sucesso|obrigado)\/(page|route|index)\.[jt]sx?$/i.test(rel)) {
+    const grant = text.search(/\.(update|insert|upsert)\(\s*\{[^}]{0,300}\b(plan|plano|paid|pago|is_pro|premium|credits|creditos|créditos|subscription|assinatura|status\s*:\s*['"](active|ativo|paid|pago))/i)
+    if (grant >= 0 && !/sessions\.retrieve|payment_status|paymentIntents\.retrieve|verif/i.test(text))
+      out.push({
+        rule_id: 'payment-fulfilled-on-redirect',
+        severity: 'high',
+        cwe: 'CWE-840',
+        index: grant,
+        title: 'Produto liberado na página de "pagamento aprovado"',
+        detail: 'A página para onde o cliente volta depois do pagamento grava o plano, o pagamento ou os créditos, sem confirmar com o serviço de pagamento.',
+        impact: 'Quem abrir esse endereço direto, sem pagar, ganha o produto. O pagamento também pode falhar depois de a pessoa ver essa página.',
+        fix: 'Libere o produto só no webhook do pagamento (com a assinatura conferida). A página de obrigado só mostra a mensagem, ou confere o status com stripe.checkout.sessions.retrieve(id) antes.',
+      })
+  }
   // Chave de admin do Supabase num arquivo que roda no navegador.
   if (/^\s*['"]use client['"]/m.test(text) && /SERVICE_ROLE|sb_secret_|serviceRole/i.test(text))
     out.push({
@@ -946,7 +1033,7 @@ function scanConfig(root, files) {
   if (routes.length) {
     const serverCode = code.filter((f) => SERVER_ROUTE.test(f) || /(^|\/)(server|middleware|lib\/server|src\/server)(\/|\.)/i.test(f))
     const hasLimit =
-      Object.keys(pkg.dependencies ?? {}).some((d) => RATE_LIMIT_DEPS.test(d)) ||
+      Object.keys(deps).some((d) => RATE_LIMIT_DEPS.test(d)) ||
       serverCode.some((f) => RATE_LIMIT_CODE.test(read(f))) ||
       files.filter((f) => /wrangler\.(jsonc?|toml)$/.test(f)).some((f) => /ratelimit/i.test(read(f)))
     if (!hasLimit)
@@ -1254,6 +1341,7 @@ export async function scanProject(root, { only = null, deps = true, history = fa
     findings.push(...scanConfig(root, all))
     // O .env do computador apontando para o banco da nuvem (o dos usuários, muitas vezes).
     findings.push(...remoteDatabaseFindings(root))
+    findings.push(...publicSecretValueFindings(root))
     scopes.push({ source: 'config', files: null })
   }
 

@@ -25,6 +25,7 @@
 //   faundr overview-context                    contexto para o agente escrever a Visão do projeto
 //   faundr overview-save [arquivo]              valida e envia a Visão (padrão: .faundr/overview.json)
 //   faundr stack-scan [--json]                 detecta a Stack sem IA (onde roda, linguagens, serviços, variáveis) e envia
+//   faundr env-check [--hosting] [--no-send]   variáveis por ambiente: código x exemplo x .env do computador x hospedagem (só nomes)
 //   faundr stack-context                       contexto para o agente revisar a Stack (skill "stack")
 //   faundr stack-save [arquivo]                valida e envia a Stack revisada (padrão: .faundr/stack.json)
 //   faundr handoff "<bilhete>"                 bilhete de passagem de bastão da sessão atual
@@ -109,6 +110,7 @@ import { installStatusline, statusFromBoard, statusLine } from './statusline.mjs
 import { agentsBlock, removeBlock, upsertBlock } from './agents-md.mjs'
 import { editLoopNote, proofNeeded, recordCheck, recordEdit, takeLoopAlerts } from './loop.mjs'
 import { launchChecks } from './launch.mjs'
+import { envMatrix, hostingFromCli, hostingProvider } from './env-matrix.mjs'
 import { anonReads, dbFindings, dbSummary, exposedTables, migrationTables, parseProbe, PROBE_SQL, probeWithToken, supabaseTarget } from './db-test.mjs'
 import { changesSince, createCheckpoint, currentTree, describeChanges, ensureSessionCheckpoint, findCheckpoint, gitRoot, listCheckpoints, restoreCheckpoint } from './checkpoints.mjs'
 
@@ -450,6 +452,7 @@ async function hook(agent) {
   if (startJobs && readState(path.dirname(linkFile)).agentsMd?.length) background.push(['agents-md', '--sync', '--quiet'])
   // Stack sem IA: pacotes, deploy e variáveis mudam pouco; só envia quando a impressão digital muda.
   if (startJobs) background.push(['stack-scan', '--quiet'])
+  if (startJobs) background.push(['env-check', '--quiet'])
   // Pontos de volta no painel: no início (o que mudou desde o último) e no fim das respostas que mudaram arquivos.
   if (startJobs || (event === 'Stop' && fs.existsSync(editedFile(payload.session_id)))) background.push(['checkpoints-sync', '--quiet'])
   // Impacto: lembra a conversa desta sessão e reenvia o uso das anteriores (o fim delas costuma se perder).
@@ -1021,6 +1024,39 @@ async function stackScan(args) {
   console.log(`- Linguagens: ${stack.languages.slice(0, 5).map((l) => `${l.name} ${l.percent}%`).join(', ') || '-'}`)
   console.log(`- ${stack.tech.length} tecnologias, ${stack.services.length} serviços, ${stack.env.length} variáveis de ambiente`)
   console.log('Para a explicação em português simples (e o que os arquivos não dizem), rode /faundr:stack.')
+}
+
+// Variáveis por ambiente: código x exemplo x .env do computador x hospedagem (só nomes).
+const ENV_KIND_PT = { 'falta-no-ar': 'quebra no ar', 'falta-no-computador': 'falta no computador', 'fora-do-exemplo': 'fora do exemplo', sobrando: 'sobrando' }
+const yesNo = (v) => (v === true ? 'sim' : v === false ? 'NÃO' : '?')
+
+async function envCheck(args) {
+  const { root } = linkedProject()
+  const { files } = projectFiles(root)
+  if (args.includes('--hosting')) {
+    const provider = hostingProvider(files)
+    if (!provider) console.log('Não reconheci a hospedagem (Cloudflare, Vercel ou Netlify) para listar as variáveis de lá.')
+    else {
+      const r = hostingFromCli(root, provider)
+      if (r.error) console.log(`Não consegui listar as variáveis na hospedagem (${provider}): ${r.error}. Faça login na CLI do provedor e rode de novo.`)
+      else {
+        fs.mkdirSync(path.join(root, '.faundr'), { recursive: true })
+        fs.writeFileSync(path.join(root, '.faundr', 'env-hosting.json'), JSON.stringify({ provider, at: new Date().toISOString(), names: r.names }, null, 1))
+        console.log(`Hospedagem (${provider}): ${r.names.length} variável(is) secreta(s) listadas (só os nomes).`)
+      }
+    }
+  }
+  const m = envMatrix(root, files)
+  if (!args.includes('--quiet')) {
+    console.log(`Variáveis (${m.rows.length}) — código · exemplo · computador · no ar${m.hosting ? ` (${m.hosting.provider})` : ''}:`)
+    for (const r of m.rows)
+      console.log(`  ${r.name}${r.scope === 'publica' ? ' [navegador]' : ''}: ${r.code.length ? 'sim' : 'não'} · ${yesNo(r.example)} · ${yesNo(r.local)} · ${yesNo(r.hosting)}${r.optional ? ' (opcional)' : ''}`)
+    if (!m.problems.length) console.log('Nenhum problema.')
+    for (const p of m.problems) console.log(`  [${ENV_KIND_PT[p.kind]}] ${p.text}`)
+    if (!m.hosting)
+      console.log('\n"?" no ar = não dá para saber pelos arquivos. Para conferir na hospedagem (só os nomes): faundr env-check --hosting (precisa da CLI do provedor logada).')
+  }
+  if (!args.includes('--no-send')) await stackApi({ action: 'env', envCheck: m })
 }
 
 // Pacote de contexto que o agente lê para revisar a Stack.
@@ -1835,6 +1871,7 @@ const QUALITY_KIND_PT = {
   instructions: 'instruções da IA',
   tool: 'ferramenta do projeto',
   review: 'revisão com IA',
+  performance: 'desempenho',
 }
 const QUALITY_ORDER = ['high', 'medium', 'low']
 const qualityLine = (f) =>
@@ -3288,6 +3325,7 @@ async function cli() {
     else if (command === 'overview-save') await overviewSave(args)
     else if (command === 'handoff') await handoffCommand(args)
     else if (command === 'stack-scan') await stackScan(args)
+    else if (command === 'env-check') await envCheck(args)
     else if (command === 'usage-sync') await usageSync(args)
     else if (command === 'background') await runBackground(args)
     else if (command === 'stack-context') await stackContext()
@@ -3345,10 +3383,10 @@ async function cli() {
     else if (command === 'errors-uptime') await errorsUptime(args)
     else
       console.log(
-        'comandos: login | link | status | checkpoint | checkpoints | restore | graph | graph-query | graph-path | graph-explain | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | concern | resolve | start | done | focus | board | handoff | resume | stack-scan | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | security-import | security-supabase | db-test | launch-check | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
+        'comandos: login | link | status | checkpoint | checkpoints | restore | graph | graph-query | graph-path | graph-explain | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | concern | resolve | start | done | focus | board | handoff | resume | stack-scan | env-check | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | security-import | security-supabase | db-test | launch-check | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
       )
   } catch (err) {
-    if (['graph', 'design-lint', 'security-scan', 'quality-scan', 'tests-scan', 'stack-scan', 'usage-sync', 'checkpoints-sync'].includes(command) && args.includes('--quiet')) log(`${command}: ${err.message}`)
+    if (['graph', 'design-lint', 'security-scan', 'quality-scan', 'tests-scan', 'stack-scan', 'env-check', 'usage-sync', 'checkpoints-sync'].includes(command) && args.includes('--quiet')) log(`${command}: ${err.message}`)
     else console.log(err.message)
     process.exit(1)
   }
