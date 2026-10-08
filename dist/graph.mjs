@@ -3926,26 +3926,26 @@ var require_ignore = __commonJS({
       const index = body2.indexOf(SLASH);
       return index < 0 || index === body2.length - 1;
     };
-    var basenameOf = (path15) => {
-      const end = path15.length - 1;
-      const index = path15.lastIndexOf(
+    var basenameOf = (path17) => {
+      const end = path17.length - 1;
+      const index = path17.lastIndexOf(
         SLASH,
-        path15[end] === SLASH ? end - 1 : end
+        path17[end] === SLASH ? end - 1 : end
       );
-      return index < 0 ? path15 : path15.slice(index + 1);
+      return index < 0 ? path17 : path17.slice(index + 1);
     };
-    var parentOf = (path15) => {
-      if (path15.charCodeAt(0) === SLASH_CODE || path15.indexOf(DOUBLE_SLASH) >= 0) {
-        const slices = path15.split(SLASH).filter(Boolean);
+    var parentOf = (path17) => {
+      if (path17.charCodeAt(0) === SLASH_CODE || path17.indexOf(DOUBLE_SLASH) >= 0) {
+        const slices = path17.split(SLASH).filter(Boolean);
         slices.pop();
         return slices.length ? slices.join(SLASH) + SLASH : EMPTY;
       }
-      const end = path15.length - 1;
-      const cut = path15.lastIndexOf(
+      const end = path17.length - 1;
+      const cut = path17.lastIndexOf(
         SLASH,
-        path15.charCodeAt(end) === SLASH_CODE ? end - 1 : end
+        path17.charCodeAt(end) === SLASH_CODE ? end - 1 : end
       );
-      return cut < 0 ? EMPTY : path15.slice(0, cut + 1);
+      return cut < 0 ? EMPTY : path17.slice(0, cut + 1);
     };
     var isString = (subject) => typeof subject === "string";
     var checkPattern = (pattern) => pattern && isString(pattern) && !REGEX_TEST_BLANK_LINE.test(pattern) && !REGEX_INVALID_TRAILING_BACKSLASH.test(pattern) && pattern.indexOf("#") !== 0;
@@ -4054,20 +4054,20 @@ var require_ignore = __commonJS({
       //   path matching.
       // - check `string` either `MODE_IGNORE` or `MODE_CHECK_IGNORE`
       // @returns {TestResult} true if a file is ignored
-      test(path15, checkUnignored, mode) {
+      test(path17, checkUnignored, mode) {
         let ignored2 = false;
         let unignored = false;
         let matchedRule;
         const rules = this._rules;
         const { length } = rules;
         const shortcut = this._basenameCount * 2 >= length;
-        const basename = shortcut ? basenameOf(path15) : path15;
+        const basename = shortcut ? basenameOf(path17) : path17;
         for (let index = 0; index < length; index++) {
           const rule = rules[index];
           const { negative } = rule;
           const skip = unignored === negative && ignored2 !== unignored || negative && !ignored2 && !unignored && !checkUnignored;
           if (!skip && rule[mode].test(
-            shortcut && rule._basenameOnly ? basename : path15
+            shortcut && rule._basenameOnly ? basename : path17
           )) {
             ignored2 = !negative;
             unignored = negative;
@@ -4087,17 +4087,17 @@ var require_ignore = __commonJS({
     var throwError = (message, Ctor) => {
       throw new Ctor(message);
     };
-    var checkPath = (path15, originalPath, doThrow) => {
-      if (!isString(path15)) {
+    var checkPath = (path17, originalPath, doThrow) => {
+      if (!isString(path17)) {
         return doThrow(
           `path must be a string, but got \`${originalPath}\``,
           TypeError
         );
       }
-      if (!path15) {
+      if (!path17) {
         return doThrow(`path must not be empty`, TypeError);
       }
-      if (checkPath.isNotRelative(path15)) {
+      if (checkPath.isNotRelative(path17)) {
         const r = "`path.relative()`d";
         return doThrow(
           `path should be a ${r} string, but got "${originalPath}"`,
@@ -4106,25 +4106,25 @@ var require_ignore = __commonJS({
       }
       return true;
     };
-    var isNotRelative = (path15) => {
-      const first = path15.charCodeAt(0);
+    var isNotRelative = (path17) => {
+      const first = path17.charCodeAt(0);
       if (first === SLASH_CODE) {
         return true;
       }
       if (first !== DOT_CODE) {
         return false;
       }
-      if (path15.length === 1) {
+      if (path17.length === 1) {
         return true;
       }
-      const second = path15.charCodeAt(1);
+      const second = path17.charCodeAt(1);
       if (second === SLASH_CODE) {
         return true;
       }
       if (second !== DOT_CODE) {
         return false;
       }
-      return path15.length === 2 || path15.charCodeAt(2) === SLASH_CODE;
+      return path17.length === 2 || path17.charCodeAt(2) === SLASH_CODE;
     };
     checkPath.isNotRelative = isNotRelative;
     checkPath.convert = (p) => p;
@@ -4155,56 +4155,56 @@ var require_ignore = __commonJS({
       }
       // @returns {TestResult}
       _test(originalPath, cache, checkUnignored) {
-        const path15 = originalPath && checkPath.convert(originalPath);
+        const path17 = originalPath && checkPath.convert(originalPath);
         checkPath(
-          path15,
+          path17,
           originalPath,
           this._strictPathCheck ? throwError : RETURN_FALSE
         );
-        return this._t(path15, cache, checkUnignored);
+        return this._t(path17, cache, checkUnignored);
       }
-      checkIgnore(path15) {
-        if (path15.charCodeAt(path15.length - 1) !== SLASH_CODE) {
-          return this.test(path15);
+      checkIgnore(path17) {
+        if (path17.charCodeAt(path17.length - 1) !== SLASH_CODE) {
+          return this.test(path17);
         }
-        const parentPath = parentOf(path15);
+        const parentPath = parentOf(path17);
         if (parentPath) {
           const parent = this._t(parentPath, this._testCache, true);
           if (parent.ignored) {
             return parent;
           }
         }
-        return this._rules.test(path15, false, MODE_CHECK_IGNORE);
+        return this._rules.test(path17, false, MODE_CHECK_IGNORE);
       }
-      _t(path15, cache, checkUnignored) {
-        if (path15 in cache) {
-          return cache[path15];
+      _t(path17, cache, checkUnignored) {
+        if (path17 in cache) {
+          return cache[path17];
         }
-        const parentPath = parentOf(path15);
+        const parentPath = parentOf(path17);
         const parent = parentPath ? this._t(parentPath, cache, checkUnignored) : UNDEFINED;
-        return cache[path15] = parent && parent.ignored ? parent : this._rules.test(path15, checkUnignored, MODE_IGNORE);
+        return cache[path17] = parent && parent.ignored ? parent : this._rules.test(path17, checkUnignored, MODE_IGNORE);
       }
-      ignores(path15) {
-        return this._test(path15, this._ignoreCache, false).ignored;
+      ignores(path17) {
+        return this._test(path17, this._ignoreCache, false).ignored;
       }
       createFilter() {
-        return (path15) => !this.ignores(path15);
+        return (path17) => !this.ignores(path17);
       }
       filter(paths) {
         return makeArray(paths).filter(this.createFilter());
       }
       // @returns {TestResult}
-      test(path15) {
-        return this._test(path15, this._testCache, true);
+      test(path17) {
+        return this._test(path17, this._testCache, true);
       }
     };
     var factory = (options) => new Ignore(options);
-    var isPathValid = (path15) => checkPath(path15 && checkPath.convert(path15), path15, RETURN_FALSE);
+    var isPathValid = (path17) => checkPath(path17 && checkPath.convert(path17), path17, RETURN_FALSE);
     var setupWindows = () => {
       const makePosix = (str) => /^\\\\\?\\/.test(str) || /["<>|\u0000-\u001F]+/u.test(str) ? str : str.replace(/\\/g, "/");
       checkPath.convert = makePosix;
       const REGEX_TEST_WINDOWS_PATH_ABSOLUTE = /^[a-z]:\//i;
-      checkPath.isNotRelative = (path15) => REGEX_TEST_WINDOWS_PATH_ABSOLUTE.test(path15) || isNotRelative(path15);
+      checkPath.isNotRelative = (path17) => REGEX_TEST_WINDOWS_PATH_ABSOLUTE.test(path17) || isNotRelative(path17);
     };
     if (
       // Detect `process` so that it can run in browsers.
@@ -4220,13 +4220,13 @@ var require_ignore = __commonJS({
 });
 
 // engine/src/cli.ts
-import path14 from "node:path";
+import path16 from "node:path";
 import { pathToFileURL } from "node:url";
 
 // engine/src/pipeline.ts
 import { execFileSync } from "node:child_process";
-import fs6 from "node:fs";
-import path13 from "node:path";
+import fs7 from "node:fs";
+import path14 from "node:path";
 
 // engine/src/analyze.ts
 import path4 from "node:path";
@@ -5934,11 +5934,11 @@ function createNeighborArrayForNode(type, direction, nodeData) {
     if (type === "undirected") return Object.keys(nodeData.undirected);
     if (typeof direction === "string") return Object.keys(nodeData[direction]);
   }
-  const neighbors = [];
+  const neighbors2 = [];
   forEachNeighbor(false, type, direction, nodeData, function(key) {
-    neighbors.push(key);
+    neighbors2.push(key);
   });
-  return neighbors;
+  return neighbors2;
 }
 function createDedupedObjectIterator(visited, nodeData, object) {
   const keys = Object.keys(object);
@@ -9493,6 +9493,12 @@ var JS_CONST_VALUES = /* @__PURE__ */ new Set(["object", "array", "as_expression
 var RATIONALE = /^(?:\/\/|#)\s*(NOTE|IMPORTANT|HACK|WHY|RATIONALE|TODO|FIXME)\s*:\s*(.+)$/;
 var KEEP_PARENT = /* @__PURE__ */ new Set(["decorated_definition", "ERROR", "enum_body_declarations"]);
 var line = (n) => n.startPosition.row + 1;
+function span(n, body2) {
+  const text = n.text;
+  const at = body2 ? text.indexOf(body2.text) : -1;
+  const head = (at > 0 ? text.slice(0, at) : text.split("\n")[0]).replace(/\s*=>\s*$/, "").replace(/[\s{:]+$/, "");
+  return { end_location: `L${n.endPosition.row + 1}`, signature: shorten(head, 200) };
+}
 function shorten(text, width = 80) {
   const flat = text.replace(/\s+/g, " ").trim();
   if (flat.length <= width) return flat;
@@ -9502,7 +9508,7 @@ function shorten(text, width = 80) {
 async function extractCode(rel, source, cfg, resolver) {
   const tree = await parse(cfg.grammar, source);
   const root = tree.rootNode;
-  const stem = fileStem(rel);
+  const stem2 = fileStem(rel);
   const fileNid = fileNodeId(rel);
   const nodes = [];
   const edges = [];
@@ -9537,7 +9543,7 @@ async function extractCode(rel, source, cfg, resolver) {
     });
   };
   const ensureNamed = (name2) => {
-    const local2 = makeId(stem, name2);
+    const local2 = makeId(stem2, name2);
     if (seen.has(local2)) return local2;
     const id = makeId(name2);
     if (id && !seen.has(id)) {
@@ -9552,7 +9558,7 @@ async function extractCode(rel, source, cfg, resolver) {
     trackedBodies.add(body2.id);
   };
   addNode2(fileNid, path8.posix.basename(rel), 1);
-  function nameOf(n) {
+  function nameOf2(n) {
     const field = cfg.nameFieldByType?.[n.type] ?? cfg.nameField ?? "name";
     let nameNode = n.childForFieldName(field);
     if (!nameNode && cfg.nameFallback) nameNode = n.namedChildren.find((c) => cfg.nameFallback.includes(c.type)) ?? null;
@@ -9680,15 +9686,15 @@ async function extractCode(rel, source, cfg, resolver) {
         const value = d.childForFieldName("value");
         if (nameNode?.type !== "identifier" || !value) continue;
         const name2 = nameNode.text;
-        const nid = makeId(stem, name2);
+        const nid = makeId(stem2, name2);
         const v = unwrap2(value);
         if (JS_FUNCTION_VALUES.has(v.type)) {
-          addNode2(nid, `${name2}()`, d);
+          addNode2(nid, `${name2}()`, d, span(d, v.childForFieldName("body")));
           addEdge2(fileNid, nid, "contains", d);
           callable.add(nid);
           track(nid, v.childForFieldName("body"));
         } else if (JS_CONST_VALUES.has(v.type) || exported) {
-          addNode2(nid, name2, d);
+          addNode2(nid, name2, d, span(d, null));
           addEdge2(fileNid, nid, "contains", d);
           track(nid, v);
         }
@@ -9704,7 +9710,7 @@ async function extractCode(rel, source, cfg, resolver) {
       const name2 = (n.childForFieldName("name") ?? n.childForFieldName("property"))?.text;
       if (value && name2 && JS_FUNCTION_VALUES.has(unwrap2(value).type)) {
         const nid = makeId(parentClass, name2);
-        addNode2(nid, `.${name2}()`, n);
+        addNode2(nid, `.${name2}()`, n, span(n, unwrap2(value).childForFieldName("body")));
         addEdge2(parentClass, nid, "method", n);
         callable.add(nid);
         track(nid, unwrap2(value).childForFieldName("body"));
@@ -9739,11 +9745,11 @@ async function extractCode(rel, source, cfg, resolver) {
       }
     }
     if (cfg.classTypes.has(t)) {
-      const name2 = nameOf(n);
+      const name2 = nameOf2(n);
       if (!name2) return;
-      const nid = makeId(stem, name2);
+      const nid = makeId(stem2, name2);
       const isNew = !seen.has(nid);
-      addNode2(nid, name2, n);
+      addNode2(nid, name2, n, span(n, bodyOf(n)));
       if (isNew) addEdge2(parentClass ?? fileNid, nid, "contains", n);
       callable.add(nid);
       callableClass.add(nid);
@@ -9760,22 +9766,22 @@ async function extractCode(rel, source, cfg, resolver) {
       return;
     }
     if (cfg.functionTypes.has(t)) {
-      const name2 = nameOf(n);
+      const name2 = nameOf2(n);
       if (!name2) return;
       let owner = parentClass;
       if (cfg.name === "go" && t === "method_declaration") {
         const recv = n.childForFieldName("receiver")?.descendantsOfType("type_identifier")[0]?.text;
-        if (recv) owner = makeId(stem, recv);
+        if (recv) owner = makeId(stem2, recv);
       }
       if (owner) {
         const nid = makeId(owner, name2);
-        addNode2(nid, `.${name2}()`, n);
+        addNode2(nid, `.${name2}()`, n, span(n, bodyOf(n)));
         addEdge2(seen.has(owner) ? owner : fileNid, nid, seen.has(owner) ? "method" : "contains", n);
         callable.add(nid);
         track(nid, bodyOf(n));
       } else {
-        const nid = makeId(stem, name2);
-        addNode2(nid, `${name2}()`, n);
+        const nid = makeId(stem2, name2);
+        addNode2(nid, `${name2}()`, n, span(n, bodyOf(n)));
         addEdge2(fileNid, nid, "contains", n);
         callable.add(nid);
         track(nid, bodyOf(n));
@@ -9790,7 +9796,7 @@ async function extractCode(rel, source, cfg, resolver) {
   for (const c of root.descendantsOfType("comment")) {
     const m = c.text.trim().match(RATIONALE);
     if (!m) continue;
-    const rid = makeId(stem, "rationale", String(line(c)));
+    const rid = makeId(stem2, "rationale", String(line(c)));
     addNode2(rid, shorten(`${m[1]}: ${m[2]}`), c, { file_type: "rationale" });
     addEdge2(rid, fileNid, "rationale_for", c);
   }
@@ -9822,8 +9828,8 @@ async function extractCode(rel, source, cfg, resolver) {
         return { name: name2, member: true, receiver: obj.childForFieldName("property")?.text, thisField: true };
       }
       if (fn3.type === "scoped_identifier" || fn3.type === "qualified_identifier") {
-        const path15 = fn3.childForFieldName("path") ?? fn3.childForFieldName("scope");
-        return { name: name2, member: true, receiver: path15?.text };
+        const path17 = fn3.childForFieldName("path") ?? fn3.childForFieldName("scope");
+        return { name: name2, member: true, receiver: path17?.text };
       }
       return { name: name2, member: true, receiver: obj?.type === "identifier" || obj?.type === "this" || obj?.type === "self" ? obj.text : obj?.text.slice(0, 40) };
     }
@@ -9963,7 +9969,7 @@ function resolveLink(raw, rel, root, wiki, allDocs) {
   return null;
 }
 function extractMarkdown(rel, source, root, allDocs) {
-  const stem = fileStem(rel);
+  const stem2 = fileStem(rel);
   const fileNid = fileNodeId(rel);
   const nodes = [
     { id: fileNid, label: path9.posix.basename(rel), file_type: "document", source_file: rel, source_location: "L1", node_kind: "page" }
@@ -10001,9 +10007,9 @@ function extractMarkdown(rel, source, root, allDocs) {
     if (h) {
       const level = h[1].length;
       const title = h[2].trim();
-      let id = makeId(stem, title);
+      let id = makeId(stem2, title);
       if (!normalizeId(title)) return;
-      if (seen.has(id)) id = makeId(stem, title, String(ln));
+      if (seen.has(id)) id = makeId(stem2, title, String(ln));
       seen.add(id);
       nodes.push({ id, label: title, file_type: "document", source_file: rel, source_location: `L${ln}`, node_kind: "heading" });
       while (stack.length && stack[stack.length - 1].level >= level) stack.pop();
@@ -10067,7 +10073,7 @@ function extractJson(rel, source) {
   if (!data || typeof data !== "object" || Array.isArray(data)) return null;
   const isConfig = CONFIG_NAMES.has(name2) || /tsconfig.*\.json$/.test(name2) || Object.keys(data).some((k) => CONFIG_KEYS.has(k));
   if (!isConfig) return null;
-  const stem = fileStem(rel);
+  const stem2 = fileStem(rel);
   const fileNid = fileNodeId(rel);
   const nodes = [{ id: fileNid, label: name2, file_type: "code", source_file: rel, source_location: "L1" }];
   const edges = [];
@@ -10093,7 +10099,7 @@ function extractJson(rel, source) {
         edges.push(edge(fileNid, addRef(value), "extends", rel, 1, { context: "import" }));
         continue;
       }
-      const id = makeId(stem, parentKey ?? void 0, key);
+      const id = makeId(stem2, parentKey ?? void 0, key);
       if (!normalizeId(key) || seen.has(id)) continue;
       seen.add(id);
       nodes.push({ id, label: key, file_type: "code", source_file: rel, source_location: "L1" });
@@ -10243,8 +10249,60 @@ function collectFiles(root) {
   return out2;
 }
 
-// engine/src/report.ts
+// engine/src/cache.ts
+import crypto from "node:crypto";
+import fs6 from "node:fs";
 import path11 from "node:path";
+var EXTRACT_VERSION = 2;
+var cacheFile = (root) => path11.join(root, ".faundr", "extract-cache.json");
+var printsFile = (root) => path11.join(root, ".faundr", "fingerprints.json");
+var hashText = (text) => crypto.createHash("sha1").update(text).digest("hex");
+var fileSetKey = (files) => hashText(files.map((f) => f.rel).sort().join("\n"));
+function loadCache(root, files) {
+  try {
+    const cache = JSON.parse(fs6.readFileSync(cacheFile(root), "utf8"));
+    if (cache.version === EXTRACT_VERSION && cache.fileSet === fileSetKey(files)) return cache.files;
+  } catch {
+  }
+  return {};
+}
+function saveCache(root, files, entries) {
+  try {
+    fs6.mkdirSync(path11.dirname(cacheFile(root)), { recursive: true });
+    const cache = { version: EXTRACT_VERSION, fileSet: fileSetKey(files), files: entries };
+    fs6.writeFileSync(cacheFile(root), JSON.stringify(cache));
+    const prints = { version: EXTRACT_VERSION, fileSet: cache.fileSet, files: Object.fromEntries(Object.entries(entries).map(([r, e]) => [r, [e.size, e.mtimeMs]])) };
+    fs6.writeFileSync(printsFile(root), JSON.stringify(prints));
+  } catch {
+  }
+}
+function staleFiles(root, files) {
+  let cache = null;
+  try {
+    cache = JSON.parse(fs6.readFileSync(printsFile(root), "utf8"));
+  } catch {
+  }
+  if (!cache || cache.version !== EXTRACT_VERSION) return { stale: files.map((f) => f.rel), setChanged: true };
+  if (cache.fileSet !== fileSetKey(files)) {
+    const before = new Set(Object.keys(cache.files));
+    const now = new Set(files.map((f) => f.rel));
+    return { stale: [...[...now].filter((r) => !before.has(r)), ...[...before].filter((r) => !now.has(r))], setChanged: true };
+  }
+  const stale = [];
+  for (const f of files) {
+    const old = cache.files[f.rel];
+    try {
+      const st = fs6.statSync(f.abs);
+      if (!old || old[0] !== st.size || old[1] !== st.mtimeMs) stale.push(f.rel);
+    } catch {
+      stale.push(f.rel);
+    }
+  }
+  return { stale, setChanged: false };
+}
+
+// engine/src/report.ts
+import path12 from "node:path";
 var MIN_COMMUNITY = 3;
 function renderReport(opts) {
   const { g, communities, names } = opts;
@@ -10263,7 +10321,7 @@ function renderReport(opts) {
   const total = g.size || 1;
   const pct = (n) => Math.round(n / total * 100);
   const thin = [...communities.values()].filter((m) => real(m).length < MIN_COMMUNITY).length;
-  L.push(`# Relat\xF3rio do grafo - ${path11.basename(opts.root)}  (${today})`, "");
+  L.push(`# Relat\xF3rio do grafo - ${path12.basename(opts.root)}  (${today})`, "");
   L.push("## Corpus", `- ${opts.totalFiles} arquivos \xB7 ~${opts.totalWords.toLocaleString("pt-BR")} palavras`, "");
   L.push(
     "## Resumo",
@@ -10321,11 +10379,11 @@ function renderReport(opts) {
 }
 
 // engine/src/roles.ts
-import path12 from "node:path";
+import path13 from "node:path";
 var dir = (re) => new RegExp(`(^|/)(${re})/`, "i");
 function roleForFile(rel) {
-  const ext = path12.posix.extname(rel).toLowerCase();
-  const base = path12.posix.basename(rel).toLowerCase();
+  const ext = path13.posix.extname(rel).toLowerCase();
+  const base = path13.posix.basename(rel).toLowerCase();
   if ([".md", ".mdx", ".qmd"].includes(ext)) return "document";
   if (/\.(test|spec)\.[^.]+$/.test(base) || dir("tests?|__tests__|e2e|cypress|playwright").test(rel)) return "test";
   if (ext === ".json" || /^(vite|vitest|tailwind|postcss|eslint|prettier|next|nuxt|astro|svelte|webpack|rollup|babel|jest|drizzle|playwright)\.config\./.test(
@@ -10358,10 +10416,10 @@ function routePath(rel) {
   return `/${parts2.join("/")}`;
 }
 function displayLabel(rel, role, docTitle) {
-  const base = path12.posix.basename(rel);
+  const base = path13.posix.basename(rel);
   if (role === "document") {
     if (docTitle) return docTitle;
-    const parent = path12.posix.basename(path12.posix.dirname(rel));
+    const parent = path13.posix.basename(path13.posix.dirname(rel));
     if (/^skill.md$/i.test(base) && parent) return `Comando ${humanize(parent)}`;
     if (/^(readme|index).mdx?$/i.test(base) && parent && parent !== ".") return humanize(parent);
     return humanize(base);
@@ -10384,35 +10442,60 @@ function gitCommit(root) {
     return void 0;
   }
 }
-async function buildProjectGraph(root) {
-  const started = Date.now();
-  const files = collectFiles(root);
+async function extractAll(root, files) {
   const resolver = new PathResolver(root);
   const docs = files.filter((f) => f.kind === "markdown").map((f) => f.rel);
-  const extractions = /* @__PURE__ */ new Map();
+  const cached = loadCache(root, files);
+  const entries = {};
+  const changed = [];
   let words = 0;
   for (const f of files) {
-    let source;
+    let st;
     try {
-      source = fs6.readFileSync(f.abs, "utf8");
+      st = fs7.statSync(f.abs);
     } catch {
       continue;
     }
-    words += source.split(/\s+/).length;
+    const old = cached[f.rel];
+    if (old && old.size === st.size && old.mtimeMs === st.mtimeMs) {
+      entries[f.rel] = old;
+      words += old.words;
+      continue;
+    }
+    let source;
     try {
-      if (f.kind === "markdown") extractions.set(f.rel, extractMarkdown(f.rel, source, root, docs));
-      else if (f.kind === "json") {
-        const ex = extractJson(f.rel, source);
-        if (ex) extractions.set(f.rel, ex);
-      } else {
-        const lang = languageForFile(f.rel);
-        extractions.set(f.rel, await extractCode(f.rel, source, lang, resolver));
-      }
+      source = fs7.readFileSync(f.abs, "utf8");
+    } catch {
+      continue;
+    }
+    const hash = hashText(source);
+    if (old && old.hash === hash) {
+      entries[f.rel] = { ...old, size: st.size, mtimeMs: st.mtimeMs };
+      words += old.words;
+      continue;
+    }
+    const entry = { size: st.size, mtimeMs: st.mtimeMs, hash, words: source.split(/\s+/).length, extraction: null };
+    words += entry.words;
+    changed.push(f.rel);
+    try {
+      if (f.kind === "markdown") entry.extraction = extractMarkdown(f.rel, source, root, docs);
+      else if (f.kind === "json") entry.extraction = extractJson(f.rel, source) ?? null;
+      else entry.extraction = await extractCode(f.rel, source, languageForFile(f.rel), resolver);
     } catch (err2) {
       process.stderr.write(`faundr graph: falha ao ler ${f.rel}: ${err2.message}
 `);
     }
+    entries[f.rel] = entry;
   }
+  saveCache(root, files, entries);
+  const extractions = /* @__PURE__ */ new Map();
+  for (const [rel, e] of Object.entries(entries)) if (e.extraction) extractions.set(rel, e.extraction);
+  return { extractions, words, changed };
+}
+async function buildProjectGraph(root) {
+  const started = Date.now();
+  const files = collectFiles(root);
+  const { extractions, words } = await extractAll(root, files);
   const { nodes, edges } = resolveCorpus(extractions);
   const g = buildGraph(nodes, edges);
   const communities = cluster(g);
@@ -10482,15 +10565,40 @@ function toGraphJson(g, communities, names, commit) {
   };
 }
 function writeOutputs(root, result) {
-  const dir2 = path13.join(root, OUT_DIR);
-  fs6.mkdirSync(dir2, { recursive: true });
-  fs6.writeFileSync(path13.join(dir2, "graph.json"), JSON.stringify(result.graph));
-  fs6.writeFileSync(path13.join(dir2, "GRAPH_REPORT.md"), result.report);
+  const dir2 = path14.join(root, OUT_DIR);
+  fs7.mkdirSync(dir2, { recursive: true });
+  fs7.writeFileSync(path14.join(dir2, "graph.json"), JSON.stringify(result.graph));
+  fs7.writeFileSync(path14.join(dir2, "GRAPH_REPORT.md"), result.report);
+}
+async function refreshGraph(root) {
+  const file = path14.join(root, OUT_DIR, "graph.json");
+  if (!fs7.existsSync(file)) return null;
+  const files = collectFiles(root);
+  const { stale, setChanged } = staleFiles(root, files);
+  if (!stale.length) return { changed: [] };
+  const { extractions, changed } = await extractAll(root, files);
+  if (!changed.length && !setChanged) return { changed: [] };
+  const old = loadGraphJson(root);
+  const oldById = new Map(old.nodes.map((n) => [n.id, n]));
+  const { nodes, edges } = resolveCorpus(extractions);
+  const g = buildGraph(nodes, edges);
+  const communities = /* @__PURE__ */ new Map();
+  const names = /* @__PURE__ */ new Map();
+  g.forEachNode((id) => {
+    const o = oldById.get(id);
+    if (o?.community == null) return;
+    communities.set(o.community, [...communities.get(o.community) ?? [], id]);
+    names.set(o.community, o.community_name);
+  });
+  const graph = toGraphJson(g, communities, names, old.built_at_commit);
+  graph.graph = { ...old.graph, refreshed_at: (/* @__PURE__ */ new Date()).toISOString() };
+  fs7.writeFileSync(file, JSON.stringify(graph));
+  return { changed: setChanged ? stale : changed };
 }
 function loadGraphJson(root) {
-  const file = path13.join(root, OUT_DIR, "graph.json");
-  if (!fs6.existsSync(file)) throw new Error("Grafo ainda n\xE3o gerado. Rode: faundr graph");
-  return JSON.parse(fs6.readFileSync(file, "utf8"));
+  const file = path14.join(root, OUT_DIR, "graph.json");
+  if (!fs7.existsSync(file)) throw new Error("Grafo ainda n\xE3o gerado. Rode: faundr graph");
+  return JSON.parse(fs7.readFileSync(file, "utf8"));
 }
 
 // engine/src/query.ts
@@ -10524,18 +10632,18 @@ function scoreNodes(g, terms) {
   const scores = [];
   g.forEachNode((id, a) => {
     const nl = labelOf(id);
-    const bare = nl.replace(/\(\)$/, "");
+    const bare2 = nl.replace(/\(\)$/, "");
     const lt = tokens(a.label).join(" ");
     const src = (a.source_file ?? "").toLowerCase();
     let score = 0;
-    if ([nl, bare, lt, id.toLowerCase()].includes(joined)) score += 1e3 * 10 * joinedW;
-    else if (joined && [nl, bare, lt].some((x) => x.startsWith(joined))) score += 100 * 10 * joinedW;
+    if ([nl, bare2, lt, id.toLowerCase()].includes(joined)) score += 1e3 * 10 * joinedW;
+    else if (joined && [nl, bare2, lt].some((x) => x.startsWith(joined))) score += 100 * 10 * joinedW;
     let tiered = 0;
     let matched = 0;
     for (const t of norm) {
       const w = idf.get(t);
-      if (t === nl || t === bare) tiered += 1e3 * w, matched++;
-      else if (nl.startsWith(t) || bare.startsWith(t) || lt.split(" ").some((x) => x.startsWith(t))) tiered += 100 * w, matched++;
+      if (t === nl || t === bare2) tiered += 1e3 * w, matched++;
+      else if (nl.startsWith(t) || bare2.startsWith(t) || lt.split(" ").some((x) => x.startsWith(t))) tiered += 100 * w, matched++;
       else if (nl.includes(t)) tiered += w, matched++;
       if (src.includes(t)) score += 0.5 * w;
     }
@@ -11129,6 +11237,465 @@ function unusedCode(root, modules, texts, entry) {
   return { orphans, exports: exports2 };
 }
 
+// engine/src/search.ts
+import fs8 from "node:fs";
+import path15 from "node:path";
+var strip2 = (s) => s.normalize("NFKD").replace(new RegExp("\\p{M}+", "gu"), "");
+function wordsOf(text) {
+  const split = strip2(text).replace(new RegExp("([\\p{Ll}\\p{N}])(\\p{Lu})", "gu"), "$1 $2").replace(new RegExp("(\\p{Lu}+)(\\p{Lu}\\p{Ll})", "gu"), "$1 $2").toLowerCase();
+  return (split.match(/[\p{L}\p{N}]+/gu) ?? []).map(stem);
+}
+var stem = (w) => w.length > 4 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w;
+var STOPWORDS2 = new Set(
+  "the and for with that this what where when which who how why does into from about are was were been have has had can could should would will not but all any our your their there here then than them they its also just only onde como qual quai quem quando porque para por com que uma uns dos das nos nas pelo pela isso isto esse essa este esta ele ela eles elas seu sua seus suas tem ter foi ser sao esta estao fazer faz vai vao fica ficam pra pro sobre entre cada todo toda todos todas depois antes agora ainda muito mais menos quero preciso existe existem acontece funciona aqui ali la tipo coisa coisas codigo code arquivo file fica".split(/\s+/)
+);
+var PT_EN = {
+  usuario: ["user"],
+  projeto: ["project"],
+  sessao: ["session"],
+  sessoe: ["session"],
+  erro: ["error"],
+  senha: ["password"],
+  chave: ["key", "secret"],
+  grafo: ["graph"],
+  cupom: ["coupon"],
+  cupon: ["coupon"],
+  frete: ["shipping"],
+  carrinho: ["cart"],
+  pedido: ["order"],
+  teste: ["test"],
+  regra: ["rule"],
+  tarefa: ["task"],
+  funcionalidade: ["feature"],
+  decisao: ["decision"],
+  memoria: ["memory"],
+  painel: ["panel", "dashboard"],
+  convite: ["invite"],
+  organizacao: ["org", "organization"],
+  seguranca: ["security"],
+  qualidade: ["quality"],
+  banco: ["db", "database"],
+  tela: ["screen", "page", "view"],
+  rota: ["route"],
+  enviar: ["send", "upload"],
+  envia: ["send", "upload"],
+  salvar: ["save"],
+  salva: ["save"],
+  apagar: ["delete"],
+  apaga: ["delete"],
+  criar: ["create"],
+  cria: ["create"],
+  buscar: ["fetch", "search", "query"],
+  busca: ["search", "query"],
+  ler: ["read", "load"],
+  le: ["read", "load"],
+  mostrar: ["show", "render"],
+  mostra: ["show", "render"],
+  uso: ["usage"],
+  aplicar: ["apply"],
+  aplica: ["apply"],
+  calcular: ["calc", "compute"],
+  calcula: ["calc", "compute"],
+  custo: ["cost"],
+  preco: ["price"],
+  valor: ["value", "total"],
+  desconto: ["discount"],
+  entrar: ["login", "signin"],
+  sair: ["logout"],
+  conta: ["account"],
+  pagamento: ["payment"],
+  nota: ["note"],
+  comentario: ["comment"],
+  aviso: ["warning", "notice"],
+  evento: ["event"],
+  configuracao: ["config", "setting"],
+  dono: ["owner"],
+  membro: ["member"],
+  papel: ["role"],
+  permissao: ["permission"],
+  arquivo: ["file"],
+  pasta: ["dir", "folder"],
+  comando: ["command"],
+  resumo: ["summary"],
+  relatorio: ["report"],
+  achado: ["finding"],
+  gancho: ["hook"],
+  bloquear: ["block", "guard"],
+  bloqueia: ["block", "guard"],
+  lista: ["list"],
+  listar: ["list"],
+  atualizar: ["update", "refresh"],
+  atualiza: ["update", "refresh"],
+  data: ["date"],
+  hora: ["time"],
+  tempo: ["time", "duration"],
+  token: ["token"],
+  login: ["login"],
+  cache: ["cache"]
+};
+var TEST_PATH = /(^|\/)(tests?|__tests__|spec|e2e)\/|\.(test|spec)\.\w+$/;
+var ASKS_TESTS = /\b(test|teste|spec)\b/;
+var ASKS_DOCS = /\b(doc|docs|documento|documentacao|readme|guia|md)\b/;
+var WEIGHT = { name: 3, path: 2, body: 1 };
+var K1 = 1.2;
+var B = 0.75;
+var BODY_LINES = 300;
+function queryGroups(question) {
+  const all = wordsOf(question);
+  const kept = all.filter((w) => !STOPWORDS2.has(w) && (w.length > 1 || /\d/.test(w)));
+  return [...new Set(kept.length ? kept : all)].map((w) => [w, ...(PT_EN[w] ?? []).filter((t) => t !== w)]);
+}
+var SourceCache = class {
+  constructor(root) {
+    this.root = root;
+  }
+  root;
+  files = /* @__PURE__ */ new Map();
+  lines(rel) {
+    if (!this.files.has(rel)) {
+      try {
+        this.files.set(rel, fs8.readFileSync(path15.join(this.root, rel), "utf8").split(/\r?\n/));
+      } catch {
+        this.files.set(rel, null);
+      }
+    }
+    return this.files.get(rel);
+  }
+};
+var lineOf = (loc) => loc && /^L\d+/.test(loc) ? Number(loc.slice(1)) : 0;
+var isFileNode2 = (n) => !!n.source_file && n.id === fileNodeId(n.source_file);
+var nameOf = (n) => n.label.replace(/\(\)$/, "").replace(/^\./, "");
+function rankNodes(json, question, src) {
+  const groups = queryGroups(question);
+  if (!groups.length) return [];
+  const q = strip2(question).toLowerCase();
+  const wantsTests = ASKS_TESTS.test(q);
+  const wantsDocs = ASKS_DOCS.test(q);
+  const docs = json.nodes.filter((n) => n.source_file && !n.external).map((n) => {
+    const fields = { name: wordsOf(nameOf(n)), path: wordsOf(n.source_file), body: [] };
+    const start2 = lineOf(n.source_location);
+    const end = lineOf(n.end_location);
+    if (src && n.file_type === "code" && !isFileNode2(n) && start2 && end >= start2) {
+      const lines = src.lines(n.source_file);
+      if (lines) fields.body = wordsOf(lines.slice(start2 - 1, Math.min(end, start2 - 1 + BODY_LINES)).join("\n"));
+    }
+    return { n, fields };
+  });
+  const stats = {};
+  for (const f of ["name", "path", "body"]) {
+    const df = /* @__PURE__ */ new Map();
+    let total = 0;
+    for (const d of docs) {
+      total += d.fields[f].length;
+      for (const w of new Set(d.fields[f])) df.set(w, (df.get(w) ?? 0) + 1);
+    }
+    stats[f] = { avg: total / Math.max(1, docs.length) || 1, df };
+  }
+  const N = docs.length;
+  const degree = /* @__PURE__ */ new Map();
+  for (const l of json.links) {
+    if (l.relation === "calls" || l.relation === "imports" || l.relation === "imports_from" || l.relation === "indirect_call") {
+      degree.set(l.target, (degree.get(l.target) ?? 0) + 1);
+    }
+  }
+  const bm25 = (fields, w) => {
+    let total = 0;
+    for (const f of ["name", "path", "body"]) {
+      const words = fields[f];
+      const tf = words.reduce((c, x) => c + (x === w ? 1 : 0), 0);
+      if (!tf) continue;
+      const df = stats[f].df.get(w) ?? 0;
+      const idf = Math.log(1 + (N - df + 0.5) / (df + 0.5));
+      total += WEIGHT[f] * idf * (tf * (K1 + 1) / (tf + K1 * (1 - B + B * words.length / stats[f].avg)));
+    }
+    return total;
+  };
+  const phrase = groups.map((g) => g[0]).join(" ");
+  const hits = [];
+  for (const { n, fields } of docs) {
+    let score = 0;
+    let matched = 0;
+    for (const [word, ...translations] of groups) {
+      const s = bm25(fields, word) + 0.6 * translations.reduce((t, w) => t + bm25(fields, w), 0);
+      if (s) score += s, matched++;
+    }
+    if (!score) continue;
+    const coverage = matched / groups.length;
+    score *= 0.4 + 0.6 * coverage;
+    if (fields.name.join(" ") === phrase) score *= 2;
+    if (TEST_PATH.test(n.source_file) && !wantsTests) score *= 0.4;
+    if (n.file_type !== "code" && !wantsDocs) score *= 0.5;
+    if (isFileNode2(n)) score *= 0.8;
+    score *= 1 + 0.1 * Math.log(1 + (degree.get(n.id) ?? 0));
+    hits.push({ node: n, score });
+  }
+  return hits.sort((a, b) => b.score - a.score || a.node.label.length - b.node.label.length || a.node.id.localeCompare(b.node.id));
+}
+function neighbors(json) {
+  const byId = new Map(json.nodes.map((n) => [n.id, n]));
+  const incoming = /* @__PURE__ */ new Map();
+  const outgoing = /* @__PURE__ */ new Map();
+  for (const l of json.links) {
+    ;
+    (incoming.get(l.target) ?? incoming.set(l.target, []).get(l.target)).push(l);
+    (outgoing.get(l.source) ?? outgoing.set(l.source, []).get(l.source)).push(l);
+  }
+  return { byId, incoming, outgoing };
+}
+var CALLS = /* @__PURE__ */ new Set(["calls", "indirect_call"]);
+var KIND_LABEL = (n) => n.file_type === "document" ? "documento" : isFileNode2(n) ? "arquivo" : n.label.startsWith(".") ? "m\xE9todo" : n.label.endsWith("()") ? "fun\xE7\xE3o" : "s\xEDmbolo";
+var where = (n) => {
+  const end = lineOf(n.end_location);
+  const start2 = lineOf(n.source_location);
+  return `${n.source_file}:${n.source_location || "L1"}${end > start2 ? `-L${end}` : ""}`;
+};
+var FENCE = { ts: "ts", tsx: "tsx", js: "js", mjs: "js", cjs: "js", jsx: "jsx", py: "python", go: "go", rs: "rust", java: "java", rb: "ruby", php: "php", cs: "csharp", kt: "kotlin", swift: "swift", md: "md" };
+function snippet(n, src, max) {
+  const start2 = lineOf(n.source_location);
+  const end = Math.max(start2, lineOf(n.end_location));
+  if (!start2 || isFileNode2(n)) return null;
+  const lines = src.lines(n.source_file);
+  if (!lines) return null;
+  const last = Math.min(end, start2 + max - 1, lines.length);
+  const width = String(last).length;
+  const body2 = lines.slice(start2 - 1, last).map((l, i2) => `${String(start2 + i2).padStart(width)}  ${l}`);
+  const lang = FENCE[path15.extname(n.source_file).slice(1)] ?? "";
+  const more = end > last ? `
+\u2026 mais ${end - last} linhas (${n.source_file}:L${last + 1}-L${end})` : "";
+  return `\`\`\`${lang}
+${body2.join("\n")}
+\`\`\`${more}`;
+}
+function relatedLine(title, links, pick, byId, max = 5) {
+  const seen = /* @__PURE__ */ new Set();
+  const items = [];
+  for (const l of links) {
+    const other = byId.get(pick(l));
+    if (!other || seen.has(other.id)) continue;
+    seen.add(other.id);
+    items.push(other.source_file ? `${other.label} (${other.source_file}:${l.source_location || other.source_location})` : other.label);
+  }
+  if (!items.length) return null;
+  const extra = items.length > max ? ` \u2026 e mais ${items.length - max}` : "";
+  return `   ${title}: ${items.slice(0, max).join(", ")}${extra}`;
+}
+function search(json, question, opts) {
+  const src = new SourceCache(opts.root);
+  const ranked = rankNodes(json, question, src);
+  if (!ranked.length) return `Nada no grafo para "${question}". Tente com o nome de uma fun\xE7\xE3o, arquivo ou tela, ou rode faundr graph se o grafo estiver velho.`;
+  const top = ranked[0].score;
+  const limit = opts.limit ?? 8;
+  const results = [];
+  const labels = /* @__PURE__ */ new Set();
+  for (const h of ranked) {
+    if (results.length >= limit || results.length >= 3 && h.score < top * 0.15) break;
+    const key = `${h.node.source_file}|${h.node.label}`;
+    if (labels.has(key)) continue;
+    labels.add(key);
+    results.push(h);
+  }
+  const { byId, incoming, outgoing } = neighbors(json);
+  const maxChars = (opts.budget ?? 3e3) * 4;
+  const codeLines = opts.codeLines ?? 80;
+  let used = 0;
+  const blocks = results.map((h, i2) => {
+    const n = h.node;
+    const lines = [`${i2 + 1}. ${n.label}  ${where(n)}  [${KIND_LABEL(n)}]`];
+    if (n.signature && n.signature !== n.label) lines.push(`   ${n.signature}`);
+    const callers2 = relatedLine("Chamado por", (incoming.get(n.id) ?? []).filter((l) => CALLS.has(l.relation)), (l) => l.source, byId);
+    const calls = relatedLine("Chama", (outgoing.get(n.id) ?? []).filter((l) => CALLS.has(l.relation)), (l) => l.target, byId);
+    const importers = isFileNode2(n) ? relatedLine("Importado por", (incoming.get(n.id) ?? []).filter((l) => l.relation === "imports_from"), (l) => l.source, byId) : null;
+    for (const l of [callers2, calls, importers]) if (l) lines.push(l);
+    let text = lines.join("\n");
+    const code = used + text.length < maxChars ? snippet(n, src, codeLines) : null;
+    if (code && used + text.length + code.length <= maxChars) text += `
+${code}`;
+    else if (code) {
+      const room = Math.floor((maxChars - used - text.length) / 60);
+      const short = room >= 5 ? snippet(n, src, Math.min(room, codeLines)) : null;
+      if (short) text += `
+${short}`;
+    }
+    used += text.length;
+    return text;
+  });
+  const header = `Busca no grafo: "${question}" \xB7 ${results.length} resultado(s) de ${ranked.length} que combinam (${json.nodes.length} n\xF3s)`;
+  return [header, ...blocks].join("\n\n");
+}
+
+// engine/src/tools.ts
+var WALK = /* @__PURE__ */ new Set(["calls", "indirect_call", "imports", "imports_from", "re_exports", "references", "inherits", "implements"]);
+var RELATION_PT = {
+  calls: "chama",
+  indirect_call: "chama (indireto)",
+  imports: "importa",
+  imports_from: "importa",
+  re_exports: "reexporta",
+  references: "usa",
+  inherits: "herda",
+  implements: "implementa"
+};
+var bare = (label) => label.replace(/\(\)$/, "").replace(/^\./, "").toLowerCase();
+function resolveNode(json, text) {
+  const [scope, name2] = text.includes("::") ? text.split("::", 2) : [void 0, text];
+  const q = name2.trim().toLowerCase();
+  const nodes = json.nodes.filter((n) => n.source_file && (!scope || n.source_file.endsWith(scope)));
+  const tiers = [
+    (n) => isFileNode2(n) && (n.source_file.toLowerCase() === q || n.source_file.toLowerCase().endsWith(`/${q}`)),
+    (n) => bare(n.label) === q.replace(/\(\)$/, "").replace(/^\./, ""),
+    (n) => n.id === q,
+    (n) => bare(n.label).startsWith(q)
+  ];
+  for (const tier of tiers) {
+    const hits = nodes.filter(tier);
+    if (!hits.length) continue;
+    const deg = /* @__PURE__ */ new Map();
+    for (const l of json.links) if (WALK.has(l.relation)) deg.set(l.target, (deg.get(l.target) ?? 0) + 1);
+    hits.sort((a, b) => Number(b.file_type === "code") - Number(a.file_type === "code") || (deg.get(b.id) ?? 0) - (deg.get(a.id) ?? 0));
+    if (new Set(hits.map((h) => h.source_file)).size > 1) return { node: hits[0], ambiguous: hits };
+    return { node: hits[0] };
+  }
+  return {};
+}
+function ambiguityNote(text, found) {
+  if (!found.ambiguous) return "";
+  const others = found.ambiguous.slice(1, 6).map((n) => `${n.source_file}::${bare(n.label)}`);
+  return `
+(H\xE1 ${found.ambiguous.length} com esse nome; usei ${where(found.node)}. Outros: ${others.join(", ")}. Para escolher: arquivo::${text}.)`;
+}
+function callers(json, text, opts = {}) {
+  const direction = opts.direction ?? "in";
+  const depth = Math.max(1, Math.min(opts.depth ?? 1, 5));
+  const limit = opts.limit ?? 60;
+  const found = resolveNode(json, text);
+  if (!found.node) return `Nada no grafo com o nome '${text}'. Tente faundr graph-query "${text}".`;
+  const seed = found.node;
+  const byId = new Map(json.nodes.map((n) => [n.id, n]));
+  const adj = /* @__PURE__ */ new Map();
+  for (const l of json.links) {
+    if (!WALK.has(l.relation)) continue;
+    const key = direction === "in" ? l.target : l.source;
+    const other = direction === "in" ? l.source : l.target;
+    (adj.get(key) ?? adj.set(key, []).get(key)).push({ other, relation: l.relation, at: `${l.source_file}:${l.source_location}` });
+  }
+  const seeds = isFileNode2(seed) ? [seed, ...json.nodes.filter((n) => n.source_file === seed.source_file && n.id !== seed.id)] : [seed];
+  const visited = new Set(seeds.map((s) => s.id));
+  const levels = [];
+  let frontier = [...visited];
+  let total = 0;
+  for (let d = 1; d <= depth && frontier.length; d++) {
+    const next = [];
+    const lines = [];
+    for (const cur of frontier) {
+      for (const { other, relation, at } of adj.get(cur) ?? []) {
+        if (visited.has(other)) continue;
+        visited.add(other);
+        next.push(other);
+        const n = byId.get(other);
+        total++;
+        if (total > limit) continue;
+        const label = n?.label ?? other;
+        const loc = n?.source_file ? d === 1 ? at : where(n) : "(externo)";
+        lines.push(`  ${label}  ${loc}  [${RELATION_PT[relation] ?? relation}${d > 1 ? `, via ${byId.get(cur)?.label ?? cur}` : ""}]`);
+      }
+    }
+    if (lines.length) levels.push([d === 1 ? direction === "in" ? "Diretamente:" : "Usa diretamente:" : `A ${d} saltos:`, ...lines]);
+    frontier = next;
+  }
+  const what = direction === "in" ? "Quem depende de" : "O que usa";
+  const head = `${what} ${seed.label} (${where(seed)})${depth > 1 ? `, at\xE9 ${depth} saltos` : ""}: ${total} encontrado(s)`;
+  if (!total) {
+    const none = direction === "in" ? "Ningu\xE9m no projeto chama ou importa isso (pode ser ponto de entrada, rota ou c\xF3digo sem uso)." : "N\xE3o usa nada do projeto.";
+    return `${head}
+${none}${ambiguityNote(text, found)}`;
+  }
+  const cut = total > limit ? `
+\u2026 e mais ${total - limit} (use --limit ${total})` : "";
+  return [head, ...levels.map((l) => l.join("\n"))].join("\n") + cut + ambiguityNote(text, found);
+}
+function skeleton(json, file) {
+  const q = file.replace(/\\/g, "/").toLowerCase();
+  const files = json.nodes.filter((n) => isFileNode2(n) && (n.source_file.toLowerCase() === q || n.source_file.toLowerCase().endsWith(`/${q}`)));
+  if (!files.length) {
+    const near = json.nodes.filter((n) => isFileNode2(n) && n.source_file.toLowerCase().includes(q)).slice(0, 5);
+    return `Arquivo '${file}' n\xE3o est\xE1 no grafo.${near.length ? ` Parecidos: ${near.map((n) => n.source_file).join(", ")}` : ""}`;
+  }
+  if (files.length > 1) return `V\xE1rios arquivos com esse nome: ${files.map((n) => n.source_file).join(", ")}. Passe o caminho completo.`;
+  const rel = files[0].source_file;
+  const { byId, outgoing, incoming } = neighbors(json);
+  const symbols = json.nodes.filter((n) => n.source_file === rel && !isFileNode2(n) && n.file_type !== "rationale").sort((a, b) => lineOf(a.source_location) - lineOf(b.source_location));
+  const lines = symbols.map((n) => {
+    const indent = n.label.startsWith(".") ? "    " : "  ";
+    const end = lineOf(n.end_location);
+    const span2 = end > lineOf(n.source_location) ? `${n.source_location}-L${end}` : n.source_location;
+    const used = (incoming.get(n.id) ?? []).filter((l) => WALK.has(l.relation)).length;
+    return `${indent}${span2.padEnd(11)} ${n.signature ?? n.label}${used ? `  \xB7 usado ${used}x` : ""}`;
+  });
+  const imports = [...new Set((outgoing.get(files[0].id) ?? []).filter((l) => l.relation === "imports_from").map((l) => byId.get(l.target)?.source_file || byId.get(l.target)?.label || l.target))];
+  const importers = (incoming.get(files[0].id) ?? []).filter((l) => l.relation === "imports_from").length;
+  return [
+    `Esqueleto de ${rel}: ${symbols.length} defini\xE7\xE3o(\xF5es); importado por ${importers} arquivo(s)`,
+    ...imports.length ? [`Importa: ${imports.join(", ")}`] : [],
+    "",
+    ...lines
+  ].join("\n");
+}
+function grep(json, pattern, opts) {
+  let re;
+  try {
+    re = new RegExp(pattern, opts.ignoreCase ? "i" : "");
+  } catch {
+    re = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), opts.ignoreCase ? "i" : "");
+  }
+  const maxHits = opts.maxHits ?? 200;
+  const maxGroups = opts.maxGroups ?? 30;
+  const prefix = opts.in?.replace(/\\/g, "/").replace(/^\.\//, "");
+  const src = new SourceCache(opts.root);
+  const { incoming } = neighbors(json);
+  const inDegree = (id) => (incoming.get(id) ?? []).filter((l) => WALK.has(l.relation)).length;
+  const files = json.nodes.filter((n) => isFileNode2(n) && (!prefix || n.source_file.startsWith(prefix)));
+  const bySymbolFile = /* @__PURE__ */ new Map();
+  for (const n of json.nodes) if (n.source_file && !isFileNode2(n) && n.end_location) (bySymbolFile.get(n.source_file) ?? bySymbolFile.set(n.source_file, []).get(n.source_file)).push(n);
+  const groups = /* @__PURE__ */ new Map();
+  let total = 0;
+  for (const f of files) {
+    const lines = src.lines(f.source_file);
+    if (!lines) continue;
+    const symbols = bySymbolFile.get(f.source_file) ?? [];
+    lines.forEach((text, i2) => {
+      if (!re.test(text)) return;
+      total++;
+      if (total > maxHits) return;
+      const ln = i2 + 1;
+      let best = null;
+      for (const s of symbols) {
+        const a = lineOf(s.source_location);
+        const b = lineOf(s.end_location);
+        if (a <= ln && ln <= b && (!best || b - a < lineOf(best.end_location) - lineOf(best.source_location))) best = s;
+      }
+      const key = best?.id ?? `file:${f.source_file}`;
+      const g = groups.get(key) ?? { symbol: best, file: f.source_file, inDegree: best ? inDegree(best.id) : 0, hits: [] };
+      g.hits.push(`    L${ln}: ${text.trim().slice(0, 160)}`);
+      groups.set(key, g);
+    });
+  }
+  if (!total) return `Nada encontrado para /${pattern}/ em ${files.length} arquivo(s) do grafo.`;
+  const sorted = [...groups.values()].sort((a, b) => b.inDegree - a.inDegree || a.file.localeCompare(b.file));
+  const shown = sorted.slice(0, maxGroups).map((g) => {
+    const title = g.symbol ? `${g.symbol.label}  ${where(g.symbol)}${g.inDegree ? `  \xB7 usado ${g.inDegree}x` : ""}` : `${g.file} (fora de fun\xE7\xF5es)`;
+    return [`  ${title}`, ...g.hits.slice(0, 8), ...g.hits.length > 8 ? [`    \u2026 e mais ${g.hits.length - 8} nesta defini\xE7\xE3o`] : []].join("\n");
+  });
+  const cut = [
+    total > maxHits ? `${total - maxHits} ocorr\xEAncia(s) al\xE9m do limite de ${maxHits}` : "",
+    sorted.length > maxGroups ? `${sorted.length - maxGroups} grupo(s) n\xE3o mostrados` : ""
+  ].filter(Boolean);
+  return [
+    `Busca /${pattern}/: ${total} ocorr\xEAncia(s) em ${groups.size} lugar(es) de ${files.length} arquivo(s); os mais usados primeiro`,
+    ...shown,
+    ...cut.length ? [`(${cut.join("; ")}; refine com --in <pasta>)`] : []
+  ].join("\n");
+}
+
 // engine/src/cli.ts
 function flag(args2, name2) {
   const i2 = args2.indexOf(name2);
@@ -11136,24 +11703,38 @@ function flag(args2, name2) {
 }
 async function runEngine(args2, root = process.cwd()) {
   const [cmd, ...rest] = args2;
-  const positional = rest.filter((a, i2) => !a.startsWith("--") && !(i2 > 0 && ["--budget"].includes(rest[i2 - 1])));
+  const positional = rest.filter((a, i2) => !a.startsWith("--") && a !== "-i" && !(i2 > 0 && ["--budget", "--limit", "--depth", "--in"].includes(rest[i2 - 1])));
   switch (cmd) {
     case "build": {
-      const dir2 = path14.resolve(positional[0] ?? root);
+      const dir2 = path16.resolve(positional[0] ?? root);
       const result = await buildProjectGraph(dir2);
       writeOutputs(dir2, result);
       const s = result.stats;
       return `Grafo gerado: ${s.nodes} n\xF3s, ${s.edges} liga\xE7\xF5es, ${s.communities} comunidades a partir de ${s.files} arquivos (${(s.ms / 1e3).toFixed(1)} s).`;
     }
     case "query":
-      return query(loadGraphJson(root), positional.join(" "), { budget: Number(flag(rest, "--budget") ?? 2e3), dfs: rest.includes("--dfs") });
+      if (rest.includes("--subgraph")) return query(loadGraphJson(root), positional.join(" "), { budget: Number(flag(rest, "--budget") ?? 2e3), dfs: rest.includes("--dfs") });
+      return search(loadGraphJson(root), positional.join(" "), {
+        root,
+        budget: Number(flag(rest, "--budget") ?? 3e3),
+        limit: Number(flag(rest, "--limit") ?? 8)
+      });
     case "path":
       if (positional.length < 2) throw new Error('uso: path "A" "B" [--undirected]');
       return shortestPath(loadGraphJson(root), positional[0], positional[1], { undirected: rest.includes("--undirected") });
+    case "callers": {
+      const depth = Number(flag(rest, "--depth") ?? 1);
+      const direction = rest.includes("--out") ? "out" : "in";
+      return callers(loadGraphJson(root), positional.join(" "), { direction, depth, limit: Number(flag(rest, "--limit") ?? 60) });
+    }
+    case "skeleton":
+      return skeleton(loadGraphJson(root), positional.join(" "));
+    case "grep":
+      return grep(loadGraphJson(root), positional.join(" "), { root, in: flag(rest, "--in"), ignoreCase: rest.includes("-i") || rest.includes("--ignore-case") });
     case "explain":
       return explain(loadGraphJson(root), positional.join(" "));
     default:
-      return 'comandos: build [raiz] | query "<pergunta>" [--budget N] [--dfs] | path "A" "B" [--undirected] | explain "X"';
+      return 'comandos: build [raiz] | query "<pergunta>" [--budget N] [--limit N] [--subgraph [--dfs]] | callers X [--out] [--depth N] | skeleton <arquivo> | grep <padr\xE3o> [--in pasta] [-i] | path "A" "B" [--undirected] | explain "X"';
   }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -11165,12 +11746,19 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 export {
   analyzeQuality,
   buildProjectGraph,
+  callers,
   explain,
+  grep,
   loadGraphJson,
   qualityGrammar,
   query,
+  rankNodes,
+  refreshGraph,
   runEngine,
+  search,
   shortestPath,
+  skeleton,
   unusedCode,
+  wordsOf,
   writeOutputs
 };

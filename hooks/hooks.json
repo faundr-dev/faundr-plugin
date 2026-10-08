@@ -29,7 +29,8 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs\" hook claude",
-            "timeout": 10
+            "timeout": 10,
+            "async": true
           }
         ]
       }

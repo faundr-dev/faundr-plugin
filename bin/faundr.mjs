@@ -5,14 +5,19 @@
 //   faundr link <projectId>                    liga a pasta atual a um projeto
 //   faundr status                              mostra configuração e ligação
 //   faundr graph                               gera o grafo de conhecimento do projeto e envia à plataforma
-//   faundr graph-query "<pergunta>"            subgrafo relevante para a pergunta (--budget N, --dfs)
+//   faundr graph-query "<pergunta>"            até 8 trechos de código relevantes, com quem chama (--budget N, --limit N, --subgraph)
 //   faundr graph-path "A" "B"                  caminho mais curto entre dois nós (--undirected)
 //   faundr graph-explain "X"                   um nó e suas conexões
+//   faundr graph-callers "X"                   quem chama ou importa X (--out: o que X usa; --depth N)
+//   faundr graph-skeleton <arquivo>            as assinaturas do arquivo, sem o corpo
+//   faundr graph-grep "<padrão>"               busca de texto agrupada por função, as mais usadas primeiro (--in pasta, -i)
 //   faundr feature "<título>" [--desc "..."]   cria uma funcionalidade e a torna a atual desta pasta
 //     --after <atual | nome>                   registra como a próxima etapa de outra (fica planejada; não vira a atual)
 //   faundr task "<descrição>" [--feature nome] adiciona tarefa ao checklist da funcionalidade atual (ou de outra etapa)
 //   faundr start|done "<trecho ou nº>"         marca tarefa como em andamento / concluída
 //   faundr decision "<título>" [--why "..."]   registra uma decisão técnica
+//   faundr rule "<título>" [--why "..."]       registra uma regra do time
+//     --file <arquivo ou padrão>               (rule e decision, pode repetir) liga aos arquivos: chega ao agente antes de editá-los
 //   faundr concern "<título>" [--why "..."]    registra uma preocupação para revisar depois
 //   faundr resolve [P-<n> | trecho]            marca uma preocupação como resolvida (sem argumento: lista as abertas)
 //   faundr focus "<nome>"                      troca a funcionalidade atual
@@ -93,6 +98,10 @@ import { parseImport, supabaseAdvisors } from './security-import.mjs'
 import { contextLines, findMap, resolvePosition } from './sourcemap.mjs'
 import { detectStack } from './stack.mjs'
 import { graphFooter, rememberTranscript, transcriptUsage, transcriptsToSync } from './usage.mjs'
+import { dependentsNote, readGraph } from './dependents.mjs'
+import { readRules, rulesFor, rulesNote, writeRules } from './rules.mjs'
+import { installStatusline, statusFromBoard, statusLine } from './statusline.mjs'
+import { agentsBlock, removeBlock, upsertBlock } from './agents-md.mjs'
 
 const CONFIG_DIR = path.join(os.homedir(), '.faundr')
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json')
@@ -110,7 +119,7 @@ const WORK_GUIDANCE = `[Faundr] Registre o trabalho para o time acompanhar no pa
 
 // Orientação "sempre ligada" (equivalente à regra de CLAUDE.md do graphify): consultar o grafo antes de varrer arquivos.
 const GRAPH_GUIDANCE = `[Faundr] Este projeto tem um grafo de conhecimento em .faundr/ (código + docs, com comunidades e ligações).
-- Para perguntas sobre o código, rode primeiro: faundr graph-query "<pergunta>". Para relações: faundr graph-path "A" "B". Para um conceito: faundr graph-explain "X". Isso devolve só o subgrafo relevante, bem menor que ler arquivos ou grep.
+- Para perguntas sobre o código, rode primeiro: faundr graph-query "<pergunta>". Ele devolve as funções e arquivos mais relevantes já com o código, quem chama e o que chamam: muitas vezes dispensa abrir o arquivo. Antes de mudar uma função ou arquivo: faundr graph-callers "X" (quem depende dele; --depth 2 para o efeito em cadeia). Para ver um arquivo sem ler tudo: faundr graph-skeleton <arquivo>. No lugar de grep: faundr graph-grep "<padrão>" (agrupa por função e mostra as mais usadas primeiro). Para relações: faundr graph-path "A" "B". Para um conceito: faundr graph-explain "X".
 - Visão geral da arquitetura: .faundr/GRAPH_REPORT.md (leia só quando as consultas não bastarem).
 - O grafo se atualiza sozinho quando você edita arquivos.`
 
@@ -166,6 +175,37 @@ function findUp(dir, name) {
 }
 
 // Branch atual lendo .git/HEAD direto (sem spawnar git, para ser rápido).
+// Pasta do git (resolve o arquivo .git de worktrees e submódulos).
+function gitDirOf(cwd) {
+  const dotGit = findUp(cwd, '.git')
+  if (!dotGit) return null
+  if (!fs.statSync(dotGit).isFile()) return dotGit
+  const m = fs.readFileSync(dotGit, 'utf8').match(/gitdir:\s*(.+)/)
+  return m ? path.resolve(path.dirname(dotGit), m[1].trim()) : null
+}
+
+// Commit atual lido dos arquivos do .git: no Windows, abrir um `git rev-parse` leva ~1 s no início da sessão.
+function gitHead(cwd) {
+  try {
+    const gitDir = gitDirOf(cwd)
+    if (!gitDir) return null
+    const head = fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf8').trim()
+    if (!head.startsWith('ref: ')) return head
+    const ref = head.slice(5)
+    // Worktree: as refs ficam na pasta comum.
+    const commonFile = path.join(gitDir, 'commondir')
+    const common = fs.existsSync(commonFile) ? path.resolve(gitDir, fs.readFileSync(commonFile, 'utf8').trim()) : gitDir
+    for (const dir of [gitDir, common]) {
+      const file = path.join(dir, ...ref.split('/'))
+      if (fs.existsSync(file)) return fs.readFileSync(file, 'utf8').trim()
+    }
+    const packed = fs.readFileSync(path.join(common, 'packed-refs'), 'utf8')
+    return packed.split('\n').find((l) => l.endsWith(` ${ref}`))?.split(' ')[0] ?? null
+  } catch {
+    return null
+  }
+}
+
 function gitBranch(cwd) {
   try {
     const dotGit = findUp(cwd, '.git')
@@ -363,41 +403,46 @@ async function hook(agent) {
   }
   // Trabalhos em segundo plano, todos num processo só (ver spawnBackground).
   const background = []
+  // As checagens "do início da sessão" nascem na primeira pergunta: esse hook roda em segundo plano, e no do início
+  // abrir o processo delas custava ~1 s de espera no Windows. Elas só alimentam o painel e as próximas sessões.
+  const startJobs = event === 'UserPromptSubmit' && readState(path.dirname(linkFile)).startJobsSession !== payload.session_id
+  if (startJobs) writeState(path.dirname(linkFile), { startJobsSession: payload.session_id })
   // Checagem de design sem IA: no início da sessão e quando o agente mexeu em telas.
-  if (event === 'SessionStart') background.push(['design-lint', '--quiet', '--session', payload.session_id])
+  if (startJobs) background.push(['design-lint', '--quiet', '--session', payload.session_id])
   else if (event === 'Stop' && takeDesignDirty(projectId, payload)) background.push(['design-lint', '--quiet', '--session', payload.session_id])
   if (event === 'Stop' && takeGraphDirty(projectId)) {
     background.push(['graph', '--quiet', '--agent', agent, '--session', payload.session_id])
   }
   // Segurança sem IA: checagem completa no início da sessão; no fim da resposta, só o que o agente editou.
-  if (event === 'SessionStart') background.push(['security-scan', '--quiet', '--session', payload.session_id])
+  if (startJobs) background.push(['security-scan', '--quiet', '--session', payload.session_id])
   // Testes: só o inventário (sem rodar nada; os testes só rodam quando pedirem).
-  if (event === 'SessionStart') background.push(['tests-scan', '--quiet'])
+  if (startJobs) background.push(['tests-scan', '--quiet'])
+  if (startJobs) background.push(['status-refresh'])
+  if (startJobs && readState(path.dirname(linkFile)).agentsMd?.length) background.push(['agents-md', '--sync', '--quiet'])
   // Stack sem IA: pacotes, deploy e variáveis mudam pouco; só envia quando a impressão digital muda.
-  if (event === 'SessionStart') background.push(['stack-scan', '--quiet'])
+  if (startJobs) background.push(['stack-scan', '--quiet'])
   // Impacto: lembra a conversa desta sessão e reenvia o uso das anteriores (o fim delas costuma se perder).
   if (agent === 'claude' && CONTEXT_EVENTS.has(event) && payload.transcript_path) {
     const root = path.dirname(linkFile)
     const pending = readState(root).usageTranscripts ?? {}
     if (pending[payload.session_id]?.path !== payload.transcript_path)
       writeState(root, { usageTranscripts: rememberTranscript(pending, payload.session_id, payload.transcript_path) })
-    if (event === 'SessionStart' && transcriptsToSync(pending, payload.session_id).length)
+    if (startJobs && transcriptsToSync(pending, payload.session_id).length)
       background.push(['usage-sync', '--quiet', '--session', payload.session_id])
   }
   if (event === 'Stop' && checkPending(path.dirname(linkFile), payload.session_id, 'securityChecked'))
     background.push(['security-scan', '--quiet', '--session', payload.session_id, '--edited'])
   // Qualidade sem IA: completa no início da sessão; no fim da resposta, só o que o agente editou. Nunca trava.
+  if (startJobs) background.push(['quality-scan', '--quiet', '--session', payload.session_id])
   if (event === 'SessionStart') {
-    background.push(['quality-scan', '--quiet', '--session', payload.session_id])
     // Commit em que a sessão começou: base do "tamanho da mudança" (uma sessão retomada mantém a base).
     const root = path.dirname(linkFile)
-    const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', windowsHide: true }).stdout?.trim()
+    const head = gitHead(root)
     if (head && readState(root).qualityBase?.session !== payload.session_id) writeState(root, { qualityBase: { session: payload.session_id, head } })
   }
   if (event === 'Stop' && checkPending(path.dirname(linkFile), payload.session_id, 'qualityChecked'))
     background.push(['quality-scan', '--quiet', '--session', payload.session_id, '--edited'])
 
-  if (background.length) spawnBackground(background, path.dirname(linkFile))
 
   // Erros no desenvolvimento: comando de build, tipos, testes, lint ou script que falhou (ou voltou a passar).
   if ((event === 'PostToolUse' || event === 'PostToolUseFailure') && payload.tool_name === 'Bash')
@@ -414,12 +459,15 @@ async function hook(agent) {
       log(`usage: ${err.message}`)
     }
   }
-  const res = await fetch(`${apiUrl}/api/hooks/event`, {
+  const request = fetch(`${apiUrl}/api/hooks/event`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
     body: JSON.stringify({ agent, projectId, git: { branch: gitBranch(cwd) }, currentFeatureId: readState(path.dirname(linkFile)).currentFeatureId ?? null, payload, usage }),
     signal: AbortSignal.timeout(timeout),
   })
+  // As checagens em segundo plano nascem enquanto o servidor responde (abrir um processo leva ~1 s no Windows).
+  if (background.length) spawnBackground(background, path.dirname(linkFile))
+  const res = await request
   if (!res.ok) return log(`${event}: HTTP ${res.status} ${await res.text()}`)
 
   const answer = await res.json()
@@ -429,11 +477,12 @@ async function hook(agent) {
   if (event === 'SessionStart') {
     const hasGraph = fs.existsSync(path.join(path.dirname(linkFile), '.faundr', 'graph.json'))
     const root = path.dirname(linkFile)
+    // Regras ligadas a arquivos: cópia local para o guard entregar antes de cada edição (ele não usa a rede).
+    if (Array.isArray(answer.anchoredRules)) writeRules(root, answer.anchoredRules)
     const designMd = findDesignMd(root)
     const designNote = designMd ? DESIGN_GUIDANCE(designMd) : uiFiles(root).length ? NO_DESIGN_GUIDANCE : null
     additionalContext = [additionalContext, WORK_GUIDANCE, hasGraph && GRAPH_GUIDANCE, designNote].filter(Boolean).join('\n\n')
   }
-  if (event === 'UserPromptSubmit') additionalContext = [additionalContext, takeSecurityAlert(payload.session_id)].filter(Boolean).join('\n\n')
   if (additionalContext && CONTEXT_EVENTS.has(event)) {
     process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext } }))
   }
@@ -521,6 +570,9 @@ function flag(args, name) {
   return i >= 0 ? args[i + 1] : undefined
 }
 
+/** Todos os valores de uma opção que pode se repetir (`--file a --file b`). */
+const flags = (args, name) => args.flatMap((a, i) => (a === name && args[i + 1] ? [args[i + 1]] : []))
+
 // Motor do grafo (engine/ empacotado em plugin/dist/graph.mjs pelo `npm run build:engine`).
 const ENGINE_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'graph.mjs')
 const loadEngine = () => import(pathToFileURL(ENGINE_FILE).href)
@@ -534,7 +586,18 @@ function projectRoot() {
 async function graphCommand(name, args) {
   const engine = await loadEngine()
   const root = projectRoot()
+  // Antes de responder, refaz no grafo local só os arquivos que mudaram (o envio ao painel fica para o fim da resposta).
+  let refreshed = null
+  try {
+    refreshed = await engine.refreshGraph(root)
+  } catch (err) {
+    log(`graph refresh: ${err?.message ?? err}`)
+  }
   const output = await engine.runEngine([name, ...args], root)
+  if (refreshed?.changed.length) {
+    const files = refreshed.changed
+    console.log(`(Grafo atualizado antes da consulta: ${files.length > 3 ? `${files.length} arquivos` : files.join(', ')} mudaram.)`)
+  }
   // Rodapé com o tamanho da resposta e o dos arquivos citados: o Faundr soma no fim da sessão (Impacto).
   console.log([output, graphFooter(output, root)].filter(Boolean).join('\n\n'))
 }
@@ -650,6 +713,20 @@ function printFeature(f, byId) {
 }
 
 async function work(command, args) {
+  await workCommand(command, args)
+  // A barra de status lê o resumo do arquivo de estado: atualiza depois de mexer no quadro.
+  if (['feature', 'task', 'done', 'start', 'focus', 'concern', 'resolve'].includes(command)) await refreshStatus().catch((err) => log(`status: ${err?.message ?? err}`))
+}
+
+/** Guarda em .faundr/state.json o resumo que a barra de status mostra (projeto, funcionalidade, passo, preocupações). */
+async function refreshStatus() {
+  const { root } = linkedProject()
+  const current = readState(root).currentFeatureId ?? null
+  const b = await memoryApi({ action: 'board' })
+  writeState(root, { status: statusFromBoard(b, current, b.projectName) })
+}
+
+async function workCommand(command, args) {
   const { root } = linkedProject()
   const current = readState(root).currentFeatureId ?? null
   const text = textArg(args)
@@ -676,10 +753,16 @@ async function work(command, args) {
     if (parent) return console.log(`Tarefa adicionada em "${parent.title}": ${text}`)
     return console.log(current ? `Tarefa adicionada: ${text}` : `Tarefa adicionada (sem funcionalidade atual — use faundr feature "<título>" para agrupar): ${text}`)
   }
-  if (command === 'decision') {
-    if (!text) throw new Error('uso: faundr decision "<título>" [--why "<porquê>"]')
-    await memoryApi({ action: 'add', kind: 'decision', title: text, body: flag(args, '--why'), parentId: current })
-    return console.log(`Decisão registrada: ${text}`)
+  if (command === 'decision' || command === 'rule') {
+    const name = command === 'rule' ? 'Regra' : 'Decisão'
+    if (!text) throw new Error(`uso: faundr ${command} "<título>" [--why "<porquê>"] [--file "<arquivo ou padrão, ex.: src/server/**>"]...`)
+    const paths = flags(args, '--file')
+    const body = flag(args, '--why')
+    const { id } = await memoryApi({ action: 'add', kind: command, title: text, body, parentId: command === 'decision' ? current : null, paths })
+    if (!paths.length) return console.log(`${name} registrada: ${text}`)
+    // Já vale nesta sessão: entra na cópia local que o guard lê antes de cada edição.
+    writeRules(root, [...readRules(root).filter((r) => r.id !== id), { id, kind: command, title: text, body: body ?? '', paths }])
+    return console.log(`${name} registrada, ligada a ${paths.join(', ')}: ${text}\nEla não entra mais no início da sessão; chega ao agente antes de ele editar um desses arquivos.`)
   }
   if (command === 'concern') {
     if (!text) throw new Error('uso: faundr concern "<o que preocupa>" [--why "<detalhes, o que revisar>"]')
@@ -764,13 +847,6 @@ function stripFrontmatter(text) {
   return text.startsWith('---') ? text.replace(/^---[\s\S]*?\n---\s*\n/, '') : text
 }
 
-function gitHead(root) {
-  try {
-    return spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim() || null
-  } catch {
-    return null
-  }
-}
 
 // Pacote de contexto que o agente lê para escrever/atualizar a Visão do projeto.
 async function overviewContext() {
@@ -2185,6 +2261,37 @@ async function testsShow(args = []) {
   for (const c of cases) console.log(`${c.status === 'failed' ? 'FALHANDO' : 'INSTÁVEL'} ${c.name}${c.file ? ` (${c.file})` : ''}`)
 }
 
+// Regras ligadas ao arquivo, cada uma uma vez por sessão.
+function rulesOnce(root, sid, rel) {
+  try {
+    const shown = readState(root).rulesShown
+    const ids = shown?.session === sid ? shown.ids : []
+    const rules = rulesFor(readRules(root), rel, ids)
+    if (!rules.length) return null
+    writeState(root, { rulesShown: { session: sid, ids: [...ids, ...rules.map((r) => r.id)] } })
+    return rulesNote(root, rel, rules)
+  } catch (err) {
+    log(`guard regras: ${err?.message ?? err}`)
+    return null
+  }
+}
+
+// Antes da primeira edição de cada arquivo na sessão: quem depende dele, pelo grafo local.
+function dependentsOnce(root, sid, rel) {
+  try {
+    const shown = readState(root).dependentsShown
+    const files = shown?.session === sid ? shown.files : []
+    if (files.includes(rel)) return null
+    const graph = readGraph(root)
+    if (!graph) return null
+    writeState(root, { dependentsShown: { session: sid, files: [...files, rel].slice(-200) } })
+    return dependentsNote(graph, rel)
+  } catch (err) {
+    log(`guard dependentes: ${err?.message ?? err}`)
+    return null
+  }
+}
+
 // PreToolUse: antes de gravar, procura chaves no conteúdo novo. Barra as mais perigosas e avisa das outras.
 async function guard() {
   const payload = JSON.parse(await readStdin())
@@ -2211,15 +2318,15 @@ async function guard() {
       }),
     )
   }
-  if (warn.length)
-    process.stdout.write(
-      JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: 'PreToolUse',
-          additionalContext: `[Faundr] Atenção: ${rel} vai receber o que parece ser uma chave secreta (${warn.map((w) => `${w.name}: ${w.masked}`).join('; ')}). ${how}`,
-        },
-      }),
-    )
+  // O alerta da checagem de segurança em segundo plano entra antes da próxima edição: o hook de cada pergunta
+  // roda em segundo plano e o Claude Code descarta o que ele devolve.
+  const context = [
+    warn.length && `[Faundr] Atenção: ${rel} vai receber o que parece ser uma chave secreta (${warn.map((w) => `${w.name}: ${w.masked}`).join('; ')}). ${how}`,
+    takeSecurityAlert(payload.session_id),
+    rulesOnce(path.dirname(linkFile), payload.session_id, rel),
+    payload.tool_name !== 'Write' && dependentsOnce(path.dirname(linkFile), payload.session_id, rel),
+  ].filter(Boolean)
+  if (context.length) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: context.join('\n\n') } }))
 }
 
 // ---- Design ----------------------------------------------------------------------------------
@@ -2850,9 +2957,76 @@ function status() {
   console.log(`Log:     ${LOG_FILE}`)
 }
 
+// Barra de status do Claude Code: recebe o JSON da sessão no stdin e imprime uma linha, só com arquivos locais.
+async function statusline() {
+  let input = {}
+  try {
+    input = JSON.parse((await readStdin()) || '{}')
+  } catch {}
+  const cwd = input.workspace?.current_dir ?? input.cwd ?? process.cwd()
+  const linkFile = findUp(cwd, LINK_FILE)
+  if (!linkFile) return
+  const root = path.dirname(linkFile)
+  const { projectId } = readJson(linkFile) ?? {}
+  const hasGraph = fs.existsSync(path.join(root, '.faundr', 'graph.json'))
+  const graph = hasGraph ? (projectId && fs.existsSync(dirtyFile(projectId)) ? 'stale' : 'fresh') : null
+  process.stdout.write(statusLine(readState(root).status, { graph }))
+}
+
+// O que o Impacto receberia desta sessão (docs/impacto-contrato.md): só números, lidos da conversa.
+function usageDebug(args) {
+  const { root } = linkedProject()
+  const given = args.find((a) => !a.startsWith('--'))
+  const recent = Object.values(readState(root).usageTranscripts ?? {}).sort((a, b) => b.at - a.at)[0]?.path
+  const file = given || recent
+  if (!file) throw new Error('Nenhuma conversa lembrada ainda nesta pasta. Passe o arquivo: faundr usage --debug <conversa.jsonl>')
+  const usage = transcriptUsage(file)
+  if (!usage) throw new Error(`Não achei a conversa ${file}`)
+  console.log(`Conversa: ${file}`)
+  console.log(JSON.stringify(usage, null, 2))
+  console.log('Campos explicados em docs/impacto-contrato.md (no repositório do Faundr).')
+}
+
+// Bloco com as regras e decisões no AGENTS.md/CLAUDE.md, para agentes sem os hooks do Faundr (desligado por padrão).
+async function agentsMd(args) {
+  const { root } = linkedProject()
+  const chosen = flags(args, '--file')
+  const saved = readState(root).agentsMd ?? []
+  if (args.includes('--off')) {
+    for (const f of chosen.length ? chosen : saved) console.log(`${f}: ${removeBlock(path.join(root, f))}`)
+    writeState(root, { agentsMd: chosen.length ? saved.filter((f) => !chosen.includes(f)) : [] })
+    return console.log('Bloco do Faundr desligado.')
+  }
+  // --sync: só atualiza o que já foi ligado (roda no começo de cada sessão).
+  const files = args.includes('--sync') ? saved : chosen.length ? chosen : saved.length ? saved : ['AGENTS.md']
+  if (!files.length) return
+  const { decisions, projectName } = await memoryApi({ action: 'board' })
+  const body = agentsBlock(decisions ?? [], projectName)
+  const results = files.map((f) => `${f}: ${upsertBlock(path.join(root, f), body)}`)
+  writeState(root, { agentsMd: [...new Set([...saved, ...files])] })
+  if (args.includes('--quiet')) return log(`agents-md: ${results.join('; ')}`)
+  console.log(results.join('\n'))
+  console.log(`${(decisions ?? []).length} regra(s) e decisão(ões) no bloco. Ele se atualiza no começo de cada sessão; para tirar: faundr agents-md --off`)
+}
+
+function statuslineInstall(args) {
+  const r = installStatusline({ pluginFile: fileURLToPath(import.meta.url), force: args.includes('--force') })
+  if (!r.ok) throw new Error(`Barra de status não instalada: ${r.reason}`)
+  if (r.already) return console.log('A barra de status do Faundr já está ligada.')
+  console.log(`Barra de status do Faundr ligada em ${r.settingsFile}${r.replaced ? ` (substituiu: ${r.replaced.command ?? 'a anterior'})` : ''}. Ela aparece na próxima atualização da barra (ou ao abrir o Claude Code de novo).`)
+  console.log('Para tirar: apague a chave "statusLine" desse arquivo.')
+}
+
 const [command, ...args] = process.argv.slice(2)
 
-if (command === 'hook' || command === 'gate' || command === 'guard') {
+if (command === 'statusline') {
+  // A barra nunca mostra erro: sem projeto ligado ou com algo quebrado, fica em branco.
+  try {
+    await statusline()
+  } catch (err) {
+    log(`statusline: ${err?.message ?? err}`)
+  }
+} else if (command === 'hook' || command === 'gate' || command === 'guard') {
   try {
     if (command === 'gate') await gate()
     else if (command === 'guard') await guard()
@@ -2871,11 +3045,18 @@ async function cli() {
     if (command === 'login') await login(args[0], args)
     else if (command === 'link') await link(args.join(' ').trim())
     else if (command === 'status') status()
+    else if (command === 'status-refresh') await refreshStatus()
+    else if (command === 'statusline-install') statuslineInstall(args)
+    else if (command === 'agents-md') await agentsMd(args)
+    else if (command === 'usage' && args.includes('--debug')) usageDebug(args)
     else if (command === 'graph') await graph(args)
     else if (command === 'graph-query') await graphCommand('query', args)
     else if (command === 'graph-path') await graphCommand('path', args)
     else if (command === 'graph-explain') await graphCommand('explain', args)
-    else if (['feature', 'task', 'decision', 'concern', 'resolve', 'done', 'start', 'focus', 'board'].includes(command)) await work(command, args)
+    else if (command === 'graph-callers') await graphCommand('callers', args)
+    else if (command === 'graph-skeleton') await graphCommand('skeleton', args)
+    else if (command === 'graph-grep') await graphCommand('grep', args)
+    else if (['feature', 'task', 'decision', 'rule', 'concern', 'resolve', 'done', 'start', 'focus', 'board'].includes(command)) await work(command, args)
     else if (command === 'overview-context') await overviewContext()
     else if (command === 'overview-save') await overviewSave(args)
     else if (command === 'handoff') await handoffCommand(args)
@@ -2935,7 +3116,7 @@ async function cli() {
     else if (command === 'errors-uptime') await errorsUptime(args)
     else
       console.log(
-        'comandos: login | link | status | graph | graph-query | graph-path | graph-explain | feature | task | decision | concern | resolve | start | done | focus | board | handoff | resume | stack-scan | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | security-import | security-supabase | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
+        'comandos: login | link | status | graph | graph-query | graph-path | graph-explain | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | concern | resolve | start | done | focus | board | handoff | resume | stack-scan | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | security-import | security-supabase | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
       )
   } catch (err) {
     if (['graph', 'design-lint', 'security-scan', 'quality-scan', 'tests-scan', 'stack-scan', 'usage-sync'].includes(command) && args.includes('--quiet')) log(`${command}: ${err.message}`)

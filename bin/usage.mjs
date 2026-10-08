@@ -7,7 +7,7 @@ import path from 'node:path'
 const EXPLORE_TOOLS = new Set(['Read', 'Grep', 'Glob'])
 // Bash usado para olhar o código (o mesmo papel de Read/Grep/Glob).
 const EXPLORE_BASH = /^\s*(?:cd\s+[^&;|]+(?:&&|;)\s*)?(?:grep|rg|cat|head|tail|sed\s+-n|find|ls|wc)\b/
-const GRAPH_CMD = /\bfaundr(?:\.mjs)?["']?\s+graph-(?:query|path|explain)\b/
+const GRAPH_CMD = /\bfaundr(?:\.mjs)?["']?\s+graph-(?:query|path|explain|callers|skeleton|grep)\b/
 // Rodapé que `faundr graph-*` imprime (graphFooter).
 const GRAPH_FOOTER = /\[Faundr\] Grafo: resposta ~(\d+) tokens; arquivos citados: \d+, ~(\d+) tokens/
 const FAUNDR_MARK = '[Faundr]'
