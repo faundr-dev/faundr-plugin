@@ -11,17 +11,18 @@
 //   faundr graph-callers "X"                   quem chama ou importa X (--out: o que X usa; --depth N)
 //   faundr graph-skeleton <arquivo>            as assinaturas do arquivo, sem o corpo
 //   faundr graph-grep "<padrão>"               busca de texto agrupada por função, as mais usadas primeiro (--in pasta, -i)
-//   faundr feature "<título>" [--desc "..."]   cria uma funcionalidade e a torna a atual desta pasta
+//   faundr feature "<título>" [--desc "..."] [--done-when "a; b"]  cria uma funcionalidade (com o critério de pronto) e a torna a atual
 //     --after <atual | nome>                   registra como a próxima etapa de outra (fica planejada; não vira a atual)
+//   faundr criteria ["<critério>"] | criteria-check <n> --met|--not-met [--note]   critério de pronto da funcionalidade atual
 //   faundr task "<descrição>" [--feature nome] adiciona tarefa ao checklist da funcionalidade atual (ou de outra etapa)
 //   faundr start|done "<trecho ou nº>"         marca tarefa como em andamento / concluída
 //   faundr decision "<título>" [--why "..."]   registra uma decisão técnica
-//   faundr rule "<título>" [--why "..."]       registra uma regra do time
+//   faundr rule "<título>" [--why "..."] [--file <padrão>] [--forbid "<regex>"]  regra do time; --forbid: o que o código não pode ter
 //     --file <arquivo ou padrão>               (rule e decision, pode repetir) liga aos arquivos: chega ao agente antes de editá-los
 //   faundr concern "<título>" [--why "..."]    registra uma preocupação para revisar depois
 //   faundr resolve [P-<n> | trecho]            marca uma preocupação como resolvida (sem argumento: lista as abertas)
 //   faundr focus "<nome>"                      troca a funcionalidade atual
-//   faundr board [--all]                       mostra o checklist
+//   faundr board [--all | --memory]             mostra o checklist (--memory: as regras e decisões confirmadas)
 //   faundr overview-context                    contexto para o agente escrever a Visão do projeto
 //   faundr overview-save [arquivo]              valida e envia a Visão (padrão: .faundr/overview.json)
 //   faundr stack-scan [--json]                 detecta a Stack sem IA (onde roda, linguagens, serviços, variáveis) e envia
@@ -107,7 +108,7 @@ import { contextLines, findMap, resolvePosition } from './sourcemap.mjs'
 import { detectStack } from './stack.mjs'
 import { graphFooter, rememberTranscript, transcriptUsage, transcriptsToSync } from './usage.mjs'
 import { dependentsNote, readGraph } from './dependents.mjs'
-import { readRules, rulesFor, rulesNote, writeRules } from './rules.mjs'
+import { forbiddenIn, forbiddenNote, readRules, rulesFor, rulesNote, writeRules } from './rules.mjs'
 import { installStatusline, statusFromBoard, statusLine } from './statusline.mjs'
 import { agentsBlock, removeBlock, upsertBlock } from './agents-md.mjs'
 import { editLoopNote, proofNeeded, recordCheck, recordEdit, takeLoopAlerts } from './loop.mjs'
@@ -195,6 +196,13 @@ function gitDirOf(cwd) {
   if (!fs.statSync(dotGit).isFile()) return dotGit
   const m = fs.readFileSync(dotGit, 'utf8').match(/gitdir:\s*(.+)/)
   return m ? path.resolve(path.dirname(dotGit), m[1].trim()) : null
+}
+
+/** Quantos arquivos têm mudanças fora de commit (sem contar o .faundr/); 0 sem git. */
+function uncommittedChanges(root) {
+  const r = spawnSync('git', ['status', '--porcelain', '--untracked-files=normal'], { cwd: root, encoding: 'utf8', timeout: 15_000 })
+  if (r.status !== 0) return 0
+  return r.stdout.split('\n').filter((l) => l.trim() && !/^.. \.faundr\//.test(l) && !/^.. "?\.faundr\//.test(l)).length
 }
 
 // Commit atual lido dos arquivos do .git: no Windows, abrir um `git rev-parse` leva ~1 s no início da sessão.
@@ -393,6 +401,12 @@ async function gate() {
           : ''),
     )
   }
+  // Critério de pronto ainda não conferido: confere antes de dar a etapa como terminada.
+  const unchecked = (finished?.feature.criteria ?? []).map((c, i) => ({ ...c, n: i + 1 })).filter((c) => c.met !== true)
+  if (finished && unchecked.length)
+    steps.push(
+      `antes de dar "${finished.feature.title}" como pronta, confira o critério de pronto combinado com o usuário: ${unchecked.map((c) => `${c.n}. ${c.text}`).join(' ')}. Para cada um, veja de verdade (rode, abra, teste) e registre com faundr criteria-check <nº> --met ou --not-met --note "<como conferiu>"; conte ao usuário o que foi atendido e o que não foi`,
+    )
   if (finished)
     steps.push(
       finished.next.length
@@ -742,8 +756,10 @@ function printFeature(f, byId) {
   const done = f.tasks.filter((t) => t.task_status === 'completed').length
   const prev = f.after && byId?.get(f.after)
   console.log(`${f.title}  (${done}/${f.tasks.length} concluídas)${f.planned ? '  [planejada]' : ''}${prev ? `  · vem depois de "${prev.title}"` : ''}`)
-  f.tasks.forEach((t, i) => console.log(`  ${String(i + 1).padStart(2)}. ${MARK[t.task_status] ?? '[ ]'} ${t.title}`))
+  f.tasks.forEach((t, i) => console.log(`  ${String(i + 1).padStart(2)}. ${MARK[t.task_status] ?? '[ ]'} ${t.title}${t.done_dirty ? '  (sem commit)' : ''}`))
   if (!f.tasks.length) console.log('  (sem tarefas ainda — faundr task "<descrição>")')
+  if (f.criteria?.length)
+    console.log(`  Pronto quando: ${f.criteria.map((c, i) => `${i + 1}. ${c.text}${c.met === true ? ' [atendido]' : c.met === false ? ' [não atendido]' : ''}`).join(' ')}`)
   const next = (f.next ?? []).map((id) => byId?.get(id)).filter(Boolean)
   if (next.length) console.log(`  → próxima etapa: ${next.map((n) => `"${n.title}"${n.finished ? ' (concluída)' : ''}`).join(', ')}`)
 }
@@ -777,9 +793,37 @@ async function workCommand(command, args) {
       writeState(root, { lastStepId: id })
       return console.log(`Próxima etapa registrada (depois de "${prev.title}"): ${text}\nTarefas dela: faundr task "<passo>" --feature "${text}". Para começá-la: faundr focus "${text}".`)
     }
-    const { id } = await memoryApi({ action: 'add', kind: 'feature', title: text, body: flag(args, '--desc') })
+    const criteria = (flag(args, '--done-when') ?? '').split(';').map((c) => c.trim()).filter(Boolean)
+    const { id } = await memoryApi({ action: 'add', kind: 'feature', title: text, body: flag(args, '--desc'), criteria })
     writeState(root, { currentFeatureId: id })
-    return console.log(`Funcionalidade criada e definida como atual: ${text}`)
+    console.log(`Funcionalidade criada e definida como atual: ${text}`)
+    if (criteria.length) console.log(`Pronto quando: ${criteria.map((c, i) => `${i + 1}. ${c}`).join(' ')}`)
+    return
+  }
+  if (command === 'criteria') {
+    const target = flag(args, '--feature')
+    const f = target ? await findFeature(target, current) : current ? { id: current } : null
+    if (!f) throw new Error('Nenhuma funcionalidade atual: use --feature "<nome>" ou faundr focus "<nome>".')
+    if (!text) {
+      const { features } = await memoryApi({ action: 'board', featureId: f.id })
+      const list = features[0]?.criteria ?? []
+      if (!list.length) return console.log('Sem critério de pronto. Para adicionar: faundr criteria "<como saber que ficou pronto>"')
+      console.log(`Pronto quando (${features[0].title}):`)
+      return list.forEach((c, i) => console.log(`  ${i + 1}. ${c.met === true ? '[atendido]' : c.met === false ? '[não atendido]' : '[a conferir]'} ${c.text}${c.note ? ` (${c.note})` : ''}`))
+    }
+    const r = await memoryApi({ action: 'criteria', featureId: f.id, text })
+    return console.log(`Critério de pronto ${r.criteria.length} em "${r.title}": ${text}`)
+  }
+  if (command === 'criteria-check') {
+    const n = Number(text)
+    const met = args.includes('--met') ? true : args.includes('--not-met') ? false : null
+    if (!n || met === null) throw new Error('uso: faundr criteria-check <nº> --met|--not-met [--note "como conferiu"] [--feature "<nome>"]')
+    const target = flag(args, '--feature')
+    const f = target ? await findFeature(target, current) : current ? { id: current } : null
+    if (!f) throw new Error('Nenhuma funcionalidade atual: use --feature "<nome>".')
+    const r = await memoryApi({ action: 'criteria-check', featureId: f.id, index: n, met, note: flag(args, '--note') })
+    const open = r.criteria.filter((c) => c.met !== true).length
+    return console.log(`Critério ${n} de "${r.title}": ${met ? 'atendido' : 'não atendido'}. ${open ? `${open} ainda não atendido(s).` : 'Todos atendidos.'}`)
   }
   if (command === 'task') {
     if (!text) throw new Error('uso: faundr task "<descrição>" [--feature "<nome da etapa>"]')
@@ -792,13 +836,23 @@ async function workCommand(command, args) {
   if (command === 'decision' || command === 'rule') {
     const name = command === 'rule' ? 'Regra' : 'Decisão'
     if (!text) throw new Error(`uso: faundr ${command} "<título>" [--why "<porquê>"] [--file "<arquivo ou padrão, ex.: src/server/**>"]...`)
-    const paths = flags(args, '--file')
+    const forbid = flag(args, '--forbid') ?? null
+    if (forbid)
+      try {
+        new RegExp(forbid)
+      } catch {
+        throw new Error(`Padrão inválido em --forbid: ${forbid} (é uma expressão regular; ex.: "console\\.log\\(" ou "from ['\\"]axios['\\"]")`)
+      }
+    // Com padrão proibido e sem arquivos, vale para o projeto todo.
+    const paths = flags(args, '--file').length ? flags(args, '--file') : forbid ? ['**'] : []
     const body = flag(args, '--why')
-    const { id } = await memoryApi({ action: 'add', kind: command, title: text, body, parentId: command === 'decision' ? current : null, paths })
+    const { id } = await memoryApi({ action: 'add', kind: command, title: text, body, parentId: command === 'decision' ? current : null, paths, forbid })
     if (!paths.length) return console.log(`${name} registrada: ${text}`)
     // Já vale nesta sessão: entra na cópia local que o guard lê antes de cada edição.
-    writeRules(root, [...readRules(root).filter((r) => r.id !== id), { id, kind: command, title: text, body: body ?? '', paths }])
-    return console.log(`${name} registrada, ligada a ${paths.join(', ')}: ${text}\nEla não entra mais no início da sessão; chega ao agente antes de ele editar um desses arquivos.`)
+    writeRules(root, [...readRules(root).filter((r) => r.id !== id), { id, kind: command, title: text, body: body ?? '', paths, forbid }])
+    console.log(`${name} registrada, ligada a ${paths.join(', ')}: ${text}\nEla não entra mais no início da sessão; chega ao agente antes de ele editar um desses arquivos.`)
+    if (forbid) console.log(`O código não pode ter: ${forbid}. O Faundr avisa antes de uma edição que traga isso, e a checagem de qualidade aponta onde já existe.`)
+    return
   }
   if (command === 'concern') {
     if (!text) throw new Error('uso: faundr concern "<o que preocupa>" [--why "<detalhes, o que revisar>"]')
@@ -820,8 +874,21 @@ async function workCommand(command, args) {
   }
   if (command === 'done' || command === 'start') {
     if (!text) throw new Error(`uso: faundr ${command} "<trecho do nome ou nº da tarefa>"`)
-    const r = await memoryApi({ action: 'task-status', query: text, status: command === 'done' ? 'completed' : 'in_progress', featureId: current })
-    return console.log(`${command === 'done' ? 'Concluída' : 'Em andamento'}: ${r.title}`)
+    // Ao concluir: o commit do momento e se há mudanças fora de commit (a tarefa fica marcada até o próximo commit).
+    const dirty = command === 'done' ? uncommittedChanges(root) : 0
+    const r = await memoryApi({
+      action: 'task-status',
+      query: text,
+      status: command === 'done' ? 'completed' : 'in_progress',
+      featureId: current,
+      ...(command === 'done' && { commit: gitHead(root), dirty: dirty > 0 }),
+    })
+    console.log(`${command === 'done' ? 'Concluída' : 'Em andamento'}: ${r.title}`)
+    if (dirty)
+      console.log(
+        `Atenção: ${dirty} arquivo(s) com mudanças fora de commit. A tarefa aparece como "sem commit" no painel até o próximo git commit; se o trabalho dela está nessas mudanças, faça o commit (com o OK do usuário) ou diga a ele que ficou pendente.`,
+      )
+    return
   }
   if (command === 'focus') {
     const { features } = await memoryApi({ action: 'board' })
@@ -834,8 +901,19 @@ async function workCommand(command, args) {
   }
   if (command === 'board') {
     const all = args.includes('--all') || !current
-    const { features, orphanTasks, concerns, allFeatures } = await memoryApi({ action: 'board', featureId: all ? null : current })
+    const { features, orphanTasks, concerns, allFeatures, decisions } = await memoryApi({ action: 'board', featureId: all ? null : current })
     const byId = new Map((allFeatures ?? features).map((f) => [f.id, f]))
+    // --memory: as regras e decisões confirmadas (para conferir o código contra elas).
+    if (args.includes('--memory')) {
+      if (!decisions?.length) return console.log('Nenhuma regra ou decisão registrada.')
+      console.log('Regras e decisões confirmadas:')
+      decisions.forEach((d, i) =>
+        console.log(
+          `  ${i + 1}. ${d.kind === 'rule' ? 'Regra' : 'Decisão'}: ${d.title}${d.body ? ` — ${d.body}` : ''}${d.paths?.length ? ` [arquivos: ${d.paths.join(', ')}]` : ''}${d.forbid ? ` [o código não pode ter: ${d.forbid}]` : ''}`,
+        ),
+      )
+      return
+    }
     if (concerns?.length) {
       console.log('Preocupações abertas (para revisar):')
       concerns.forEach((c) => console.log(`  P-${c.ref}  ${c.title}${c.body ? ` — ${c.body}` : ''}`))
@@ -2456,6 +2534,16 @@ function rulesOnce(root, sid, rel) {
   }
 }
 
+// Regra do time com padrão proibido que a mudança traz: avisa a cada edição (não só a primeira).
+function forbiddenCheck(root, rel, content) {
+  try {
+    return forbiddenNote(rel, forbiddenIn(readRules(root), rel, content))
+  } catch (err) {
+    log(`guard regra contrariada: ${err?.message ?? err}`)
+    return null
+  }
+}
+
 // Antes da primeira edição de cada arquivo na sessão: quem depende dele, pelo grafo local.
 function dependentsOnce(root, sid, rel) {
   try {
@@ -2528,6 +2616,7 @@ async function guard() {
     warn.length && `[Faundr] Atenção: ${rel} vai receber o que parece ser uma chave secreta (${warn.map((w) => `${w.name}: ${w.masked}`).join('; ')}). ${how}`,
     takeSecurityAlert(payload.session_id),
     ...loopNotes(payload.session_id, file, rel),
+    forbiddenCheck(path.dirname(linkFile), rel, content),
     rulesOnce(path.dirname(linkFile), payload.session_id, rel),
     payload.tool_name !== 'Write' && dependentsOnce(path.dirname(linkFile), payload.session_id, rel),
   ].filter(Boolean)
@@ -3350,7 +3439,7 @@ async function cli() {
     else if (command === 'graph-callers') await graphCommand('callers', args)
     else if (command === 'graph-skeleton') await graphCommand('skeleton', args)
     else if (command === 'graph-grep') await graphCommand('grep', args)
-    else if (['feature', 'task', 'decision', 'rule', 'concern', 'resolve', 'done', 'start', 'focus', 'board'].includes(command)) await work(command, args)
+    else if (['feature', 'task', 'decision', 'rule', 'concern', 'resolve', 'done', 'start', 'focus', 'board', 'criteria', 'criteria-check'].includes(command)) await work(command, args)
     else if (command === 'overview-context') await overviewContext()
     else if (command === 'overview-save') await overviewSave(args)
     else if (command === 'handoff') await handoffCommand(args)
@@ -3415,7 +3504,7 @@ async function cli() {
     else if (command === 'errors-uptime') await errorsUptime(args)
     else
       console.log(
-        'comandos: login | link | status | checkpoint | checkpoints | restore | graph | graph-query | graph-path | graph-explain | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | concern | resolve | start | done | focus | board | handoff | handover | weekly | resume | stack-scan | env-check | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | security-import | security-supabase | db-test | launch-check | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
+        'comandos: login | link | status | checkpoint | checkpoints | restore | graph | graph-query | graph-path | graph-explain | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | concern | resolve | start | done | focus | board | criteria | criteria-check | handoff | handover | weekly | resume | stack-scan | env-check | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | security-import | security-supabase | db-test | launch-check | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
       )
   } catch (err) {
     if (['graph', 'design-lint', 'security-scan', 'quality-scan', 'tests-scan', 'stack-scan', 'env-check', 'usage-sync', 'checkpoints-sync'].includes(command) && args.includes('--quiet')) log(`${command}: ${err.message}`)

@@ -13,6 +13,7 @@ import { analyzeQuality, qualityGrammar, unusedCode } from '../dist/graph.mjs'
 import { ignoreSet } from './design-rules.mjs'
 import { projectParts } from './parts.mjs'
 import { foreignKeysWithoutIndex, queriesInLoops, unboundedQueries } from './perf-rules.mjs'
+import { matchesPath, readRules } from './rules.mjs'
 import { projectFiles } from './security.mjs'
 
 const MAX_FILE = 400_000
@@ -389,7 +390,7 @@ export async function runQuality(root, { only = null, history = true, tools = tr
 /** Lê cada arquivo pela árvore de sintaxe: achados por arquivo, medidas das funções e o que importa/exporta. */
 async function analyzeFiles(root, files, c, errors) {
   const out = { lines: 0, ignored: 0, metrics: new Map(), modules: new Map(), texts: new Map(), shortcuts: [] }
-  const house = houseRules(root)
+  const house = [...houseRules(root), ...memoryRules(root)]
   for (const rel of files) {
     const text = read(root, rel)
     if (!text || GENERATED_HEADER.test(text.slice(0, 300))) continue
@@ -752,6 +753,28 @@ function globToRegex(glob) {
 }
 
 /** Regras escritas pelo time: uma por arquivo .md com frontmatter (nome, padrao, arquivos, gravidade) e a mensagem no corpo. */
+// Regras e decisões da memória com padrão proibido (faundr rule "..." --forbid "<padrão>"), da cópia local que
+// o guard usa. Mesmo caminho das regras da casa, com outro texto.
+export function memoryRules(root) {
+  const out = []
+  for (const r of readRules(root)) {
+    if (!r.forbid) continue
+    let re
+    try {
+      re = new RegExp(r.forbid)
+    } catch {
+      continue
+    }
+    out.push({
+      rule: `memoria/${String(r.id).slice(0, 8)}`,
+      files: { test: (rel) => (r.paths ?? []).some((p) => matchesPath(p, rel)) },
+      ctx: { memory: true, name: r.title, message: r.body ?? '', pattern: r.forbid, severity: 'medium' },
+      lines: (text) => text.split('\n').flatMap((l, i) => (re.test(l) ? [i + 1] : [])),
+    })
+  }
+  return out
+}
+
 export function houseRules(root) {
   let names = []
   try {
@@ -788,6 +811,13 @@ export function houseRules(root) {
 }
 
 function houseText(c, n) {
+  if (c.memory)
+    return [
+      `Regra do time contrariada: ${c.name}${n > 1 ? ` (${n} lugares)` : ''}`,
+      `O código tem o que a regra registrada no Faundr proíbe (padrão: ${c.pattern}).`,
+      c.message || 'O time registrou esta regra para o projeto.',
+      'Ajuste o código para seguir a regra. Se ela não vale mais, mude ou apague a regra no painel (Memória) em vez de ignorar.',
+    ]
   return [
     `Regra da casa: ${c.name}${n > 1 ? ` (${n} lugares)` : ''}`,
     `O código bate com uma regra escrita pelo time em ${c.file}.`,

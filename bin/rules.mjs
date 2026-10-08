@@ -53,3 +53,30 @@ export function rulesNote(root, rel, rules) {
   })
   return `[Faundr] Regras do time para ${rel} (valem para este arquivo; siga):\n${lines.join('\n')}`
 }
+
+/** Regras com padrão proibido (forbid) que o texto contraria neste arquivo: [{ rule, line }] (linha de exemplo). */
+export function forbiddenIn(rules, rel, text) {
+  const out = []
+  for (const r of rules) {
+    if (!r.forbid || !r.paths?.some((p) => matchesPath(p, rel))) continue
+    let re
+    try {
+      re = new RegExp(r.forbid)
+    } catch {
+      continue
+    }
+    const line = text.split('\n').find((l) => re.test(l))
+    if (line !== undefined) out.push({ rule: r, line: line.trim().slice(0, 160) })
+  }
+  return out
+}
+
+/** Aviso antes da edição: a mudança traz algo que uma regra do time proíbe. */
+export function forbiddenNote(rel, hits) {
+  if (!hits.length) return null
+  return [
+    `[Faundr] Esta mudança em ${rel} contraria ${hits.length === 1 ? 'uma regra' : `${hits.length} regras`} do time:`,
+    ...hits.map((h) => `- "${h.rule.title}" (o código não pode ter: ${h.rule.forbid}). Trecho: ${h.line}`),
+    'Ajuste antes de gravar. Se a regra não vale mais, pergunte ao usuário antes de seguir (ela pode ser mudada no painel, em Memória).',
+  ].join('\n')
+}

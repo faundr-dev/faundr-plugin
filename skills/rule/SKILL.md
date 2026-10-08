@@ -13,3 +13,5 @@ Separe a regra (curta e afirmativa, ex.: "Toda rota do servidor confere o acesso
 Sem caminhos, a regra vale para tudo e entra no início de toda sessão. Se a regra claramente fala de uma parte do código mas o usuário não disse onde, sugira os caminhos (use `faundr graph-query` se houver grafo) e pergunte em uma frase antes de registrar.
 
 Confirme em uma frase: com caminhos, diga que ela chega ao agente antes de ele editar esses arquivos (já nesta sessão); sem caminhos, que todo agente recebe a regra a partir da próxima sessão.
+
+Se a regra proíbe algo que dá para achar pelo texto do código (uma biblioteca, uma função, um jeito de escrever: "não usar axios", "sem console.log nas telas", "nada de chave do Stripe no front"), acrescente `--forbid "<expressão regular>"` (ex.: `--forbid "from ['\"]axios['\"]"`). Assim o Faundr avisa antes de uma edição que traga isso e a checagem de qualidade aponta onde já existe. Diga ao usuário o padrão que usou.
