@@ -1755,7 +1755,7 @@ async function launchCheck(args) {
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data.error ?? `Erro da API (${res.status})`)
-  console.log('\nO checklist completo (com segurança, erros, testes, Stack e backup) está no painel: Visão geral → Pronto para lançar?')
+  console.log('\nO checklist completo (com segurança, erros, testes, Stack e backup) está no painel: Lançamento → Pronto para lançar?')
 }
 
 async function securityReviewDone(args) {
