@@ -17,6 +17,7 @@ import path from 'node:path'
 import { SECRET_RULES } from '../dist/secret-rules.mjs'
 import { LOCKFILE, parseLockfile } from './lockfiles.mjs'
 import { allDeps, partWith, projectParts } from './parts.mjs'
+import { remoteDatabaseFindings } from './env-target.mjs'
 
 const SEVERITIES = ['critical', 'high', 'medium', 'low']
 const lower = (s) => SEVERITIES[Math.min(SEVERITIES.indexOf(s) + 1, SEVERITIES.length - 1)]
@@ -1251,6 +1252,8 @@ export async function scanProject(root, { only = null, deps = true, history = fa
   // ou quando um arquivo que muda essa resposta foi editado.
   if (!only || files.some((f) => SERVER_ROUTE.test(f) || HEADER_FILES.test(f) || /(^|\/)(package\.json|firestore\.rules|storage\.rules|database\.rules\.json)$/.test(f))) {
     findings.push(...scanConfig(root, all))
+    // O .env do computador apontando para o banco da nuvem (o dos usuários, muitas vezes).
+    findings.push(...remoteDatabaseFindings(root))
     scopes.push({ source: 'config', files: null })
   }
 

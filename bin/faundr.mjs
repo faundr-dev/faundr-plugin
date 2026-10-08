@@ -78,6 +78,9 @@
 //   faundr errors-dsn                          endereço (DSN) para o app publicado mandar erros ao Faundr (SDK do Sentry)
 //   faundr errors-uptime <https://site> | --off  confere o site a cada 5 min; fora do ar vira E-n
 //   faundr errors-import-sentry --org O --project P  traz os erros abertos de quem já usa o Sentry (SENTRY_AUTH_TOKEN)
+//   faundr checkpoint ["motivo"]               salva um ponto de volta dos arquivos (o Faundr já salva sozinho antes das mudanças)
+//   faundr checkpoints                         lista os pontos de volta e o que mudou desde cada um
+//   faundr restore <n> [--yes]                 volta os arquivos para o ponto n (sem --yes, só mostra o que mudaria)
 //   faundr guard claude                       chamado pelo hook PreToolUse: barra chaves perigosas antes de gravar
 //   faundr hook <claude|codex>                 chamado pelos hooks (lê o JSON do stdin)
 //
@@ -102,6 +105,8 @@ import { dependentsNote, readGraph } from './dependents.mjs'
 import { readRules, rulesFor, rulesNote, writeRules } from './rules.mjs'
 import { installStatusline, statusFromBoard, statusLine } from './statusline.mjs'
 import { agentsBlock, removeBlock, upsertBlock } from './agents-md.mjs'
+import { editLoopNote, proofNeeded, recordCheck, recordEdit, takeLoopAlerts } from './loop.mjs'
+import { changesSince, createCheckpoint, currentTree, describeChanges, ensureSessionCheckpoint, findCheckpoint, gitRoot, listCheckpoints, restoreCheckpoint } from './checkpoints.mjs'
 
 const CONFIG_DIR = path.join(os.homedir(), '.faundr')
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json')
@@ -262,7 +267,7 @@ function sessionEditedFiles(sessionId, fromLine = 0) {
 function cleanEditedMarkers() {
   try {
     for (const f of fs.readdirSync(CONFIG_DIR)) {
-      if (!f.startsWith('edited-')) continue
+      if (!/^(edited|loop)-/.test(f)) continue
       const file = path.join(CONFIG_DIR, f)
       if (Date.now() - fs.statSync(file).mtimeMs > 2 * 24 * 3600_000) fs.unlinkSync(file)
     }
@@ -319,6 +324,14 @@ async function currentStep(projectId, featureId, token, apiUrl) {
   return { feature: f, next: (f.next ?? []).map((id) => byId.get(id)).filter((n) => n && !n.finished) }
 }
 
+// Há algo para provar que funciona (build, testes, tipos)? Sem isso, pedir a prova só gastaria tokens.
+function hasChecks(root) {
+  try {
+    if (allScripts(root).some((s) => /^(build|test|typecheck|type-check|check|lint|tsc)/.test(s.name))) return true
+  } catch {}
+  return ['tsconfig.json', 'pyproject.toml', 'pytest.ini', 'setup.cfg', 'Cargo.toml', 'go.mod'].some((f) => fs.existsSync(path.join(root, f)))
+}
+
 async function gate() {
   const payload = JSON.parse(await readStdin())
   if (payload.stop_hook_active) return // já estamos continuando por causa de um Stop: não repetir
@@ -344,11 +357,18 @@ async function gate() {
   const stale = readState(root).overviewNudgedSession === sid ? null : await overviewStale(projectId, token, apiUrl)
   // Stack: só quando já foi revisada e a detecção mudou (pacote, deploy, serviço novo). Uma vez por sessão.
   const stackStale = readState(root).stackNudgedSession === sid ? null : await overviewStale(projectId, token, apiUrl, 'stack').catch(() => null)
-  if (!handoff && !stale && !stackStale && !designFiles.length && !finished) return
+  // Prova: código mudou e nenhuma checagem passou depois (uma vez por leva de mudanças, só se há o que rodar).
+  const proof = hasChecks(root) ? proofNeeded(CONFIG_DIR, sid) : null
+  if (!handoff && !stale && !stackStale && !designFiles.length && !finished && !proof) return
   if (stale) writeState(root, { overviewNudgedSession: sid })
   if (stackStale) writeState(root, { stackNudgedSession: sid })
 
   const steps = []
+  if (proof)
+    steps.push(
+      (proof.failing.length ? `\`${proof.failing[0]}\` ainda está falhando: conserte ou diga claramente ao usuário que não está funcionando. ` : '') +
+        'confira que o que você mudou funciona antes de dizer que está pronto: rode o que fizer sentido aqui (build, testes, checagem de tipos ou o próprio app) e conte o resultado ao usuário em uma linha; se não der para rodar, diga isso em vez de afirmar que funciona',
+    )
   if (handoff)
     steps.push(
       'escreva o bilhete de passagem de bastão: 1 a 3 frases, em português simples, dizendo o que ficou pela metade, qual é a próxima etapa da funcionalidade em que você está trabalhando (veja faundr board; se ela tiver etapas registradas, cite a próxima pelo nome) e qualquer cuidado para quem continuar (não repita a lista de arquivos; se nada ficou pendente, diga isso). Rode com a ferramenta Bash: faundr handoff "<bilhete>"',
@@ -400,6 +420,11 @@ async function hook(agent) {
   if (event === 'PostToolUse' && EDIT_TOOLS.has(payload.tool_name)) {
     markGraphDirty(projectId)
     markSessionEdited(payload.session_id, payload.tool_input?.file_path ?? payload.tool_input?.notebook_path)
+    try {
+      recordEdit(CONFIG_DIR, payload.session_id, payload.tool_input?.file_path ?? payload.tool_input?.notebook_path)
+    } catch (err) {
+      log(`prova: ${err?.message ?? err}`)
+    }
   }
   // Trabalhos em segundo plano, todos num processo só (ver spawnBackground).
   const background = []
@@ -421,6 +446,8 @@ async function hook(agent) {
   if (startJobs && readState(path.dirname(linkFile)).agentsMd?.length) background.push(['agents-md', '--sync', '--quiet'])
   // Stack sem IA: pacotes, deploy e variáveis mudam pouco; só envia quando a impressão digital muda.
   if (startJobs) background.push(['stack-scan', '--quiet'])
+  // Pontos de volta no painel: no início (o que mudou desde o último) e no fim das respostas que mudaram arquivos.
+  if (startJobs || (event === 'Stop' && fs.existsSync(editedFile(payload.session_id)))) background.push(['checkpoints-sync', '--quiet'])
   // Impacto: lembra a conversa desta sessão e reenvia o uso das anteriores (o fim delas costuma se perder).
   if (agent === 'claude' && CONTEXT_EVENTS.has(event) && payload.transcript_path) {
     const root = path.dirname(linkFile)
@@ -1135,6 +1162,12 @@ async function captureErrors(payload, root, projectId, config) {
   const passed = !failed && !issues.length
   if (passed && filtered) return // saída filtrada vazia não prova nada
   if (!passed && !issues.length) return
+  // Detector de loop: o mesmo erro voltando seguidas vezes vira aviso ao agente no próximo PreToolUse.
+  try {
+    recordCheck(CONFIG_DIR, payload.session_id, { checkKey: c.checkKey, passed, issues })
+  } catch (err) {
+    log(`loop: ${err?.message ?? err}`)
+  }
   const openKeys = readState(root).errorsOpenKeys
   if (passed && Array.isArray(openKeys) && !openKeys.includes(c.checkKey)) return // nada aberto para este comando
   const sent = await errorsApi(
@@ -2292,6 +2325,20 @@ function dependentsOnce(root, sid, rel) {
   }
 }
 
+// Avisos do detector de loop: o mesmo erro seguidas vezes, ou muitas mudanças no arquivo com algo falhando.
+function loopNotes(sid, file, rel) {
+  try {
+    let priorEdits = 0
+    try {
+      priorEdits = fs.readFileSync(editedFile(sid), 'utf8').split('\n').filter((l) => l.trim() === file).length
+    } catch {}
+    return [...takeLoopAlerts(CONFIG_DIR, sid), editLoopNote(CONFIG_DIR, sid, { rel, priorEdits })]
+  } catch (err) {
+    log(`guard loop: ${err?.message ?? err}`)
+    return []
+  }
+}
+
 // PreToolUse: antes de gravar, procura chaves no conteúdo novo. Barra as mais perigosas e avisa das outras.
 async function guard() {
   const payload = JSON.parse(await readStdin())
@@ -2305,6 +2352,15 @@ async function guard() {
     .join('\n')
   const rel = path.relative(path.dirname(linkFile), path.resolve(payload.cwd ?? process.cwd(), file)).split(path.sep).join('/')
   const { block, warn } = guardContent(content, rel)
+  // Ponto de volta antes da primeira edição da sessão (e de novo a cada 30 min de edições).
+  let checkpoint = null
+  if (!block.length) {
+    try {
+      checkpoint = ensureSessionCheckpoint(path.dirname(linkFile), payload.session_id, { configDir: CONFIG_DIR })
+    } catch (err) {
+      log(`guard ponto de volta: ${err?.message ?? err}`)
+    }
+  }
   const how = 'Coloque o valor no arquivo .env (que não vai para o git) e leia com process.env.NOME_DA_VARIAVEL; se for só exemplo, use um valor claramente falso (ex.: sk_live_xxx).'
   if (block.length) {
     log(`guard: barrou ${block.map((b) => b.name).join(', ')} em ${rel}`)
@@ -2321,12 +2377,99 @@ async function guard() {
   // O alerta da checagem de segurança em segundo plano entra antes da próxima edição: o hook de cada pergunta
   // roda em segundo plano e o Claude Code descarta o que ele devolve.
   const context = [
+    checkpoint && '[Faundr] Ponto de volta dos arquivos salvo antes desta mudança (para desfazer: /faundr:undo).',
     warn.length && `[Faundr] Atenção: ${rel} vai receber o que parece ser uma chave secreta (${warn.map((w) => `${w.name}: ${w.masked}`).join('; ')}). ${how}`,
     takeSecurityAlert(payload.session_id),
+    ...loopNotes(payload.session_id, file, rel),
     rulesOnce(path.dirname(linkFile), payload.session_id, rel),
     payload.tool_name !== 'Write' && dependentsOnce(path.dirname(linkFile), payload.session_id, rel),
   ].filter(Boolean)
   if (context.length) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: context.join('\n\n') } }))
+}
+
+// ---- Pontos de volta ---------------------------------------------------------------------------
+
+function checkpointRoot() {
+  const root = gitRoot(process.cwd())
+  if (!root) throw new Error('Esta pasta não está num repositório git: sem git, o Faundr não consegue guardar pontos de volta. Para começar: git init')
+  return root
+}
+
+const when = (iso) => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+
+function checkpointCommand(args) {
+  const root = checkpointRoot()
+  const reason = args.filter((a) => !a.startsWith('--')).join(' ').trim() || 'salvo na mão'
+  const c = createCheckpoint(root, { reason })
+  console.log(c.created ? `Ponto de volta salvo (${when(c.at)}): ${reason}.` : `Nada mudou desde o último ponto de volta (${when(c.at)}); ele continua valendo.`)
+}
+
+function checkpointsList(args) {
+  const root = checkpointRoot()
+  const all = listCheckpoints(root)
+  if (!all.length) return console.log('Nenhum ponto de volta ainda. O Faundr salva um sozinho antes da primeira mudança de cada sessão (ou: faundr checkpoint).')
+  const limit = Number(flag(args, '--limit')) || 10
+  const shown = all.slice(0, limit)
+  // Uma foto do estado atual para comparar com todos (abrir o git leva tempo no Windows).
+  const now = currentTree(root)
+  console.log('Pontos de volta (o 1 é o mais recente). Para voltar: faundr restore <n>')
+  for (const c of shown) {
+    let changes = null
+    try {
+      changes = changesSince(root, c, now)
+    } catch {}
+    const since = !changes ? '' : changes.length ? `desde então: ${describeChanges(changes)}` : 'os arquivos estão iguais a este ponto'
+    console.log(`  ${c.n}. ${when(c.at)} · ${c.reason}${since ? `\n     ${since}` : ''}`)
+  }
+  if (all.length > shown.length) console.log(`  … e mais ${all.length - shown.length} (--limit ${all.length})`)
+}
+
+// Manda ao painel os 20 pontos de volta mais recentes e o que mudou depois de cada um (só nomes de arquivo).
+// Só quando há ponto novo ou os arquivos mudaram desde o último envio.
+async function checkpointsSync(args) {
+  const { root, projectId, config } = linkedProject()
+  const repo = gitRoot(root)
+  if (!repo) return
+  const all = listCheckpoints(repo).slice(0, 20)
+  if (!all.length) return
+  const now = currentTree(repo)
+  const last = readState(root).checkpointsSynced
+  if (last?.newest === all[0].commit && last?.tree === now) return
+  const at = new Date().toISOString()
+  const checkpoints = all.map((c, i) => {
+    const changes = changesSince(repo, c, i === 0 ? now : all[i - 1].tree)
+    return { commit: c.commit, at: c.at, reason: c.reason, session: c.session, changes: changes.slice(0, 60), changesCount: changes.length, changesUntil: i === 0 ? at : all[i - 1].at }
+  })
+  const res = await fetch(`${config.apiUrl}/api/cli/checkpoints`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${config.token}` },
+    body: JSON.stringify({ projectId, action: 'sync', agent: 'claude', checkpoints }),
+    signal: AbortSignal.timeout(20_000),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error ?? `Erro da API (${res.status})`)
+  writeState(root, { checkpointsSynced: { newest: all[0].commit, tree: now } })
+  if (!args.includes('--quiet')) console.log(`${data.saved ?? 0} pontos de volta enviados ao painel (Atividade → Pontos de volta).`)
+}
+
+function restoreCommand(args) {
+  const root = checkpointRoot()
+  const which = args.find((a) => !a.startsWith('--'))
+  if (!which) throw new Error('Diga qual ponto de volta: faundr restore <n> (veja a lista com faundr checkpoints).')
+  const c = findCheckpoint(root, which)
+  if (!c) throw new Error(`Ponto de volta ${which} não encontrado (veja a lista com faundr checkpoints).`)
+  const changes = changesSince(root, c)
+  if (!changes.length) return console.log(`Os arquivos já estão iguais ao ponto de ${when(c.at)}; nada a fazer.`)
+  if (!args.includes('--yes')) {
+    console.log(`Voltar para o ponto de ${when(c.at)} (${c.reason}) desfaz isto:`)
+    for (const ch of changes.slice(0, 40)) console.log(`  ${ch.status === 'criado' ? 'apaga (foi criado depois)' : ch.status === 'apagado' ? 'traz de volta (foi apagado depois)' : 'volta como era'}: ${ch.path}`)
+    if (changes.length > 40) console.log(`  … e mais ${changes.length - 40}`)
+    console.log('O estado atual é salvo antes, como um ponto de volta novo: dá para desfazer a volta. Arquivos fora do git (.env, node_modules) e o banco de dados não mudam.')
+    return console.log(`Para confirmar: faundr restore ${c.n} --yes`)
+  }
+  const r = restoreCheckpoint(root, c)
+  console.log(`Pronto: arquivos de volta ao ponto de ${when(c.at)} (${r.restored.length} restaurados, ${r.removed.length} apagados).`)
+  console.log(`O estado de antes ficou salvo como ponto de volta (${when(r.saved.at)}); para desfazer a volta: faundr restore 1 --yes`)
 }
 
 // ---- Design ----------------------------------------------------------------------------------
@@ -3049,6 +3192,10 @@ async function cli() {
     else if (command === 'statusline-install') statuslineInstall(args)
     else if (command === 'agents-md') await agentsMd(args)
     else if (command === 'usage' && args.includes('--debug')) usageDebug(args)
+    else if (command === 'checkpoint') checkpointCommand(args)
+    else if (command === 'checkpoints') checkpointsList(args)
+    else if (command === 'restore') restoreCommand(args)
+    else if (command === 'checkpoints-sync') await checkpointsSync(args)
     else if (command === 'graph') await graph(args)
     else if (command === 'graph-query') await graphCommand('query', args)
     else if (command === 'graph-path') await graphCommand('path', args)
@@ -3116,10 +3263,10 @@ async function cli() {
     else if (command === 'errors-uptime') await errorsUptime(args)
     else
       console.log(
-        'comandos: login | link | status | graph | graph-query | graph-path | graph-explain | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | concern | resolve | start | done | focus | board | handoff | resume | stack-scan | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | security-import | security-supabase | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
+        'comandos: login | link | status | checkpoint | checkpoints | restore | graph | graph-query | graph-path | graph-explain | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | concern | resolve | start | done | focus | board | handoff | resume | stack-scan | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | security-import | security-supabase | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
       )
   } catch (err) {
-    if (['graph', 'design-lint', 'security-scan', 'quality-scan', 'tests-scan', 'stack-scan', 'usage-sync'].includes(command) && args.includes('--quiet')) log(`${command}: ${err.message}`)
+    if (['graph', 'design-lint', 'security-scan', 'quality-scan', 'tests-scan', 'stack-scan', 'usage-sync', 'checkpoints-sync'].includes(command) && args.includes('--quiet')) log(`${command}: ${err.message}`)
     else console.log(err.message)
     process.exit(1)
   }
