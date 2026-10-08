@@ -142,7 +142,9 @@ export function checkPaymentWebhook(root, files) {
 
 // ---- Política de privacidade -----------------------------------------------------------------------------------
 
-const PRIVACY_PATH = /(privac|privacy|politica-de-privacidade|lgpd)/i
+// O nome do arquivo da página (privacidade.tsx, privacy/page.tsx, politica-de-privacidade.html), numa pasta de páginas.
+const PRIVACY_PATH = /(^|\/)[^/]*(privac|privacy|politica-de-privacidade)[^/]*(\/(page|index|route)\.[a-z]+)?$/i
+export const PAGE_DIR = /(^|\/)(routes|pages|app|public|static|views|site|content)\//i
 // Link para a página (href ou to apontando para privacidade), não só o texto citado numa explicação.
 const PRIVACY_LINK = /\b(href|to)=\{?["'`][^"'`]*(privac|privacy|politica|lgpd)[^"'`]*["'`]/i
 
@@ -150,7 +152,7 @@ export function checkPrivacy(root, files) {
   const key = 'privacidade'
   const code = codeFiles(files)
   // Só páginas (telas, HTML ou Markdown publicado), não código que só tem "privacy" no nome.
-  const byPath = code.filter((f) => PRIVACY_PATH.test(f) && /\.(m?[jt]sx|vue|svelte|astro|html|mdx?)$/.test(f) && !/(^|\/)(docs?|\.github|plugin|bin|scripts?)\//i.test(f))
+  const byPath = code.filter((f) => PRIVACY_PATH.test(f) && PAGE_DIR.test(f) && /\.(m?[jt]sx|vue|svelte|astro|html|mdx?)$/.test(f) && !/(^|\/)(docs?|\.github|plugin|bin|scripts?)\//i.test(f))
   if (byPath.length) return { key, status: 'ok', detail: `Há uma página de privacidade (${byPath[0]}).`, evidence: byPath.slice(0, 3) }
   const ui = code.filter((f) => /\.(m?[jt]sx|vue|svelte|astro|html)$/.test(f))
   const link = ui.find((f) => PRIVACY_LINK.test(read(root, f)))

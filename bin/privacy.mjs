@@ -4,7 +4,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { checkPrivacy } from './launch.mjs'
+import { checkPrivacy, PAGE_DIR } from './launch.mjs'
 
 const MAX_FILE = 400_000
 const SKIP = /(^|\/)(node_modules|dist|build|\.next|\.output|\.svelte-kit|\.git|\.faundr|vendor|coverage|\.wrangler|\.vercel|bench|docs?|examples?|plugin|engine)\//
@@ -130,8 +130,9 @@ function dependencies(root, files) {
 
 const COOKIE_CONSENT_DEP = /(cookieconsent|cookie-consent|@cookiehub|cookiebot|klaro|osano|onetrust|usercentrics|@consentmanager)/i
 const COOKIE_CONSENT_TEXT = /(aceitar (todos os )?cookies|accept (all )?cookies|consentimento (de|para) cookies|cookie consent|gerenciar cookies|prefer[eê]ncias de cookies)/i
-const TERMS_PATH = /(termos|terms|tos\b|condicoes|condições)/i
-const TERMS_TEXT = /(termos de uso|termos de serviço|terms of (service|use))/i
+const TERMS_PATH = /(^|\/)[^/]*(termos|terms|condicoes|condições)[^/]*(\/(page|index|route)\.[a-z]+)?$/i
+// Link para a página de termos (não só o texto citado numa explicação).
+const TERMS_LINK = /\b(href|to)=\{?["'`][^"'`]*(termos|terms|condicoes)[^"'`]*["'`]/i
 const DELETE_ACCOUNT = /(excluir (minha )?conta|apagar (minha )?conta|deletar (minha )?conta|delete (my )?account|deleteUser\(|auth\.admin\.deleteUser|delete_account|account\/delete|excluir-conta)/i
 
 /** Inventário de dados pessoais e terceiros, e os itens de LGPD para o checklist. */
@@ -179,7 +180,7 @@ export function privacyScan(root, files) {
 
   const has = (re) => code.some((f) => re.test(texts.get(f)))
   const policy = checkPrivacy(root, files)
-  const termsFile = app.find((f) => UI.test(f) && TERMS_PATH.test(f))
+  const termsFile = app.find((f) => UI.test(f) && PAGE_DIR.test(f) && TERMS_PATH.test(f))
   const cookieTrackers = third.filter((t) => t.cookies && t.kind === 'rastreador')
   const consent = [...deps].some((d) => COOKIE_CONSENT_DEP.test(d)) || has(COOKIE_CONSENT_TEXT)
   const sensitive = [...data.values()].filter((d) => d.sensitive)
@@ -189,7 +190,7 @@ export function privacyScan(root, files) {
     { key: 'lgpd-privacidade', status: policy.status, detail: policy.detail, evidence: policy.evidence },
     termsFile
       ? { key: 'lgpd-termos', status: 'ok', detail: `Há uma página de termos (${termsFile}).`, evidence: [termsFile] }
-      : has(TERMS_TEXT)
+      : has(TERMS_LINK)
         ? { key: 'lgpd-termos', status: 'aviso', detail: 'O site cita os termos de uso, mas não achei a página deles.', evidence: [] }
         : { key: 'lgpd-termos', status: 'falta', detail: 'Não há termos de uso: as regras de uso do app, o que a pessoa pode e não pode fazer e as responsabilidades.', evidence: [] },
     !cookieTrackers.length

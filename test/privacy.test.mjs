@@ -46,6 +46,16 @@ test('rastreador com cookies sem consentimento = falta; com banner = ok; sem ras
   assert.equal(check(privacyScan(d, files), 'lgpd-cookies').status, 'na', 'analytics sem cookies')
 })
 
+test('componente com "lgpd" no nome e texto que só cita os termos não contam como página', () => {
+  const [d, files] = project({
+    'src/components/LgpdPanel.tsx': '<p>Política de privacidade e Termos de uso: o que falta.</p>',
+    'plugin/bin/privacy.mjs': '// privacy',
+  })
+  const r = privacyScan(d, files)
+  assert.equal(check(r, 'lgpd-privacidade').status, 'falta')
+  assert.equal(check(r, 'lgpd-termos').status, 'falta')
+})
+
 test('termos, política e exclusão de conta encontrados', () => {
   const [d, files] = project({
     'src/routes/termos.tsx': 'export default () => null',
