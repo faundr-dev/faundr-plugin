@@ -57,6 +57,7 @@
 //   faundr security-supabase [--ref <ref>]     Security Advisor do Supabase pela API (token em SUPABASE_ACCESS_TOKEN)
 //   faundr db-test [--ref <ref>] [--sql | --result <arquivo>] [--no-send]   Testa o banco como visitante e como outra pessoa (tudo desfeito)
 //   faundr launch-check [--url <site>] [--no-send]  "Pronto para lançar?": cabeçalhos, limite de pedidos, webhook de pagamento, privacidade, banco testado
+//   faundr lgpd [--no-send]                    LGPD: dados pessoais coletados, empresas que recebem, política, termos, cookies e exclusão de conta
 //   faundr security-report [--out arquivo.md]  relatório de segurança em Markdown (padrão: .faundr/relatorio-seguranca.md)
 //   faundr quality-scan [--files a,b]          checagem de qualidade sem IA (falha escondida, tipos, complexidade, código demais); --edited: só o editado
 //   faundr quality-show [Q-<n>]                problemas de qualidade abertos, ou os detalhes de um
@@ -113,6 +114,7 @@ import { installStatusline, statusFromBoard, statusLine } from './statusline.mjs
 import { agentsBlock, removeBlock, upsertBlock } from './agents-md.mjs'
 import { editLoopNote, proofNeeded, recordCheck, recordEdit, takeLoopAlerts } from './loop.mjs'
 import { launchChecks } from './launch.mjs'
+import { privacyScan } from './privacy.mjs'
 import { envMatrix, hostingFromCli, hostingProvider } from './env-matrix.mjs'
 import { anonReads, dbFindings, dbSummary, exposedTables, migrationTables, parseProbe, PROBE_SQL, probeWithToken, supabaseTarget } from './db-test.mjs'
 import { changesSince, createCheckpoint, currentTree, describeChanges, ensureSessionCheckpoint, findCheckpoint, gitRoot, listCheckpoints, restoreCheckpoint } from './checkpoints.mjs'
@@ -1885,6 +1887,43 @@ const LAUNCH_NAME = {
   privacidade: 'Política de privacidade',
 }
 
+// LGPD: que dados pessoais o app coleta, para quais empresas vão e o que falta (política, termos, cookies, exclusão).
+const LGPD_NAME = {
+  'lgpd-privacidade': 'Política de privacidade',
+  'lgpd-termos': 'Termos de uso',
+  'lgpd-cookies': 'Consentimento de cookies',
+  'lgpd-exclusao': 'Excluir a conta e os dados',
+  'lgpd-sensiveis': 'Dados sensíveis',
+  'lgpd-terceiros': 'Empresas que recebem os dados',
+}
+
+async function lgpd(args) {
+  const { root, projectId, config } = linkedProject()
+  const { files } = projectFiles(root)
+  const r = privacyScan(root, files)
+  if (!args.includes('--quiet')) {
+    console.log(r.data.length ? 'Dados pessoais que o app coleta:' : 'Não achei coleta de dados pessoais (formulários, banco ou login).')
+    for (const d of r.data) console.log(`  - ${d.category}${d.sensitive ? ' (SENSÍVEL)' : ''}: ${d.where.join('; ')}`)
+    if (r.thirdParties.length) {
+      console.log('Empresas que recebem dados:')
+      for (const t of r.thirdParties) console.log(`  - ${t.name}${t.kind === 'rastreador' ? ' [rastreador]' : ''}: ${t.what}${t.cookies ? '; usa cookies' : ''}`)
+    }
+    console.log('')
+    for (const c of r.checks) console.log(`[${LAUNCH_PT[c.status]}] ${LGPD_NAME[c.key]}: ${c.detail}`)
+  }
+  if (args.includes('--no-send')) return
+  const checks = [...r.checks, { key: 'lgpd-inventario', status: 'ok', detail: `${r.data.length} tipo(s) de dado pessoal, ${r.thirdParties.length} empresa(s)`, data: { data: r.data, thirdParties: r.thirdParties, auth: r.auth } }]
+  const res = await fetch(`${config.apiUrl}/api/cli/launch`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${config.token}` },
+    body: JSON.stringify({ projectId, action: 'report', checks }),
+    signal: AbortSignal.timeout(30_000),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error ?? `Erro da API (${res.status})`)
+  if (!args.includes('--quiet')) console.log('\nNo painel: Lançamento → LGPD. Para os rascunhos de política, termos e aviso de cookies: /faundr:lgpd')
+}
+
 async function launchCheck(args) {
   const { root, projectId, config } = linkedProject()
   const { files } = projectFiles(root)
@@ -3477,6 +3516,7 @@ async function cli() {
     else if (command === 'security-supabase') await securitySupabase(args)
     else if (command === 'db-test') await dbTest(args)
     else if (command === 'launch-check') await launchCheck(args)
+    else if (command === 'lgpd') await lgpd(args)
     else if (command === 'quality-scan') await qualityScan(args)
     else if (command === 'quality-show') await qualityShow(args)
     else if (command === 'quality-resolve') await qualityResolve(args)
@@ -3504,7 +3544,7 @@ async function cli() {
     else if (command === 'errors-uptime') await errorsUptime(args)
     else
       console.log(
-        'comandos: login | link | status | checkpoint | checkpoints | restore | graph | graph-query | graph-path | graph-explain | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | concern | resolve | start | done | focus | board | criteria | criteria-check | handoff | handover | weekly | resume | stack-scan | env-check | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | security-import | security-supabase | db-test | launch-check | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
+        'comandos: login | link | status | checkpoint | checkpoints | restore | graph | graph-query | graph-path | graph-explain | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | concern | resolve | start | done | focus | board | criteria | criteria-check | handoff | handover | weekly | resume | stack-scan | env-check | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | security-import | security-supabase | db-test | launch-check | lgpd | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
       )
   } catch (err) {
     if (['graph', 'design-lint', 'security-scan', 'quality-scan', 'tests-scan', 'stack-scan', 'env-check', 'usage-sync', 'checkpoints-sync'].includes(command) && args.includes('--quiet')) log(`${command}: ${err.message}`)

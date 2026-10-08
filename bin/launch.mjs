@@ -143,15 +143,17 @@ export function checkPaymentWebhook(root, files) {
 // ---- Política de privacidade -----------------------------------------------------------------------------------
 
 const PRIVACY_PATH = /(privac|privacy|politica-de-privacidade|lgpd)/i
-const PRIVACY_TEXT = /(pol[ií]tica\s+de\s+privacidade|privacy\s+policy|aviso\s+de\s+privacidade)/i
+// Link para a página (href ou to apontando para privacidade), não só o texto citado numa explicação.
+const PRIVACY_LINK = /\b(href|to)=\{?["'`][^"'`]*(privac|privacy|politica|lgpd)[^"'`]*["'`]/i
 
 export function checkPrivacy(root, files) {
   const key = 'privacidade'
   const code = codeFiles(files)
-  const byPath = code.filter((f) => PRIVACY_PATH.test(f) && !/(^|\/)(docs?|\.github)\//i.test(f))
+  // Só páginas (telas, HTML ou Markdown publicado), não código que só tem "privacy" no nome.
+  const byPath = code.filter((f) => PRIVACY_PATH.test(f) && /\.(m?[jt]sx|vue|svelte|astro|html|mdx?)$/.test(f) && !/(^|\/)(docs?|\.github|plugin|bin|scripts?)\//i.test(f))
   if (byPath.length) return { key, status: 'ok', detail: `Há uma página de privacidade (${byPath[0]}).`, evidence: byPath.slice(0, 3) }
   const ui = code.filter((f) => /\.(m?[jt]sx|vue|svelte|astro|html)$/.test(f))
-  const link = ui.find((f) => PRIVACY_TEXT.test(read(root, f)))
+  const link = ui.find((f) => PRIVACY_LINK.test(read(root, f)))
   if (link) return { key, status: 'aviso', detail: `O site cita a política de privacidade (${link}), mas não achei a página dela no projeto. Confira se o link abre um texto de verdade.`, evidence: [link] }
   return {
     key,

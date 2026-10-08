@@ -57,7 +57,7 @@ test('webhook de pagamento: sem serviço = na; webhook sem assinatura = falta; c
 test('política de privacidade: página = ok; só o texto = aviso; nada = falta', () => {
   let [d, files] = project({ 'src/routes/privacidade.tsx': 'export default () => null' })
   assert.equal(checkPrivacy(d, files).status, 'ok')
-  ;[d, files] = project({ 'src/Footer.tsx': '<a href="/x">Política de Privacidade</a>' })
+  ;[d, files] = project({ 'src/Footer.tsx': '<a href="/privacidade">Política de Privacidade</a>', 'src/Help.tsx': 'veja a política de privacidade' })
   assert.equal(checkPrivacy(d, files).status, 'aviso')
   ;[d, files] = project({ 'src/App.tsx': 'oi' })
   assert.equal(checkPrivacy(d, files).status, 'falta')
