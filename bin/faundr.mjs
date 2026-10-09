@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // CLI do Faundr. Sem dependências: roda com o Node do usuário.
 //
-//   faundr login <token> [--url https://...]   salva o token pessoal
+//   faundr login [--url https://...]           login pelo navegador (--start só pede o código, --wait espera a aprovação)
+//   faundr login <token> [--url https://...]   salva um token já existente (fora do chat)
 //   faundr link <projectId>                    liga a pasta atual a um projeto
 //   faundr status                              mostra configuração e ligação
 //   faundr graph                               gera o grafo de conhecimento do projeto e envia à plataforma
@@ -95,6 +96,7 @@
 // (os detalhes vão para ~/.faundr/hook.log).
 
 import { spawn, spawnSync } from 'node:child_process'
+import { createHash, randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -123,7 +125,7 @@ const CONFIG_DIR = path.join(os.homedir(), '.faundr')
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json')
 const LOG_FILE = path.join(CONFIG_DIR, 'hook.log')
 const LINK_FILE = '.faundr.json'
-// Site do Faundr no ar; para desenvolver o próprio Faundr: /faundr:login <token> --url http://localhost:3000.
+// Site do Faundr no ar; para desenvolver o próprio Faundr: /faundr:login --url http://localhost:3000.
 const DEFAULT_API_URL = 'https://faundr.palasbusinessstrategy.workers.dev'
 
 // Ferramentas que alteram arquivos: depois delas o grafo do projeto precisa ser refeito.
@@ -663,7 +665,7 @@ async function graph(args) {
   const root = path.dirname(linkFile)
   const { projectId } = readJson(linkFile) ?? {}
   const config = loadConfig()
-  if (!config.token) throw new Error('Sem token. Faça o login primeiro (/faundr:login <token>).')
+  if (!config.token) throw new Error('Sem token. Faça o login primeiro (/faundr:login).')
 
   // Evita duas gerações ao mesmo tempo no mesmo projeto.
   const lock = lockFile(projectId)
@@ -719,7 +721,7 @@ function linkedProject() {
   const linkFile = findUp(process.cwd(), LINK_FILE)
   if (!linkFile) throw new Error('Pasta não ligada a um projeto. Use /faundr:link primeiro.')
   const config = loadConfig()
-  if (!config.token) throw new Error('Sem token. Faça o login primeiro (/faundr:login <token>).')
+  if (!config.token) throw new Error('Sem token. Faça o login primeiro (/faundr:login).')
   return { root: path.dirname(linkFile), projectId: readJson(linkFile)?.projectId, config }
 }
 
@@ -3327,18 +3329,78 @@ async function fetchProjects({ token, apiUrl }) {
     headers: { authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(8000),
   })
-  if (res.status === 401) throw new Error('Token inválido. Gere um novo no painel e faça o login de novo.')
+  if (res.status === 401) throw new Error('Token inválido. Faça o login de novo (/faundr:login).')
   if (!res.ok) throw new Error(`Erro da API (${res.status}): ${await res.text()}`)
   return res.json()
 }
 
-async function login(token, args) {
-  if (!token) throw new Error('uso: faundr login <token> [--url https://...]')
-  const i = args.indexOf('--url')
-  const apiUrl = (i >= 0 ? args[i + 1] : (readJson(CONFIG_FILE)?.apiUrl ?? DEFAULT_API_URL)).replace(/\/+$/, '')
-  const projects = await fetchProjects({ token, apiUrl }) // valida antes de salvar
-  saveConfig({ token, apiUrl })
-  console.log(`Login feito (API: ${apiUrl}). Você tem ${projects.length} projeto(s).`)
+// Login pelo navegador: o token nasce aqui e só o hash vai para o Faundr; o dono aprova o código no painel
+// (/autorizar) e o token passa a valer. Assim ele nunca aparece no chat. Enquanto espera, fica em
+// ~/.faundr/pending-login.json (só neste computador, como o config.json).
+const PENDING_LOGIN_FILE = path.join(CONFIG_DIR, 'pending-login.json')
+const LOGIN_WAIT_MS = 5 * 60_000
+
+async function login(args) {
+  const urlAt = args.indexOf('--url')
+  const apiUrl = (urlAt >= 0 ? args[urlAt + 1] : (readJson(CONFIG_FILE)?.apiUrl ?? DEFAULT_API_URL)).replace(/\/+$/, '')
+  const token = args.find((a, i) => !a.startsWith('--') && i !== urlAt + 1)
+  if (token) {
+    const projects = await fetchProjects({ token, apiUrl }) // valida antes de salvar
+    saveConfig({ token, apiUrl })
+    return console.log(`Login feito (API: ${apiUrl}). Você tem ${projects.length} projeto(s).`)
+  }
+  const wait = args.includes('--wait')
+  if (!wait) await startLogin(apiUrl)
+  if (!args.includes('--start')) await waitLogin()
+}
+
+async function startLogin(apiUrl) {
+  const token = `fdr_${randomBytes(32).toString('base64url')}`
+  const res = await fetch(`${apiUrl}/api/cli/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ tokenHash: createHash('sha256').update(token).digest('hex'), label: `Plugin · ${os.hostname()}` }),
+    signal: AbortSignal.timeout(8000),
+  })
+  if (!res.ok) throw new Error(`Erro da API (${res.status}): ${await res.text()}`)
+  const { code, expiresInSeconds } = await res.json()
+  fs.mkdirSync(CONFIG_DIR, { recursive: true })
+  const pending = { token, apiUrl, code, expiresAt: Date.now() + expiresInSeconds * 1000 }
+  fs.writeFileSync(PENDING_LOGIN_FILE, JSON.stringify(pending), { mode: 0o600 })
+  const url = `${apiUrl}/autorizar?code=${code}`
+  openBrowser(url)
+  console.log(`Código: ${code}`)
+  console.log(`Abri o navegador em ${url} (se não abriu, abra o link). Confira se o código é o mesmo e clique em Autorizar.`)
+}
+
+async function waitLogin() {
+  const pending = readJson(PENDING_LOGIN_FILE)
+  if (!pending?.token || pending.expiresAt < Date.now()) throw new Error('Nenhum login pendente (o código vale 10 minutos). Rode /faundr:login de novo.')
+  const until = Math.min(Date.now() + LOGIN_WAIT_MS, pending.expiresAt)
+  while (Date.now() < until) {
+    try {
+      const projects = await fetchProjects(pending)
+      saveConfig({ token: pending.token, apiUrl: pending.apiUrl })
+      fs.rmSync(PENDING_LOGIN_FILE, { force: true })
+      return console.log(`Login feito (API: ${pending.apiUrl}). Você tem ${projects.length} projeto(s).`)
+    } catch (err) {
+      if (!/Token inválido/.test(err.message)) throw err
+    }
+    await new Promise((r) => setTimeout(r, 2500))
+  }
+  console.log(`Ainda não autorizado. Abra ${pending.apiUrl}/autorizar?code=${pending.code}, clique em Autorizar e rode: faundr login --wait`)
+}
+
+function openBrowser(url) {
+  const [cmd, cmdArgs] =
+    process.platform === 'win32'
+      ? ['rundll32', ['url.dll,FileProtocolHandler', url]]
+      : [process.platform === 'darwin' ? 'open' : 'xdg-open', [url]]
+  try {
+    spawn(cmd, cmdArgs, { detached: true, stdio: 'ignore' }).on('error', () => {}).unref()
+  } catch {
+    // Sem navegador (servidor, SSH): o link já vai impresso.
+  }
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -3346,7 +3408,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 // Aceita o id, o nome do projeto ou nada (lista os projetos para escolher).
 async function link(query) {
   const config = loadConfig()
-  if (!config.token) throw new Error('Sem token. Faça o login primeiro (gere o token no painel).')
+  if (!config.token) throw new Error('Sem token. Faça o login primeiro (/faundr:login).')
   const projects = await fetchProjects(config)
   const project = !query
     ? undefined
@@ -3367,7 +3429,7 @@ function status() {
   const { token, apiUrl } = loadConfig()
   const linkFile = findUp(process.cwd(), LINK_FILE)
   console.log(`API:     ${apiUrl}`)
-  console.log(`Token:   ${token ? `${token.slice(0, 6)}…` : '(não configurado — use /faundr:login <token>)'}`)
+  console.log(`Token:   ${token ? `${token.slice(0, 6)}…` : '(não configurado — use /faundr:login)'}`)
   console.log(`Projeto: ${linkFile ? `${readJson(linkFile)?.projectId} (${linkFile})` : '(pasta não ligada — use /faundr:link)'}`)
   console.log(`Branch:  ${gitBranch(process.cwd()) ?? '-'}`)
   const graphFile = path.join(projectRoot(), '.faundr', 'graph.json')
@@ -3460,7 +3522,7 @@ if (command === 'statusline') {
 
 async function cli() {
   try {
-    if (command === 'login') await login(args[0], args)
+    if (command === 'login') await login(args)
     else if (command === 'link') await link(args.join(' ').trim())
     else if (command === 'status') status()
     else if (command === 'status-refresh') await refreshStatus()
