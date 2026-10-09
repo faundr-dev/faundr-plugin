@@ -169,7 +169,7 @@ export function transcriptUsage(transcriptPath) {
   return usage
 }
 
-// Arquivos citados: "src=<arquivo>" (graph-query), "Fonte: <arquivo>" e "<arquivo>:L<linha>" (graph-explain, graph-path).
+// Arquivos citados: "src=<arquivo>" (graph-query), "Fonte: <arquivo>" e "<arquivo>:L<linha>" (graph-callers, graph-path).
 const CITED_FILE = /(?:\bsrc=|Fonte:\s+)([^\s\]]+)|([\w./@-]+\.\w+):L\d+/g
 // O Read do Claude Code lê até 2000 linhas por vez: um arquivo maior não custaria o arquivo inteiro.
 const READ_LINES = 2000

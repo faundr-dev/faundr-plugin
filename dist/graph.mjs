@@ -10767,47 +10767,6 @@ function findNode(g, text) {
   }
   return {};
 }
-function explain(json, text) {
-  const g = loadGraph(json);
-  const { id, ambiguous } = findNode(g, text);
-  if (ambiguous) {
-    return [
-      `Amb\xEDguo: '${text}' corresponde a ${ambiguous.length} n\xF3s em arquivos diferentes.`,
-      ...ambiguous.slice(0, 10).map((n) => `  ${g.getNodeAttribute(n, "source_file")}
-    id: ${n}`),
-      `Tente de novo com caminho::s\xEDmbolo, ex.: ${g.getNodeAttribute(ambiguous[0], "source_file")}::${text}`
-    ].join("\n");
-  }
-  if (!id) return `Nenhum n\xF3 encontrado para '${text}'.`;
-  const a = g.getNodeAttributes(id);
-  const conns = g.edges(id).map((k) => {
-    const e = g.getEdgeAttributes(k);
-    const other = g.opposite(id, k);
-    const out2 = e._src === id;
-    return { other, out: out2, e };
-  }).sort((x, y) => g.degree(y.other) - g.degree(x.other));
-  const lines = [
-    `N\xF3: ${a.label}`,
-    `  ID:         ${id}`,
-    `  Fonte:      ${a.source_file || "-"} ${a.source_location || ""}`,
-    `  Tipo:       ${a.file_type}`,
-    `  Comunidade: ${a.community_name || a.community}`,
-    `  Grau:       ${g.degree(id)}`,
-    "",
-    `Conex\xF5es (${conns.length}):`,
-    ...conns.slice(0, 20).map(
-      ({ other, out: out2, e }) => `  ${out2 ? "-->" : "<--"} ${g.getNodeAttribute(other, "label")} [${e.relation}] [${e.confidence}] ${g.getNodeAttribute(other, "source_file") || ""}${g.getNodeAttribute(other, "source_location") ? `:${g.getNodeAttribute(other, "source_location")}` : ""}`
-    )
-  ];
-  if (conns.length > 20) lines.push(`  ... e mais ${conns.length - 20}`);
-  const byFile = /* @__PURE__ */ new Map();
-  for (const c of conns) {
-    const f = g.getNodeAttribute(c.other, "source_file") || "(externo)";
-    byFile.set(f, (byFile.get(f) ?? 0) + 1);
-  }
-  lines.push("  Por arquivo:", ...[...byFile].sort((x, y) => y[1] - x[1]).map(([f, n]) => `    ${f}: ${n} conex\xF5es`));
-  return lines.join("\n");
-}
 function shortestPath(json, from, to, opts = {}) {
   const g = loadGraph(json);
   const a = findNode(g, from);
@@ -10817,25 +10776,46 @@ function shortestPath(json, from, to, opts = {}) {
   if (!src) return `Nenhum n\xF3 encontrado para '${from}'.`;
   if (!dst) return `Nenhum n\xF3 encontrado para '${to}'.`;
   if (src === dst) return `'${from}' e '${to}' apontam para o mesmo n\xF3.`;
-  const prev = /* @__PURE__ */ new Map([[src, { node: "", key: "" }]]);
-  const queue = [src];
-  while (queue.length && !prev.has(dst)) {
-    const cur2 = queue.shift();
-    for (const k of g.edges(cur2).sort()) {
-      const e = g.getEdgeAttributes(k);
-      const nb = g.opposite(cur2, k);
-      if (!opts.undirected && e._src !== cur2) continue;
-      if (!prev.has(nb)) {
-        prev.set(nb, { node: cur2, key: k });
-        queue.push(nb);
+  const external = (id) => Boolean(g.getNodeAttribute(id, "external")) || !g.getNodeAttribute(id, "source_file");
+  const keyOf = (s) => `${s.node}\0${s.dir}${s.flips}`;
+  const walk = (undirected2) => {
+    const start2 = { node: src, dir: "", flips: 0 };
+    const prev = /* @__PURE__ */ new Map([[keyOf(start2), { step: start2, from: null, edge: "" }]]);
+    const queue = [start2];
+    while (queue.length) {
+      const cur2 = queue.shift();
+      for (const k of g.edges(cur2.node).sort()) {
+        const e = g.getEdgeAttributes(k);
+        const dir2 = e._src === cur2.node ? "f" : "b";
+        if (!undirected2 && dir2 === "b") continue;
+        if (undirected2 && e.confidence !== "EXTRACTED") continue;
+        const flips = cur2.flips + (cur2.dir && cur2.dir !== dir2 ? 1 : 0);
+        if (flips > 1) continue;
+        const nb = g.opposite(cur2.node, k);
+        if (nb !== dst && external(nb)) continue;
+        const step = { node: nb, dir: dir2, flips };
+        if (prev.has(keyOf(step))) continue;
+        prev.set(keyOf(step), { step, from: cur2, edge: k });
+        if (nb === dst) return { prev, end: step };
+        queue.push(step);
       }
     }
+    return null;
+  };
+  let undirected = Boolean(opts.undirected);
+  let found = walk(undirected);
+  if (!found && !undirected) {
+    undirected = true;
+    found = walk(true);
   }
-  if (!prev.has(dst)) {
-    return `Nenhum caminho direcionado entre '${from}' e '${to}'. Rode de novo com --undirected para ignorar a dire\xE7\xE3o.`;
-  }
+  if (!found) return `Nenhum caminho entre '${from}' e '${to}' dentro do projeto. Pode haver uma liga\xE7\xE3o que o mapa n\xE3o enxerga, como import din\xE2mico ou chamada pela API.`;
+  const note = undirected && !opts.undirected ? "Sem caminho na dire\xE7\xE3o de uso (quem chama \u2192 quem \xE9 chamado); este ignora a dire\xE7\xE3o uma vez.\n" : "";
   const hops = [];
-  for (let n = dst; n !== src; n = prev.get(n).node) hops.unshift({ node: n, key: prev.get(n).key });
+  for (let s = found.end; s.node !== src || s.dir; ) {
+    const p = found.prev.get(keyOf(s));
+    hops.unshift({ node: s.node, key: p.edge });
+    s = p.from;
+  }
   let line2 = `  ${g.getNodeAttribute(src, "label")}`;
   let cur = src;
   for (const h of hops) {
@@ -10844,7 +10824,7 @@ function shortestPath(json, from, to, opts = {}) {
     line2 += g.getNodeAttribute(h.node, "label");
     cur = h.node;
   }
-  return `Caminho mais curto (${hops.length} saltos):
+  return `${note}Caminho mais curto (${hops.length} saltos):
 ${line2}`;
 }
 
@@ -11569,7 +11549,13 @@ function callers(json, text, opts = {}) {
   const limit = opts.limit ?? 60;
   const found = resolveNode(json, text);
   if (!found.node) return `Nada no grafo com o nome '${text}'. Tente faundr graph-query "${text}".`;
-  const seed = found.node;
+  if (direction === "both") {
+    const sides = ["in", "out"].map((d) => walkFrom(json, found.node, d, depth, limit));
+    return sides.join("\n\n") + ambiguityNote(text, found);
+  }
+  return walkFrom(json, found.node, direction, depth, limit) + ambiguityNote(text, found);
+}
+function walkFrom(json, seed, direction, depth, limit) {
   const byId = new Map(json.nodes.map((n) => [n.id, n]));
   const adj = /* @__PURE__ */ new Map();
   for (const l of json.links) {
@@ -11607,11 +11593,11 @@ function callers(json, text, opts = {}) {
   if (!total) {
     const none = direction === "in" ? "Ningu\xE9m no projeto chama ou importa isso (pode ser ponto de entrada, rota ou c\xF3digo sem uso)." : "N\xE3o usa nada do projeto.";
     return `${head}
-${none}${ambiguityNote(text, found)}`;
+${none}`;
   }
   const cut = total > limit ? `
 \u2026 e mais ${total - limit} (use --limit ${total})` : "";
-  return [head, ...levels.map((l) => l.join("\n"))].join("\n") + cut + ambiguityNote(text, found);
+  return [head, ...levels.map((l) => l.join("\n"))].join("\n") + cut;
 }
 function skeleton(json, file) {
   const q = file.replace(/\\/g, "/").toLowerCase();
@@ -11724,17 +11710,18 @@ async function runEngine(args2, root = process.cwd()) {
       return shortestPath(loadGraphJson(root), positional[0], positional[1], { undirected: rest.includes("--undirected") });
     case "callers": {
       const depth = Number(flag(rest, "--depth") ?? 1);
-      const direction = rest.includes("--out") ? "out" : "in";
+      const direction = rest.includes("--both") ? "both" : rest.includes("--out") ? "out" : "in";
       return callers(loadGraphJson(root), positional.join(" "), { direction, depth, limit: Number(flag(rest, "--limit") ?? 60) });
     }
     case "skeleton":
       return skeleton(loadGraphJson(root), positional.join(" "));
     case "grep":
       return grep(loadGraphJson(root), positional.join(" "), { root, in: flag(rest, "--in"), ignoreCase: rest.includes("-i") || rest.includes("--ignore-case") });
+    // explain virou callers --both: quem usa e o que usa, com arquivo e linha.
     case "explain":
-      return explain(loadGraphJson(root), positional.join(" "));
+      return callers(loadGraphJson(root), positional.join(" "), { direction: "both", limit: Number(flag(rest, "--limit") ?? 60) });
     default:
-      return 'comandos: build [raiz] | query "<pergunta>" [--budget N] [--limit N] [--subgraph [--dfs]] | callers X [--out] [--depth N] | skeleton <arquivo> | grep <padr\xE3o> [--in pasta] [-i] | path "A" "B" [--undirected] | explain "X"';
+      return 'comandos: build [raiz] | query "<pergunta>" [--budget N] [--limit N] [--subgraph [--dfs]] | callers X [--out | --both] [--depth N] | skeleton <arquivo> | grep <padr\xE3o> [--in pasta] [-i] | path "A" "B" [--undirected]';
   }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -11747,7 +11734,6 @@ export {
   analyzeQuality,
   buildProjectGraph,
   callers,
-  explain,
   grep,
   loadGraphJson,
   qualityGrammar,

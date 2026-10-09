@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
-import { buildProjectGraph, callers, grep, rankNodes, refreshGraph, search, skeleton, wordsOf } from '../dist/graph.mjs'
+import { buildProjectGraph, callers, grep, rankNodes, refreshGraph, search, shortestPath, skeleton, wordsOf } from '../dist/graph.mjs'
 import { dependentsNote, dependentsOf } from '../bin/dependents.mjs'
 
 // Lojinha pequena: carrinho que usa cupons, um teste e um documento que falam de cupom.
@@ -82,7 +82,26 @@ test('graph-callers: quem chama, o que usa, profundidade e arquivo', async () =>
   // Arquivo: conta quem usa as funções dele, não só quem importa o arquivo.
   assert.match(callers(graph, 'src/coupons.mjs'), /applyCoupon\(\)/)
   assert.match(callers(graph, 'nadaDisso'), /^Nada no grafo/)
+  // --both (o antigo graph-explain): quem usa e o que usa, na mesma resposta.
+  const both = callers(graph, 'applyCoupon', { direction: 'both' })
+  assert.match(both, /^Quem depende de applyCoupon\(\)[^]*checkout\(\)[^]*\n\nO que usa applyCoupon\(\)[^]*findCoupon\(\)/)
   fs.rmSync(dir, { recursive: true, force: true })
+})
+
+test('graph-path: na direção de uso, sem direção com uma troca só, e nunca por módulo de fora', async () => {
+  const { dir, graph } = await shop()
+  assert.match(shortestPath(graph, 'checkout', 'findCoupon'), /^Caminho mais curto \(2 saltos\):\n  checkout\(\) --calls/)
+  // Ao contrário não há caminho de uso: tenta sem direção na mesma chamada e avisa.
+  assert.match(shortestPath(graph, 'findCoupon', 'checkout'), /^Sem caminho na direção de uso[^]*2 saltos/)
+  fs.rmSync(dir, { recursive: true, force: true })
+
+  // Dois arquivos que só têm em comum importar node:fs não estão ligados.
+  const other = fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-g-'))
+  fs.writeFileSync(path.join(other, 'a.mjs'), "import fs from 'node:fs'\nexport function lerA() {\n  return fs.readFileSync('a')\n}\n")
+  fs.writeFileSync(path.join(other, 'b.mjs'), "import fs from 'node:fs'\nexport function lerB() {\n  return fs.readFileSync('b')\n}\n")
+  const { graph: g2 } = await buildProjectGraph(other)
+  assert.match(shortestPath(g2, 'lerA', 'lerB'), /^Nenhum caminho/)
+  fs.rmSync(other, { recursive: true, force: true })
 })
 
 test('graph-skeleton: assinaturas em ordem, linhas e quantas vezes cada uma é usada', async () => {

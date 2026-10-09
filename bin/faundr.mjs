@@ -5,11 +5,11 @@
 //   faundr login <token> [--url https://...]   salva um token já existente (fora do chat)
 //   faundr link <projectId>                    liga a pasta atual a um projeto
 //   faundr status                              mostra configuração e ligação
+//   faundr mapa [pergunta]                     sem nada, o mesmo que graph; com pergunta, graph-query; com "a::x" "b::y", graph-path
 //   faundr graph                               gera o grafo de conhecimento do projeto e envia à plataforma
 //   faundr graph-query "<pergunta>"            até 8 trechos de código relevantes, com quem chama (--budget N, --limit N, --subgraph)
-//   faundr graph-path "A" "B"                  caminho mais curto entre dois nós (--undirected)
-//   faundr graph-explain "X"                   um nó e suas conexões
-//   faundr graph-callers "X"                   quem chama ou importa X (--out: o que X usa; --depth N)
+//   faundr graph-path "A" "B"                  caminho mais curto entre dois nós, sem passar por módulos de fora (--undirected)
+//   faundr graph-callers "X"                   quem chama ou importa X (--out: o que X usa; --both: os dois; --depth N)
 //   faundr graph-skeleton <arquivo>            as assinaturas do arquivo, sem o corpo
 //   faundr graph-grep "<padrão>"               busca de texto agrupada por função, as mais usadas primeiro (--in pasta, -i)
 //   faundr feature "<título>" [--desc "..."] [--done-when "a; b"]  cria uma funcionalidade (com o critério de pronto) e a torna a atual
@@ -137,7 +137,7 @@ const WORK_GUIDANCE = `[Faundr] Registre o trabalho para o time acompanhar no pa
 
 // Orientação "sempre ligada" (equivalente à regra de CLAUDE.md do graphify): consultar o grafo antes de varrer arquivos.
 const GRAPH_GUIDANCE = `[Faundr] Este projeto tem um grafo de conhecimento em .faundr/ (código + docs, com comunidades e ligações).
-- Para perguntas sobre o código, rode primeiro: faundr graph-query "<pergunta>". Ele devolve as funções e arquivos mais relevantes já com o código, quem chama e o que chamam: muitas vezes dispensa abrir o arquivo. Antes de mudar uma função ou arquivo: faundr graph-callers "X" (quem depende dele; --depth 2 para o efeito em cadeia). Para ver um arquivo sem ler tudo: faundr graph-skeleton <arquivo>. No lugar de grep: faundr graph-grep "<padrão>" (agrupa por função e mostra as mais usadas primeiro). Para relações: faundr graph-path "A" "B". Para um conceito: faundr graph-explain "X".
+- Para perguntas sobre o código, rode primeiro: faundr graph-query "<pergunta>". Ele devolve as funções e arquivos mais relevantes já com o código, quem chama e o que chamam: muitas vezes dispensa abrir o arquivo. Antes de mudar uma função ou arquivo: faundr graph-callers "X" (quem depende dele; --depth 2 para o efeito em cadeia). Para ver um arquivo sem ler tudo: faundr graph-skeleton <arquivo>. No lugar de grep: faundr graph-grep "<padrão>" (agrupa por função e mostra as mais usadas primeiro). Tudo o que se liga a uma peça (quem usa e o que ela usa): faundr graph-callers "X" --both. Como duas peças se conectam: faundr graph-path "A" "B".
 - Visão geral da arquitetura: .faundr/GRAPH_REPORT.md (leia só quando as consultas não bastarem).
 - O grafo se atualiza sozinho quando você edita arquivos.`
 
@@ -654,6 +654,23 @@ async function graphCommand(name, args) {
   }
   // Rodapé com o tamanho da resposta e o dos arquivos citados: o Faundr soma no fim da sessão (Impacto).
   console.log([output, graphFooter(output, root)].filter(Boolean).join('\n\n'))
+}
+
+// O único comando do mapa para o dono (/faundr:mapa): sem nada, gera e envia; com uma pergunta, busca;
+// com duas peças "arquivo::nome" (o botão Entender do painel), mostra como elas se conectam.
+async function mapa(args) {
+  const words = args.filter((a) => !a.startsWith('--'))
+  if (!words.length) return graph(args)
+  if (words.length === 2 && words.every((w) => w.includes('::'))) return graphCommand('path', args)
+  return graphCommand('query', args)
+}
+
+// Subagentes não recebem o contexto do início da sessão: sem este gancho, eles buscavam só com grep e nunca no mapa.
+async function subagentStart() {
+  const payload = JSON.parse(await readStdin())
+  const linkFile = findUp(payload.cwd ?? process.cwd(), LINK_FILE)
+  if (!linkFile || !fs.existsSync(path.join(path.dirname(linkFile), '.faundr', 'graph.json'))) return
+  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SubagentStart', additionalContext: GRAPH_GUIDANCE } }))
 }
 
 // Gera o grafo na raiz do projeto ligado e envia graph.json + GRAPH_REPORT.md.
@@ -3433,7 +3450,7 @@ function status() {
   console.log(`Projeto: ${linkFile ? `${readJson(linkFile)?.projectId} (${linkFile})` : '(pasta não ligada — use /faundr:link)'}`)
   console.log(`Branch:  ${gitBranch(process.cwd()) ?? '-'}`)
   const graphFile = path.join(projectRoot(), '.faundr', 'graph.json')
-  console.log(`Grafo:   ${fs.existsSync(graphFile) ? graphFile : '(ainda não gerado — use /faundr:graph)'}`)
+  console.log(`Grafo:   ${fs.existsSync(graphFile) ? graphFile : '(ainda não gerado — use /faundr:mapa)'}`)
   console.log(`Log:     ${LOG_FILE}`)
 }
 
@@ -3506,10 +3523,11 @@ if (command === 'statusline') {
   } catch (err) {
     log(`statusline: ${err?.message ?? err}`)
   }
-} else if (command === 'hook' || command === 'gate' || command === 'guard') {
+} else if (command === 'hook' || command === 'gate' || command === 'guard' || command === 'subagent-start') {
   try {
     if (command === 'gate') await gate()
     else if (command === 'guard') await guard()
+    else if (command === 'subagent-start') await subagentStart()
     else await hook(args[0] === 'codex' ? 'codex' : 'claude')
   } catch (err) {
     log(`erro (${command}): ${err?.stack ?? err}`)
@@ -3535,8 +3553,10 @@ async function cli() {
     else if (command === 'checkpoints-sync') await checkpointsSync(args)
     else if (command === 'graph') await graph(args)
     else if (command === 'graph-query') await graphCommand('query', args)
+    else if (command === 'mapa') await mapa(args)
     else if (command === 'graph-path') await graphCommand('path', args)
-    else if (command === 'graph-explain') await graphCommand('explain', args)
+    // graph-explain virou graph-callers --both; o nome antigo continua funcionando.
+    else if (command === 'graph-explain') await graphCommand('callers', [...args, '--both'])
     else if (command === 'graph-callers') await graphCommand('callers', args)
     else if (command === 'graph-skeleton') await graphCommand('skeleton', args)
     else if (command === 'graph-grep') await graphCommand('grep', args)
@@ -3606,7 +3626,7 @@ async function cli() {
     else if (command === 'errors-uptime') await errorsUptime(args)
     else
       console.log(
-        'comandos: login | link | status | checkpoint | checkpoints | restore | graph | graph-query | graph-path | graph-explain | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | concern | resolve | start | done | focus | board | criteria | criteria-check | handoff | handover | weekly | resume | stack-scan | env-check | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | security-import | security-supabase | db-test | launch-check | lgpd | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
+        'comandos: login | link | status | checkpoint | checkpoints | restore | mapa | graph | graph-query | graph-path | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | concern | resolve | start | done | focus | board | criteria | criteria-check | handoff | handover | weekly | resume | stack-scan | env-check | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | security-import | security-supabase | db-test | launch-check | lgpd | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
       )
   } catch (err) {
     if (['graph', 'design-lint', 'security-scan', 'quality-scan', 'tests-scan', 'stack-scan', 'env-check', 'usage-sync', 'checkpoints-sync'].includes(command) && args.includes('--quiet')) log(`${command}: ${err.message}`)
