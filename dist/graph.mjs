@@ -10172,11 +10172,25 @@ var SKIP_FILES = /* @__PURE__ */ new Set([
   "go.work.sum",
   "bun.lockb"
 ]);
+var GENERATED_NAME = /\.min\.(c|m)?js$|\.min\.css$|[.-]bundle\.(c|m)?js$|\.chunk\.(c|m)?js$/i;
+var GENERATED_CHECK_BYTES = 64 * 1024;
+var MAX_FILES = 5e3;
 var IGNORE_FILES = [".gitignore", ".faundrignore"];
 var MARKDOWN_EXT = /* @__PURE__ */ new Set([".md", ".mdx", ".qmd"]);
 var MAX_FILE_BYTES = 2 * 1024 * 1024;
-function isSkippedDir(name2) {
-  return SKIP_DIRS.has(name2) || name2.endsWith(".egg-info") || name2.endsWith("_venv");
+function isSkippedDir(name2, rel) {
+  return SKIP_DIRS.has(name2) || name2.endsWith(".egg-info") || name2.endsWith("_venv") || rel === ".claude/worktrees";
+}
+function looksGenerated(abs, size) {
+  if (size < GENERATED_CHECK_BYTES) return false;
+  const fd = fs5.openSync(abs, "r");
+  try {
+    const buf = Buffer.alloc(GENERATED_CHECK_BYTES);
+    const text = buf.subarray(0, fs5.readSync(fd, buf, 0, GENERATED_CHECK_BYTES, 0)).toString("utf8");
+    return text.length / (text.split("\n").length || 1) > 1e3;
+  } finally {
+    fs5.closeSync(fd);
+  }
 }
 function isSensitive(rel) {
   const parts2 = rel.split("/");
@@ -10226,17 +10240,19 @@ function collectFiles(root) {
       const rel = dirRel ? `${dirRel}/${e.name}` : e.name;
       const abs = path10.join(dirAbs, e.name);
       if (e.isDirectory()) {
-        if (isSkippedDir(e.name) || ignored(rel, true, rules)) continue;
+        if (isSkippedDir(e.name, rel) || ignored(rel, true, rules)) continue;
         walk(abs, rel, rules);
         continue;
       }
-      if (!e.isFile() || SKIP_FILES.has(e.name) || isSensitive(rel) || ignored(rel, false, rules)) continue;
+      if (!e.isFile() || SKIP_FILES.has(e.name) || GENERATED_NAME.test(e.name) || isSensitive(rel) || ignored(rel, false, rules)) continue;
+      const ext = path10.extname(e.name).toLowerCase();
       try {
-        if (fs5.statSync(abs).size > MAX_FILE_BYTES) continue;
+        const { size } = fs5.statSync(abs);
+        if (size > MAX_FILE_BYTES) continue;
+        if (!MARKDOWN_EXT.has(ext) && ext !== ".json" && looksGenerated(abs, size)) continue;
       } catch {
         continue;
       }
-      const ext = path10.extname(e.name).toLowerCase();
       if (MARKDOWN_EXT.has(ext)) out2.push({ rel, abs, kind: "markdown" });
       else if (ext === ".json") out2.push({ rel, abs, kind: "json" });
       else {
@@ -10246,7 +10262,10 @@ function collectFiles(root) {
     }
   }
   walk(root, "", []);
-  return out2;
+  if (out2.length <= MAX_FILES) return Object.assign(out2, { dropped: 0 });
+  const order = { code: 0, markdown: 1, json: 2 };
+  const kept = [...out2].sort((a, b) => order[a.kind] - order[b.kind]).slice(0, MAX_FILES);
+  return Object.assign(kept, { dropped: out2.length - MAX_FILES });
 }
 
 // engine/src/cache.ts
@@ -10518,7 +10537,7 @@ async function buildProjectGraph(root) {
   return {
     graph,
     report,
-    stats: { files: files.length, nodes: g.order, edges: g.size, communities: communities.size, ms: Date.now() - started }
+    stats: { files: files.length, dropped: files.dropped, nodes: g.order, edges: g.size, communities: communities.size, ms: Date.now() - started }
   };
 }
 var sortKeys = (o, first) => Object.fromEntries([...first.filter((k) => k in o).map((k) => [k, o[k]]), ...Object.keys(o).filter((k) => !first.includes(k)).sort().map((k) => [k, o[k]])]);
@@ -11325,6 +11344,7 @@ function queryGroups(question) {
   const kept = all.filter((w) => !STOPWORDS2.has(w) && (w.length > 1 || /\d/.test(w)));
   return [...new Set(kept.length ? kept : all)].map((w) => [w, ...(PT_EN[w] ?? []).filter((t) => t !== w)]);
 }
+var MAX_LINE_CHARS = 2e3;
 var SourceCache = class {
   constructor(root) {
     this.root = root;
@@ -11334,7 +11354,8 @@ var SourceCache = class {
   lines(rel) {
     if (!this.files.has(rel)) {
       try {
-        this.files.set(rel, fs8.readFileSync(path15.join(this.root, rel), "utf8").split(/\r?\n/));
+        const lines = fs8.readFileSync(path15.join(this.root, rel), "utf8").split(/\r?\n/);
+        this.files.set(rel, lines.map((l) => l.length > MAX_LINE_CHARS ? `${l.slice(0, MAX_LINE_CHARS)}\u2026` : l));
       } catch {
         this.files.set(rel, null);
       }

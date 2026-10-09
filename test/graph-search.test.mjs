@@ -161,3 +161,21 @@ test('antes de editar: quem depende do arquivo, sem contar o próprio arquivo', 
   assert.match(dependentsNote(graph, 'src/coupons.mjs', 1), /… e mais \d+/)
   fs.rmSync(dir, { recursive: true, force: true })
 })
+
+test('mapa: pula cópias em .claude/worktrees, arquivo compactado e código gerado de linha gigante', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-g-'))
+  const write = (rel, text) => {
+    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true })
+    fs.writeFileSync(path.join(dir, rel), text)
+  }
+  write('src/app.mjs', 'export function iniciar() {\n  return 1\n}\n')
+  write('.claude/worktrees/agent-1/src/app.mjs', 'export function iniciar() {\n  return 1\n}\n')
+  write('public/pdf.worker.min.mjs', 'export function a(){return 1}')
+  // Sem ".min" no nome, mas com cara de pacote gerado: uma linha só com mais de 64 KB.
+  write('public/vendor.js', `${Array.from({ length: 4000 }, (_, i) => `function f${i}(){return ${i}}`).join(';')}\n`)
+  const { graph, stats } = await buildProjectGraph(dir)
+  const files = new Set(graph.nodes.map((n) => n.source_file).filter(Boolean))
+  assert.deepEqual([...files], ['src/app.mjs'])
+  assert.equal(stats.dropped, 0)
+  fs.rmSync(dir, { recursive: true, force: true })
+})

@@ -16,7 +16,7 @@ const board = {
 
 test('barra: projeto, funcionalidade com progresso, passo atual, grafo e preocupações', () => {
   const s = statusFromBoard(board, 'f1', board.projectName, 1)
-  assert.deepEqual(s, { projectName: 'Lojinha', feature: { title: 'Frete grátis', done: 1, total: 3, next: 'Testes' }, concerns: 2, at: 1 })
+  assert.deepEqual(s, { projectName: 'Lojinha', feature: { title: 'Frete grátis', done: 1, total: 3, next: 'Testes' }, concerns: 2, features: 2, at: 1 })
   assert.equal(statusLine(s, { graph: 'fresh' }), 'Faundr · Lojinha · Frete grátis 1/3 · agora: Testes · grafo em dia · 2 preocupação(ões)')
   assert.equal(statusLine(statusFromBoard(board, 'nada', null), { graph: null }), 'Faundr · sem funcionalidade atual · 2 preocupação(ões)')
   assert.equal(statusLine(undefined), 'Faundr · sem funcionalidade atual')

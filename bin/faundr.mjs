@@ -133,7 +133,7 @@ const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'apply
 const GRAPH_LOCK_MS = 5 * 60_000
 
 // Orientação de acompanhamento: o agente registra o que constrói (skill "track").
-const WORK_GUIDANCE = `[Faundr] Registre o trabalho para o time acompanhar no painel: ao começar algo de vários passos, faundr feature "<título>" e um faundr task "<passo>" por passo; faundr done "<passo>" ao concluir; faundr decision "<decisão>" --why "<porquê>" para escolhas técnicas. Trabalho em etapas (fases, MVP e depois o resto): registre já no começo as etapas seguintes com faundr feature "<etapa>" --after atual --desc "<o que entra>"; ao terminar uma etapa, diga ao usuário qual é a próxima.`
+const WORK_GUIDANCE = `[Faundr] Registre o trabalho para o time acompanhar no painel: ao começar algo de vários passos (funcionalidade nova, melhoria grande, uma nova fase), antes de construir, faundr feature "<título>" --done-when "<como saber que ficou pronto>" e um faundr task "<passo>" por passo; se o pedido for vago (não diz para quem, o que fica de fora ou quando está pronto), faça antes 2 a 3 perguntas curtas numa rodada só; faundr done "<passo>" ao concluir; faundr decision "<decisão>" --why "<porquê>" para escolhas técnicas. Trabalho em etapas (fases, MVP e depois o resto): registre já no começo as etapas seguintes com faundr feature "<etapa>" --after atual --desc "<o que entra>"; ao terminar uma etapa, diga ao usuário qual é a próxima.`
 
 // Orientação "sempre ligada" (equivalente à regra de CLAUDE.md do graphify): consultar o grafo antes de varrer arquivos.
 const GRAPH_GUIDANCE = `[Faundr] Este projeto tem um grafo de conhecimento em .faundr/ (código + docs, com comunidades e ligações).
@@ -313,6 +313,16 @@ function needsHandoff(root, sid) {
   return edited > at && Date.now() - at > HANDOFF_EVERY_MS
 }
 
+// Quantos arquivos a sessão mudou sem nenhum registro de trabalho desde que começou (null quando está em dia).
+// Uma vez por sessão: é a rede para quando o agente não percebeu que o pedido era uma funcionalidade.
+function untrackedWork(root, sid) {
+  const state = readState(root)
+  if (state.untrackedNudged === sid || state.sessionStart?.session !== sid) return null
+  if ((state.workAt ?? 0) >= state.sessionStart.at) return null
+  const files = new Set(sessionEditedFiles(sid).filter(Boolean)).size
+  return files >= HANDOFF_MIN_FILES ? files : null
+}
+
 async function overviewStale(projectId, token, apiUrl, route = 'overview') {
   const res = await fetch(`${apiUrl}/api/cli/${route}`, {
     method: 'POST',
@@ -379,11 +389,17 @@ async function gate() {
   const stackStale = readState(root).stackNudgedSession === sid ? null : await overviewStale(projectId, token, apiUrl, 'stack').catch(() => null)
   // Prova: código mudou e nenhuma checagem passou depois (uma vez por leva de mudanças, só se há o que rodar).
   const proof = hasChecks(root) ? proofNeeded(CONFIG_DIR, sid) : null
-  if (!handoff && !stale && !stackStale && !designFiles.length && !finished && !proof) return
+  const untracked = untrackedWork(root, sid)
+  if (!handoff && !stale && !stackStale && !designFiles.length && !finished && !proof && !untracked) return
+  if (untracked) writeState(root, { untrackedNudged: sid })
   if (stale) writeState(root, { overviewNudgedSession: sid })
   if (stackStale) writeState(root, { stackNudgedSession: sid })
 
   const steps = []
+  if (untracked)
+    steps.push(
+      `esta sessão mudou ${untracked} arquivos e nada foi registrado no Faundr: se foi uma funcionalidade, melhoria ou fase de vários passos, registre agora o que foi feito (faundr feature "<título>" --desc "<objetivo>", um faundr task "<passo>" por passo e faundr done "<passo>" no que já ficou pronto; se fizer parte da funcionalidade atual, só as tarefas); se foi um ajuste pequeno, não registre nada`,
+    )
   if (proof)
     steps.push(
       (proof.failing.length ? `\`${proof.failing[0]}\` ainda está falhando: conserte ou diga claramente ao usuário que não está funcionando. ` : '') +
@@ -461,7 +477,11 @@ async function hook(agent) {
   // Checagem de design sem IA: no início da sessão e quando o agente mexeu em telas.
   if (startJobs) background.push(['design-lint', '--quiet', '--session', payload.session_id])
   else if (event === 'Stop' && takeDesignDirty(projectId, payload)) background.push(['design-lint', '--quiet', '--session', payload.session_id])
-  if (event === 'Stop' && takeGraphDirty(projectId)) {
+  // Projeto sem mapa: gera já na primeira pergunta, sem esperar a primeira edição (é o mapa que liga a orientação de
+  // consultá-lo, a Visão e o inventário do que já existe).
+  if (startJobs && !fs.existsSync(path.join(path.dirname(linkFile), '.faundr', 'graph.json')))
+    background.push(['graph', '--quiet', '--agent', agent, '--session', payload.session_id])
+  else if (event === 'Stop' && takeGraphDirty(projectId)) {
     background.push(['graph', '--quiet', '--agent', agent, '--session', payload.session_id])
   }
   // Segurança sem IA: checagem completa no início da sessão; no fim da resposta, só o que o agente editou.
@@ -491,6 +511,8 @@ async function hook(agent) {
   if (event === 'SessionStart') {
     // Commit em que a sessão começou: base do "tamanho da mudança" (uma sessão retomada mantém a base).
     const root = path.dirname(linkFile)
+    // Início da sessão: o fim da resposta compara com o último registro de trabalho (feature, task, done).
+    if (readState(root).sessionStart?.session !== payload.session_id) writeState(root, { sessionStart: { session: payload.session_id, at: Date.now() } })
     const head = gitHead(root)
     if (head && readState(root).qualityBase?.session !== payload.session_id) writeState(root, { qualityBase: { session: payload.session_id, head } })
   }
@@ -535,11 +557,27 @@ async function hook(agent) {
     if (Array.isArray(answer.anchoredRules)) writeRules(root, answer.anchoredRules)
     const designMd = findDesignMd(root)
     const designNote = designMd ? DESIGN_GUIDANCE(designMd) : uiFiles(root).length ? NO_DESIGN_GUIDANCE : null
-    additionalContext = [additionalContext, WORK_GUIDANCE, hasGraph && GRAPH_GUIDANCE, designNote].filter(Boolean).join('\n\n')
+    additionalContext = [additionalContext, WORK_GUIDANCE, hasGraph && GRAPH_GUIDANCE, designNote, inventoryNote(root)].filter(Boolean).join('\n\n')
   }
   if (additionalContext && CONTEXT_EVENTS.has(event)) {
     process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext } }))
   }
+}
+
+// Projeto que já tinha código antes do Faundr: oferecer, uma vez, o inventário do que já existe.
+const INVENTORY_MIN_FILES = 15
+const CODE_FILE = /\.(m?[jt]sx?|cjs|py|rb|go|rs|java|kt|php|cs|swift|vue|svelte|dart|astro)$/
+const INVENTORY_GUIDANCE = `[Faundr] Este projeto já tem código, mas nenhuma funcionalidade registrada no Faundr: o quadro de Funcionalidades só mostraria o que for feito daqui em diante. Na sua primeira resposta, ofereça ao usuário em uma linha mapear o que já existe (skill "inventario" do Faundr: lista as funcionalidades a partir do mapa do código e registra como prontas, com o OK dele). Não faça sem ele pedir; se ele recusar, não ofereça de novo.`
+
+function inventoryNote(root) {
+  const state = readState(root)
+  // Sem status ainda (pasta recém-ligada) ou com zero funcionalidades; status de um plugin antigo (sem a contagem) não vale.
+  if (state.inventoryOffered || (state.status && state.status.features !== 0)) return null
+  const tracked = spawnSync('git', ['ls-files'], { cwd: root, encoding: 'utf8', windowsHide: true })
+  const files = tracked.status === 0 ? tracked.stdout.split('\n').filter((f) => CODE_FILE.test(f)).length : uiFiles(root).length
+  if (files < INVENTORY_MIN_FILES) return null
+  writeState(root, { inventoryOffered: new Date().toISOString() })
+  return INVENTORY_GUIDANCE
 }
 
 const dirtyFile = (projectId) => path.join(CONFIG_DIR, `graph-${projectId}.dirty`)
@@ -718,6 +756,8 @@ async function graph(args) {
     if (!res.ok) throw new Error(`API recusou o grafo (${res.status}): ${await res.text()}`)
     const r = await res.json()
     say(`Grafo enviado: ${r.nodes} nós, ${r.edges} ligações, ${r.communities} comunidades (${((Date.now() - started) / 1000).toFixed(1)} s).`)
+    if (result.stats.dropped)
+      say(`Atenção: o projeto passou de ${result.stats.files} arquivos e ${result.stats.dropped} ficaram de fora do mapa (o código entrou primeiro). Para escolher o que fica de fora, liste pastas num arquivo .faundrignore na raiz (mesmo formato do .gitignore).`)
   } finally {
     try {
       fs.unlinkSync(lock)
@@ -803,9 +843,11 @@ async function workCommand(command, args) {
   const { root } = linkedProject()
   const current = readState(root).currentFeatureId ?? null
   const text = textArg(args)
+  // Último registro de trabalho: o fim da resposta só cobra o registro quando a sessão mudou muito e nada veio.
+  if (['feature', 'task', 'done', 'start', 'focus'].includes(command)) writeState(root, { workAt: Date.now() })
 
   if (command === 'feature') {
-    if (!text) throw new Error('uso: faundr feature "<título>" [--desc "..."] [--after atual|"<nome da etapa anterior>"]')
+    if (!text) throw new Error('uso: faundr feature "<título>" [--desc "..."] [--done-when "a; b"] [--after atual|"<nome da etapa anterior>"] [--existing --parts "a; b"]')
     const after = flag(args, '--after')
     if (after) {
       // Próxima etapa: fica planejada, ligada à anterior; a funcionalidade atual não muda.
@@ -813,6 +855,18 @@ async function workCommand(command, args) {
       const { id } = await memoryApi({ action: 'add', kind: 'feature', title: text, body: flag(args, '--desc'), afterId: prev.id })
       writeState(root, { lastStepId: id })
       return console.log(`Próxima etapa registrada (depois de "${prev.title}"): ${text}\nTarefas dela: faundr task "<passo>" --feature "${text}". Para começá-la: faundr focus "${text}".`)
+    }
+    if (args.includes('--existing')) {
+      // Inventário de projeto antigo: o que já funcionava antes do Faundr entra pronto e não vira a atual.
+      const parts = (flag(args, '--parts') ?? '').split(';').map((p) => p.trim()).filter(Boolean)
+      const desc = [flag(args, '--desc'), 'Já existia antes do Faundr (inventário do código).'].filter(Boolean).join(' ')
+      const { id } = await memoryApi({ action: 'add', kind: 'feature', title: text, body: desc })
+      const tasks = parts.length ? parts : ['Já existia antes do Faundr']
+      for (const title of tasks) {
+        const task = await memoryApi({ action: 'add', kind: 'task', title, parentId: id })
+        await memoryApi({ action: 'task-status', query: task.id, status: 'completed', featureId: id })
+      }
+      return console.log(`Funcionalidade que já existia registrada como pronta: ${text} (${tasks.length} parte(s))`)
     }
     const criteria = (flag(args, '--done-when') ?? '').split(';').map((c) => c.trim()).filter(Boolean)
     const { id } = await memoryApi({ action: 'add', kind: 'feature', title: text, body: flag(args, '--desc'), criteria })

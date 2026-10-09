@@ -6,8 +6,9 @@ allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *
 
 Use a CLI do Faundr pela ferramenta Bash (`faundr ...`; se não estiver no PATH, `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" ...`). Sempre com aspas.
 
-**Ao começar um trabalho de vários passos** (nova tela, integração, refatoração):
-1. Se não houver funcionalidade atual adequada (`faundr board`), crie: `faundr feature "<título curto>" --desc "<objetivo>"`.
+**Ao começar um trabalho de vários passos** (nova tela, integração, refatoração, melhoria grande, "agora vamos para a fase 2"), **antes de construir**:
+1. Se não houver funcionalidade atual adequada (`faundr board`), crie: `faundr feature "<título curto>" --desc "<objetivo>" --done-when "<critério>; <critério>"` (como saber que ficou pronto, de um jeito que dá para conferir).
+   Se o pedido for vago (não diz para quem é, o que fica de fora ou como saber que ficou pronto), faça antes 2 a 3 perguntas curtas numa rodada só, com a ferramenta de perguntas ao usuário (opções concretas, a recomendada primeiro). Com o pedido claro, não pergunte.
    Se já existir uma com esse objetivo, troque para ela: `faundr focus "<nome>"`.
 2. Registre o plano como checklist: um `faundr task "<passo>"` por passo (3 a 8 passos, verbos no infinitivo).
 3. **Trabalho em etapas** (fase 0/1/2, MVP e depois o resto, "agora X, depois Y", algo que você mesmo propôs dividir): a funcionalidade atual é só a etapa de agora. Registre **já no começo** todas as etapas seguintes que você conhece, em ordem, cada uma depois da anterior, com o que entra nela:

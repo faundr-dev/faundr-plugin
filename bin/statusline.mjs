@@ -14,6 +14,8 @@ export function statusFromBoard(board, currentFeatureId, projectName, now = Date
     projectName: projectName ?? null,
     feature: f ? { title: f.title, done: tasks.filter((t) => t.task_status === 'completed').length, total: tasks.length, next: next?.title ?? null } : null,
     concerns: (board.concerns ?? []).length,
+    // Quantas funcionalidades o projeto tem: sem nenhuma num projeto com código, o início da sessão oferece o inventário.
+    features: all.length,
     at: now,
   }
 }
