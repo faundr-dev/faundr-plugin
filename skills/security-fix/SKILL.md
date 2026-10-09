@@ -1,15 +1,17 @@
 ---
-description: Corrige um problema de segurança registrado no Faundr (S-n, ou todos os de um pacote) e só dá como resolvido quando a checagem não encontra mais o problema. Sem argumento, corrige os críticos e altos abertos, um de cada vez.
-argument-hint: [S-<n> | nome-do-pacote]
+description: Corrige um problema de segurança registrado no Faundr (S-n, ou todos os de um pacote) e só dá como resolvido quando a checagem não encontra mais o problema. Sem argumento, corrige os críticos e altos abertos, um de cada vez; com --all, corrige todos os abertos, sem parar.
+argument-hint: "[S-<n> | nome-do-pacote | --all]"
 disable-model-invocation: true
-allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *) Bash(npm install *) Bash(npm update *) Bash(npm ls *)
+allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *) Bash(npm install *) Bash(npm update *) Bash(npm ls *) Bash(npx tsc *) Bash(npm run *) Bash(git diff *) Read Grep Glob Edit Write
 ---
 
 ## Problema a corrigir
 
+Argumentos: `$ARGUMENTS`
+
 !`node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" security-show $ARGUMENTS`
 
-Se aparecer erro, "corrigido" ou "Nenhum problema", avise o usuário e pare. Sem argumento, a lista acima são os problemas abertos: trabalhe só nos **críticos e altos**, um de cada vez, na ordem da lista (rode `faundr security-show S-<n>` para ver cada um).
+Se aparecer erro, "corrigido" ou "Nenhum problema", avise o usuário e pare. Sem argumento, a lista acima são os problemas abertos: trabalhe só nos **críticos e altos**, um de cada vez, na ordem da lista (rode `faundr security-show S-<n>` para ver cada um). Com `--all`, trabalhe em **todos** os da lista, de qualquer gravidade, seguindo o "Modo --all" no fim.
 
 ## Regras
 
@@ -48,5 +50,19 @@ Se aparecer erro, "corrigido" ou "Nenhum problema", avise o usuário e pare. Sem
 1. O projeto compila (e os testes passam, se existirem).
 2. Rode com a ferramenta Bash: `faundr security-resolve S-<n>` para cada problema corrigido. Nos da checagem automática, ele refaz a checagem e só fecha se o problema sumiu; se disser que ainda aparece, revise a correção. Nos da revisão com IA, releia o código corrigido e feche com `faundr security-resolve S-<n> --verified "<o que mudou e como conferiu>"`.
 3. Se aparecer um problema que é alarme falso, **não** ignore por conta própria: explique ao usuário e sugira ignorar pelo painel (seção Segurança) ou com `faundr security-ignore S-<n> --reason nao-e-problema --note "<por quê>"`, se ele concordar.
+
+## Modo --all (todos, sem parar)
+
+O usuário pediu para resolver tudo de uma vez: **não pare para perguntar** entre um problema e outro. Comece na hora, pelos críticos e altos, depois o resto.
+
+- **Um por vez, na ordem da lista**, com as regras e o "Verificar e fechar" acima. Problemas do mesmo pacote saem numa atualização só. A cada problema fechado, uma linha só: `S-<n> corrigido (<feitos>/<total>): <o que mudou>`.
+- **O que precisaria do usuário não trava o resto**: salto de versão major, aplicar migration no banco (escreva a migration, não aplique), conta ou configuração nova no provedor, alarme falso a ignorar. Não faça; anote em "Esperam você", com o plano em uma linha, e siga para o próximo. Chave no código: tire do código normalmente e anote a troca no provedor em "Esperam você".
+- **Quebrou e não sai em 2 tentativas** (compilação, teste, ou `security-resolve` diz que ainda aparece): desfaça só a mudança daquele problema, anote em "Não deu" com o motivo e siga.
+- **Não termine a resposta enquanto houver problema aberto** que não esteja em "Esperam você" ou "Não deu". Se a conversa for resumida no meio do caminho, rode `faundr security-show` de novo: os corrigidos já saíram da lista, e ela é o que falta.
+- **No fim**, rode `faundr security-show` mais uma vez e corrija o que tiver aparecido de novo. Não faça commit.
+
+Resposta final do modo --all: quantos corrigidos e as listas "Esperam você" (com destaque para chaves a trocar e migrations a aplicar) e "Não deu", com o S-n e uma linha cada.
+
+## Resposta
 
 Responda em poucas linhas: o que estava errado, o que mudou, como foi verificado e o que o usuário ainda precisa fazer (ex.: trocar a chave no provedor).

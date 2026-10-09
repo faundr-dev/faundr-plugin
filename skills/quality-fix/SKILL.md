@@ -1,15 +1,17 @@
 ---
-description: Corrige um problema de qualidade registrado no Faundr (Q-n) sem mudar o comportamento do app, e só dá como resolvido quando a checagem não encontra mais o problema (ou, nos da revisão com IA, depois de reler e conferir). Sem argumento, corrige os altos abertos, um de cada vez.
-argument-hint: [Q-<n>]
+description: Corrige um problema de qualidade registrado no Faundr (Q-n) sem mudar o comportamento do app, e só dá como resolvido quando a checagem não encontra mais o problema (ou, nos da revisão com IA, depois de reler e conferir). Sem argumento, corrige os altos abertos, um de cada vez; com --all, corrige todos os abertos, sem parar.
+argument-hint: "[Q-<n> | --all]"
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *) Bash(npm run *) Bash(npx tsc *) Bash(npm uninstall *) Bash(git diff *) Read Grep Glob Edit Write
 ---
 
 ## Problema a corrigir
 
+Argumentos: `$ARGUMENTS`
+
 !`node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" quality-show $ARGUMENTS`
 
-Se aparecer erro, "corrigido" ou "Nenhum problema", avise o usuário e pare. Sem argumento, a lista acima são os abertos: trabalhe só nos **altos**, um de cada vez (rode `faundr quality-show Q-<n>` para ver cada um).
+Se aparecer erro, "corrigido" ou "Nenhum problema", avise o usuário e pare. Sem argumento, a lista acima são os abertos: trabalhe só nos **altos**, um de cada vez (rode `faundr quality-show Q-<n>` para ver cada um). Com `--all`, trabalhe em **todos** os da lista, na ordem dela (altos primeiro), seguindo o "Modo --all" no fim.
 
 ## Regras (comportamento idêntico)
 
@@ -40,5 +42,20 @@ Se aparecer erro, "corrigido" ou "Nenhum problema", avise o usuário e pare. Sem
    - Achado da checagem automática: `faundr quality-resolve Q-<n>`. Ele refaz a checagem e só fecha se o problema sumiu; se disser que ainda aparece, revise.
    - Achado da revisão com IA: releia o código corrigido e feche com `faundr quality-resolve Q-<n> --verified "<o que mudou e como conferiu que o comportamento é o mesmo>"`.
 3. Alarme falso: **não** ignore por conta própria. Explique ao usuário e sugira ignorar pelo painel (seção Qualidade) ou `faundr quality-ignore Q-<n> --reason falso-alarme|de-proposito --note "<por quê>"`, se ele concordar.
+
+## Modo --all (todos, sem parar)
+
+O usuário pediu para resolver tudo de uma vez: **não pare para perguntar** entre um problema e outro. Comece na hora.
+
+- **Um por vez, na ordem da lista**, com as regras e o "Verificar e fechar" acima. A cada problema fechado, uma linha só: `Q-<n> corrigido (<feitos>/<total>): <o que mudou>`.
+- **O que pediria o OK antes não trava o resto** (mais de 2 arquivos, apagar arquivo, remover pacote, mudar algo que outra pessoa usa, alarme falso a ignorar): não faça; anote em "Esperam você", com o plano em uma linha, e siga para o próximo.
+- **Problemas no mesmo arquivo**: pode corrigir em sequência e compilar e testar uma vez para o grupo, mas só feche cada um depois que a compilação e os testes passarem.
+- **Quebrou e não sai em 2 tentativas** (compilação, teste, ou `quality-resolve` diz que ainda aparece): desfaça só a mudança daquele problema, anote em "Não deu" com o motivo e siga.
+- **Não termine a resposta enquanto houver problema aberto** que não esteja em "Esperam você" ou "Não deu". Se a conversa for resumida no meio do caminho, rode `faundr quality-show --all` de novo: os corrigidos já saíram da lista, e ela é o que falta.
+- **No fim**, rode `faundr quality-show --all` mais uma vez e corrija o que tiver aparecido de novo. Rode os testes inteiros uma última vez. Não faça commit.
+
+Resposta final do modo --all: quantos corrigidos, as listas "Esperam você" e "Não deu" (Q-n e uma linha cada) e como conferiu que o comportamento continua o mesmo.
+
+## Resposta
 
 Responda em poucas linhas: o que estava errado, o que mudou (arquivos), como conferiu que o comportamento continua o mesmo e o que ficou de fora.

@@ -1,6 +1,6 @@
 ---
-description: Conserta testes falhando ou instáveis registrados no Faundr — explica a falha em português simples, descobre se o erro está no código ou no teste, conserta a causa (nunca apaga, pula ou afrouxa o teste só para passar) e confirma rodando de novo com faundr tests-run. Sem argumento, trabalha nos que estão falhando e instáveis, um de cada vez.
-argument-hint: [nome do teste ou arquivo]
+description: Conserta testes falhando ou instáveis registrados no Faundr — explica a falha em português simples, descobre se o erro está no código ou no teste, conserta a causa (nunca apaga, pula ou afrouxa o teste só para passar) e confirma rodando de novo com faundr tests-run. Sem argumento, trabalha nos que estão falhando e instáveis, um de cada vez; com --all, conserta todos, sem parar.
+argument-hint: "[nome do teste ou arquivo | --all]"
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *) Bash(npm test*) Bash(npm run *) Bash(npx vitest *) Bash(npx jest *) Bash(npx playwright *) Bash(git diff *) Bash(git log *) Read Grep Glob Edit
 ---
@@ -9,7 +9,7 @@ allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *
 
 !`node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" tests-context --fix`
 
-O alvo: $ARGUMENTS (sem argumento: os testes FALHANDO e INSTÁVEIS do contexto, um de cada vez, os falhando primeiro).
+O alvo: $ARGUMENTS (sem argumento ou com `--all`: os testes FALHANDO e INSTÁVEIS do contexto, um de cada vez, os falhando primeiro; com `--all`, siga também o "Modo --all" no fim).
 
 Leia as seções "Consertar teste falhando" e "Consertar teste instável" do **guia** (caminho no contexto).
 
@@ -30,6 +30,18 @@ Leia as seções "Consertar teste falhando" e "Consertar teste instável" do **g
 2. Conserte a causa (relógio falso, esperar o resultado em vez do relógio, dado criado no próprio teste, simular o serviço de fora).
 3. Confirme rodando o arquivo umas 5 vezes seguidas (`faundr tests-run --files <arquivo>`): tem que passar todas.
 4. **Nunca** "resolva" aumentando `retries` ou o tempo limite.
+
+## Modo --all (todos, sem parar)
+
+O usuário pediu para consertar tudo de uma vez: **não pare para perguntar** entre um teste e outro. Comece na hora.
+
+- **Um por vez**, falhando primeiro e instáveis depois, com os passos acima. A cada teste consertado, uma linha só: `<teste> consertado (<feitos>/<total>): <lado do erro, o que mudou>`.
+- **O que precisaria do dono não trava o resto**: quando não dá para saber qual comportamento é o certo (passo 3), não escolha; anote em "Esperam você" com as duas opções em uma linha e siga para o próximo.
+- **Não sai em 2 tentativas**: desfaça só a mudança daquele teste, anote em "Não deu" com o motivo e siga.
+- **Não termine a resposta enquanto houver teste falhando ou instável** que não esteja em "Esperam você" ou "Não deu". Se a conversa for resumida no meio do caminho, rode `faundr tests-context --fix` de novo: ele mostra o que falta.
+- **No fim**, rode todos (`faundr tests-run`): o que tiver quebrado no caminho entra na fila. Não faça commit.
+
+A resposta final do modo --all traz também quantos foram consertados e as listas "Esperam você" e "Não deu".
 
 ## Responda
 
