@@ -103,7 +103,7 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { findDesignMd, isUiFile, lintProject, uiFiles } from './design.mjs'
 import { buildShowcase, detectRuntime, readShowcase, SHOWCASE_FILE, showcaseHashes, showcaseStatus } from './showcase.mjs'
-import { classify, commandCwd, isPartial, maskCommand, parseErrors, toolOutput } from './errors.mjs'
+import { classify, commandCwd, isPartial, maskCommand, outputSaysFailed, parseErrors, toolOutput } from './errors.mjs'
 import { allScripts } from './parts.mjs'
 import { findSecrets, guardContent, mask, projectFiles, projectMap, scanProject } from './security.mjs'
 import { parseImport, supabaseAdvisors } from './security-import.mjs'
@@ -1380,7 +1380,7 @@ async function captureErrors(payload, root, projectId, config) {
   const filtered = /\|\s*(grep|rg|sed|awk|findstr|select-string)\b/i.test(command)
   // Com pipe, o código de saída é o do último comando (`npm run build | tail`): a saída diz se falhou.
   let failed = payload.hook_event_name === 'PostToolUseFailure'
-  if (!failed && piped && /\b(error|failed|fail)\b|✘|✖/i.test(output)) failed = true
+  if (!failed && piped && outputSaysFailed(output)) failed = true
   const issues = parseErrors(output, { kind: c.kind, root, failed, cwd: commandCwd(command, payload.cwd ?? root) })
   const passed = !failed && !issues.length
   if (passed && filtered) return // saída filtrada vazia não prova nada

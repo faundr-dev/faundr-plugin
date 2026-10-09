@@ -198,7 +198,12 @@ function testErrors(lines) {
     const v = l.match(/^\s*(?:×|✗|FAIL)\s+(\S+\.(?:test|spec)\.[mc]?[jt]sx?)\s+>\s+(.+)$/)
     const j = !v && l.match(/^\s*●\s+(.+›.+)$/)
     const p = l.match(/^FAILED\s+(\S+?)::(\S+)(?:\s+-\s+(.+))?$/)
-    if (v || j) {
+    // node --test: "✖ nome do teste (12.3ms)" (o "✖ failing tests:" do fim só repete a lista).
+    const n = !v && !j && (l.match(/^\s*✖\s+(?!failing tests:)(.+?)(?:\s+\([\d.]+m?s\))?$/) || l.match(/^\s*not ok \d+ - (.+?)(?:\s+#.*)?$/))
+    if (n) {
+      const reason = lines.slice(i + 1, i + 12).map((x) => x.trim()).find((r) => /^(\w*Error|AssertionError)\b/.test(r)) ?? ''
+      if (!out.some((o) => o.key === n[1])) out.push({ tool: 'node', code: null, message: `Teste falhou: ${n[1]}${reason ? ` (${reason})` : ''}`, file: null, line: null, index: i, key: n[1] })
+    } else if (v || j) {
       let reason = ''
       for (let k = i + 1; k < Math.min(lines.length, i + 12); k++) {
         const r = lines[k].trim()
@@ -266,9 +271,22 @@ function jsRuntimeErrors(lines) {
   return out
 }
 
+// Resumo que conta zero falhas ("ℹ fail 0", "0 failed", "Found 0 errors", "errors: 0"): é sucesso, não erro.
+const ZERO_COUNT = /\b(?:fail(?:ed|ures?|ing)?|errors?|erros?)\b\s*[:=]?\s*0\b|\b0\s+(?:fail(?:ed|ures?|ing)?|errors?|erros?)\b/gi
+const withoutZeroCounts = (s) => String(s ?? '').replace(ZERO_COUNT, '')
+
+/**
+ * Com pipe (`npm test | tail`), o código de saída é o do último comando: só a saída diz se falhou.
+ * Conta como falha uma palavra de erro que não seja um resumo de zero falhas.
+ */
+export function outputSaysFailed(output) {
+  return /\b(error|failed|fail)\b|✘|✖/i.test(withoutZeroCounts(stripAnsi(output)))
+}
+
 function genericError(lines, kind) {
-  const i = lines.findIndex((l) => /\b(error|erro|failed|falhou|fatal)\b/i.test(l) && l.trim().length > 6)
-  const index = i >= 0 ? i : lines.findLastIndex((l) => l.trim())
+  const i = lines.findIndex((l) => /\b(error|erro|failed|falhou|fatal)\b/i.test(withoutZeroCounts(l)) && l.trim().length > 6)
+  // Sem linha de erro, a última linha diz algo; menos um resumo de números ("ℹ duration_ms 29", "# pass 3").
+  const index = i >= 0 ? i : lines.findLastIndex((l) => l.trim() && !/^\s*(ℹ|#)\s/.test(l))
   if (index < 0) return []
   return [{ tool: kind, code: null, message: lines[index].trim().slice(0, 500), file: null, line: null, index }]
 }
