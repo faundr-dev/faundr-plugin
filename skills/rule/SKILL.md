@@ -15,3 +15,5 @@ Sem caminhos, a regra vale para tudo e entra no início de toda sessão. Se a re
 Confirme em uma frase: com caminhos, diga que ela chega ao agente antes de ele editar esses arquivos (já nesta sessão); sem caminhos, que todo agente recebe a regra a partir da próxima sessão.
 
 Se a regra proíbe algo que dá para achar pelo texto do código (uma biblioteca, uma função, um jeito de escrever: "não usar axios", "sem console.log nas telas", "nada de chave do Stripe no front"), acrescente `--forbid "<expressão regular>"` (ex.: `--forbid "from ['\"]axios['\"]"`). Assim o Faundr avisa antes de uma edição que traga isso e a checagem de qualidade aponta onde já existe. Diga ao usuário o padrão que usou.
+
+Se a regra muda uma anterior, acrescente `--replaces "<trecho do título da antiga>"`: a antiga fica obsoleta. Se o comando avisar que ela "parece com" outra, diga ao usuário qual e pergunte se a antiga deve ser aposentada (`faundr memory-edit <id> --obsolete`).

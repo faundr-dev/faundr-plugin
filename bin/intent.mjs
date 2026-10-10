@@ -89,3 +89,36 @@ export function featureNudge(current) {
     .filter(Boolean)
     .join('\n')
 }
+
+// ---- regra dita no chat ------------------------------------------------------------------------
+// "a partir de agora…", "nunca apague…", "cuidado com…": o usuário está dando uma regra que deveria valer nas próximas
+// sessões e para o time. Sem registrar, ela fica só nesta conversa (ou na memória local de quem está usando).
+
+const RULE = new RegExp(
+  [
+    'a partir de agora',
+    'daqui (pra|para) (frente|diante)',
+    'de agora em diante',
+    'toda vez que',
+    '(sempre|nunca|jamais) (use|usar|usa|faca|fazer|coloque|colocar|deixe|deixar|mude|mudar|apague|apagar|delete|deletar|rode|rodar|publique|publicar|suba|subir|mexa|mexer|crie|criar|pergunte|perguntar|peca|pedir|mostre|mostrar|escreva|escrever|instale|instalar|commite|commitar|confie|esqueca|esquecer|remova|remover|altere|alterar|exponha|expor|guarde|guardar|grave|gravar|envie|enviar|aceite|aceitar|ignore|ignorar)',
+    'nao (pode|podem|deve|devem) (usar|ter|mexer|apagar|deletar|mudar|alterar|subir|publicar|expor|ficar|aparecer|entrar)',
+    '(e|eh) proibido',
+    'cuidado,? (com|que|pra|para)',
+    'nao (quero|aceito) (mais )?que (voce|o claude|ele|isso) (use|faca|mude|apague|mexa|coloque|rode|publique|crie|instale)',
+  ]
+    .map((p) => `\\b${p}\\b`)
+    .join('|'),
+)
+
+/** 'rule' quando o pedido parece dar uma regra que deve continuar valendo; null quando não. */
+export function ruleIntent(prompt) {
+  const raw = String(prompt ?? '').trim()
+  if (raw.length < 12 || /^[/!#<]/.test(raw)) return null
+  const text = plain(raw.replace(/<pasted_content[\s\S]*?<\/pasted_content>/g, ' '))
+  if (CONTINUED.test(text)) return null
+  return RULE.test(text) ? 'rule' : null
+}
+
+export function ruleNudge() {
+  return '[Faundr] O usuário parece ter dado uma regra para continuar valendo. Se for algo para as próximas conversas e para o time (não só para agora), registre: faundr rule "<regra curta e afirmativa>" --why "<porquê>" (com --file "<pasta ou padrão>" se valer só para uma parte do código; se substitui uma anterior, --replaces "<trecho do título>") e diga ao usuário em uma frase que registrou. Se for só para este pedido, ignore este aviso.'
+}

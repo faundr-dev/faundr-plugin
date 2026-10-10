@@ -20,6 +20,9 @@
 //   faundr decision "<título>" [--why "..."]   registra uma decisão técnica
 //   faundr rule "<título>" [--why "..."] [--file <padrão>] [--forbid "<regex>"]  regra do time; --forbid: o que o código não pode ter
 //     --file <arquivo ou padrão>               (rule e decision, pode repetir) liga aos arquivos: chega ao agente antes de editá-los
+//     --replaces "<id ou trecho>"              (rule e decision) aposenta a regra ou decisão que esta substitui
+//     --global                                 (decision) não liga sozinha aos arquivos que a sessão editou
+//   faundr memory-edit "<id ou trecho>" [--rule|--decision] [--file …] [--global] [--obsolete]  muda uma regra ou decisão
 //   faundr concern "<título>" [--why "..."]    registra uma preocupação para revisar depois
 //   faundr resolve [P-<n> | trecho]            marca uma preocupação como resolvida (sem argumento: lista as abertas)
 //   faundr focus "<nome>"                      troca a funcionalidade atual
@@ -111,7 +114,7 @@ import { contextLines, findMap, resolvePosition } from './sourcemap.mjs'
 import { detectStack } from './stack.mjs'
 import { graphFooter, rememberTranscript, transcriptUsage, transcriptsToSync } from './usage.mjs'
 import { dependentsNote, readGraph } from './dependents.mjs'
-import { forbiddenIn, forbiddenNote, readRules, rulesFor, rulesNote, writeRules } from './rules.mjs'
+import { forbiddenIn, forbiddenNote, globalRules, readMemoryIndex, readRules, rulesFor, rulesNote, writeMemoryIndex, writeRules } from './rules.mjs'
 import { installStatusline, statusFromBoard, statusLine } from './statusline.mjs'
 import { agentsBlock, removeBlock, upsertBlock } from './agents-md.mjs'
 import { editLoopNote, proofNeeded, recordCheck, recordEdit, takeLoopAlerts } from './loop.mjs'
@@ -133,7 +136,7 @@ const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'apply
 const GRAPH_LOCK_MS = 5 * 60_000
 
 // Orientação de acompanhamento: o agente registra o que constrói (skill "track").
-const WORK_GUIDANCE = `[Faundr] Registre o trabalho para o time acompanhar no painel: ao começar algo de vários passos (funcionalidade nova, melhoria grande, uma nova fase), antes de construir, faundr feature "<título>" --done-when "<como saber que ficou pronto>" e um faundr task "<passo>" por passo; se o pedido for vago (não diz para quem, o que fica de fora ou quando está pronto), faça antes 2 a 3 perguntas curtas numa rodada só; faundr done "<passo>" ao concluir; faundr decision "<decisão>" --why "<porquê>" para escolhas técnicas. Trabalho em etapas (fases, MVP e depois o resto): registre já no começo as etapas seguintes com faundr feature "<etapa>" --after atual --desc "<o que entra>"; ao terminar uma etapa, diga ao usuário qual é a próxima.`
+const WORK_GUIDANCE = `[Faundr] Registre o trabalho para o time acompanhar no painel: ao começar algo de vários passos (funcionalidade nova, melhoria grande, uma nova fase), antes de construir, faundr feature "<título>" --done-when "<como saber que ficou pronto>" e um faundr task "<passo>" por passo; se o pedido for vago (não diz para quem, o que fica de fora ou quando está pronto), faça antes 2 a 3 perguntas curtas numa rodada só; faundr done "<passo>" ao concluir; faundr decision "<decisão>" --why "<porquê>" para escolhas técnicas (se ela muda uma decisão anterior, acrescente --replaces "<trecho do título da antiga>"). Trabalho em etapas (fases, MVP e depois o resto): registre já no começo as etapas seguintes com faundr feature "<etapa>" --after atual --desc "<o que entra>"; ao terminar uma etapa, diga ao usuário qual é a próxima.`
 
 // Orientação "sempre ligada" (equivalente à regra de CLAUDE.md do graphify): consultar o grafo antes de varrer arquivos.
 const GRAPH_GUIDANCE = `[Faundr] Este projeto tem um grafo de conhecimento em .faundr/ (código + docs, com comunidades e ligações).
@@ -555,6 +558,11 @@ async function hook(agent) {
     const root = path.dirname(linkFile)
     // Regras ligadas a arquivos: cópia local para o guard entregar antes de cada edição (ele não usa a rede).
     if (Array.isArray(answer.anchoredRules)) writeRules(root, answer.anchoredRules)
+    // Todas as regras e decisões: o hook do pedido entrega as do assunto; as que o início já levou não se repetem.
+    if (Array.isArray(answer.memoryIndex)) {
+      writeMemoryIndex(root, answer.memoryIndex)
+      writeState(root, { rulesShown: { session: payload.session_id, ids: answer.memoryShown ?? [] } })
+    }
     const designMd = findDesignMd(root)
     const designNote = designMd ? DESIGN_GUIDANCE(designMd) : uiFiles(root).length ? NO_DESIGN_GUIDANCE : null
     additionalContext = [additionalContext, WORK_GUIDANCE, hasGraph && GRAPH_GUIDANCE, designNote, inventoryNote(root)].filter(Boolean).join('\n\n')
@@ -707,8 +715,16 @@ async function mapa(args) {
 async function subagentStart() {
   const payload = JSON.parse(await readStdin())
   const linkFile = findUp(payload.cwd ?? process.cwd(), LINK_FILE)
-  if (!linkFile || !fs.existsSync(path.join(path.dirname(linkFile), '.faundr', 'graph.json'))) return
-  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SubagentStart', additionalContext: GRAPH_GUIDANCE } }))
+  if (!linkFile) return
+  const root = path.dirname(linkFile)
+  // O subagente não recebe o início da sessão: leva as regras do time (as ligadas a arquivos chegam pelo guard).
+  const rules = globalRules(readMemoryIndex(root))
+  const teamRules = rules.length
+    ? `[Faundr] Regras do time (siga sempre):\n${rules.map((r) => `- ${r.title}${r.body ? ` — ${r.body}` : ''}`).join('\n')}`
+    : null
+  const graphNote = fs.existsSync(path.join(root, '.faundr', 'graph.json')) ? GRAPH_GUIDANCE : null
+  const additionalContext = [teamRules, graphNote].filter(Boolean).join('\n\n')
+  if (additionalContext) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SubagentStart', additionalContext } }))
 }
 
 // Gera o grafo na raiz do projeto ligado e envia graph.json + GRAPH_REPORT.md.
@@ -825,6 +841,48 @@ function printFeature(f, byId) {
   if (next.length) console.log(`  → próxima etapa: ${next.map((n) => `"${n.title}"${n.finished ? ' (concluída)' : ''}`).join(', ')}`)
 }
 
+// Arquivos que esta sessão editou, para ligar a decisão a eles: só quando são poucos (1 a 5) e específicos. Arquivo
+// que já tem 3+ regras e decisões ligadas é central demais (mexe-se nele o tempo todo) e fica de fora.
+const AUTO_ANCHOR_MAX = 5
+function autoAnchor(root) {
+  const sid = readState(root).sessionStart?.session
+  if (!sid) return []
+  const crowded = new Map()
+  for (const m of readMemoryIndex(root)) for (const p of m.paths ?? []) crowded.set(p, (crowded.get(p) ?? 0) + 1)
+  const files = sessionEditedFiles(sid)
+    .map((f) => path.relative(root, path.resolve(f)).split(path.sep).join('/'))
+    .filter((rel) => rel && !rel.startsWith('..') && !rel.startsWith('.faundr/') && !/(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/.test(rel))
+    .filter((rel) => (crowded.get(rel) ?? 0) < 3)
+  const unique = [...new Set(files)]
+  return unique.length >= 1 && unique.length <= AUTO_ANCHOR_MAX ? unique : []
+}
+
+// Mudar uma regra ou decisão já registrada: virar regra (vale sempre) ou decisão, ligar a arquivos, voltar a valer
+// para o projeto todo ou aposentar.
+async function memoryEdit(args) {
+  const { root } = linkedProject()
+  const query = textArg(args)
+  const files = flags(args, '--file')
+  const kind = args.includes('--rule') ? 'rule' : args.includes('--decision') ? 'decision' : undefined
+  const obsolete = args.includes('--obsolete')
+  const paths = args.includes('--global') ? [] : files.length ? files : undefined
+  if (!query || (!kind && !obsolete && paths === undefined))
+    throw new Error('uso: faundr memory-edit "<id ou trecho do título>" [--rule | --decision] [--file "<caminho>"]... [--global] [--obsolete]')
+  const r = await memoryApi({ action: 'memory-edit', query, kind, paths, obsolete })
+  // Cópias locais: o guard e o hook do pedido passam a ver a mudança já nesta sessão.
+  const index = readMemoryIndex(root)
+  const item = index.find((m) => m.id === r.id)
+  writeMemoryIndex(root, obsolete ? index.filter((m) => m.id !== r.id) : index.map((m) => (m.id === r.id ? { ...m, kind: r.kind, paths: r.paths } : m)))
+  const rules = readRules(root).filter((x) => x.id !== r.id)
+  if (!obsolete && r.paths.length) rules.push({ id: r.id, kind: r.kind, title: r.title, body: item?.body ?? '', paths: r.paths })
+  writeRules(root, rules)
+  const name = r.kind === 'rule' ? 'Regra' : 'Decisão'
+  if (obsolete) return console.log(`Aposentada: ${r.title}`)
+  console.log(
+    `${name}: ${r.title}\n${r.paths.length ? `Ligada a ${r.paths.join(', ')}: chega antes de editar esses arquivos e quando o pedido falar do assunto.` : r.kind === 'rule' ? 'Vale para o projeto todo: entra no início de toda sessão e nos subagentes.' : 'Vale para o projeto todo: entra no início da sessão quando é recente, e quando o pedido falar do assunto.'}`,
+  )
+}
+
 async function work(command, args) {
   await workCommand(command, args)
   // A barra de status lê o resumo do arquivo de estado: atualiza depois de mexer no quadro.
@@ -918,15 +976,33 @@ async function workCommand(command, args) {
       } catch {
         throw new Error(`Padrão inválido em --forbid: ${forbid} (é uma expressão regular; ex.: "console\\.log\\(" ou "from ['\\"]axios['\\"]")`)
       }
-    // Com padrão proibido e sem arquivos, vale para o projeto todo.
-    const paths = flags(args, '--file').length ? flags(args, '--file') : forbid ? ['**'] : []
+    // Com padrão proibido e sem arquivos, vale para o projeto todo. Decisão sem --file: liga sozinha aos arquivos
+    // que esta sessão editou (quando são poucos), para chegar na hora de mexer neles.
+    const explicit = flags(args, '--file')
+    const auto = !explicit.length && !forbid && command === 'decision' && !args.includes('--global') ? autoAnchor(root) : []
+    const paths = explicit.length ? explicit : forbid ? ['**'] : auto
     const body = flag(args, '--why')
-    const { id } = await memoryApi({ action: 'add', kind: command, title: text, body, parentId: command === 'decision' ? current : null, paths, forbid })
-    if (!paths.length) return console.log(`${name} registrada: ${text}`)
-    // Já vale nesta sessão: entra na cópia local que o guard lê antes de cada edição.
-    writeRules(root, [...readRules(root).filter((r) => r.id !== id), { id, kind: command, title: text, body: body ?? '', paths, forbid }])
-    console.log(`${name} registrada, ligada a ${paths.join(', ')}: ${text}\nEla não entra mais no início da sessão; chega ao agente antes de ele editar um desses arquivos.`)
+    const replaces = flag(args, '--replaces')
+    const r = await memoryApi({ action: 'add', kind: command, title: text, body, parentId: command === 'decision' ? current : null, paths, forbid, replaces })
+    const { id } = r
+    // Já vale nesta sessão: entra nas cópias locais (o guard lê antes de cada edição; o hook do pedido, pelo assunto).
+    if (paths.length) writeRules(root, [...readRules(root).filter((x) => x.id !== id), { id, kind: command, title: text, body: body ?? '', paths, forbid }])
+    const index = readMemoryIndex(root).filter((m) => m.id !== id && m.id !== r.replaced?.id)
+    writeMemoryIndex(root, [...index, { id, kind: command, title: text, body: (body ?? '').replace(/\s+/g, ' ').slice(0, 300), paths }])
+    if (r.replaced) writeRules(root, readRules(root).filter((x) => x.id !== r.replaced.id))
+    const short = id.slice(0, 6)
+    if (!paths.length) console.log(`${name} registrada (${short}): ${text}`)
+    else if (auto.length)
+      console.log(
+        `${name} registrada (${short}), ligada aos arquivos que esta sessão editou: ${paths.join(', ')}.\nEla chega ao agente antes de ele editar esses arquivos e quando um pedido falar do assunto. Se vale para o projeto todo: faundr memory-edit ${short} --global`,
+      )
+    else console.log(`${name} registrada (${short}), ligada a ${paths.join(', ')}: ${text}\nEla não entra mais no início da sessão; chega ao agente antes de ele editar um desses arquivos.`)
     if (forbid) console.log(`O código não pode ter: ${forbid}. O Faundr avisa antes de uma edição que traga isso, e a checagem de qualidade aponta onde já existe.`)
+    if (r.replaced) console.log(`Substitui "${r.replaced.title}", que ficou obsoleta.`)
+    if (r.similar?.length)
+      console.log(
+        `Parece com: ${r.similar.map((m) => `${m.id.slice(0, 6)} "${m.title}"`).join('; ')}. Se esta substitui uma delas, aposente a antiga: faundr memory-edit <id> --obsolete (ou registre de novo com --replaces <id>). Se forem coisas diferentes, nada a fazer.`,
+      )
     return
   }
   if (command === 'concern') {
@@ -984,7 +1060,7 @@ async function workCommand(command, args) {
       console.log('Regras e decisões confirmadas:')
       decisions.forEach((d, i) =>
         console.log(
-          `  ${i + 1}. ${d.kind === 'rule' ? 'Regra' : 'Decisão'}: ${d.title}${d.body ? ` — ${d.body}` : ''}${d.paths?.length ? ` [arquivos: ${d.paths.join(', ')}]` : ''}${d.forbid ? ` [o código não pode ter: ${d.forbid}]` : ''}`,
+          `  ${i + 1}.${d.id ? ` [${d.id.slice(0, 6)}]` : ''} ${d.kind === 'rule' ? 'Regra' : 'Decisão'}: ${d.title}${d.body ? ` — ${d.body}` : ''}${d.paths?.length ? ` [arquivos: ${d.paths.join(', ')}]` : ''}${d.forbid ? ` [o código não pode ter: ${d.forbid}]` : ''}`,
         ),
       )
       return
@@ -3662,6 +3738,7 @@ async function cli() {
     else if (command === 'quality-finding') await qualityFinding(args)
     else if (command === 'quality-review-done') await qualityReviewDone(args)
     else if (command === 'quality-rule') await qualityRule(args)
+    else if (command === 'memory-edit') await memoryEdit(args)
     else if (command === 'quality-ladder') await qualityLadder(args)
     else if (command === 'tests-scan') await testsScan(args)
     else if (command === 'tests-run') await testsRun(args)
@@ -3680,7 +3757,7 @@ async function cli() {
     else if (command === 'errors-uptime') await errorsUptime(args)
     else
       console.log(
-        'comandos: login | link | status | checkpoint | checkpoints | restore | mapa | graph | graph-query | graph-path | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | concern | resolve | start | done | focus | board | criteria | criteria-check | handoff | handover | weekly | resume | stack-scan | env-check | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | security-import | security-supabase | db-test | launch-check | lgpd | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
+        'comandos: login | link | status | checkpoint | checkpoints | restore | mapa | graph | graph-query | graph-path | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | memory-edit | concern | resolve | start | done | focus | board | criteria | criteria-check | handoff | handover | weekly | resume | stack-scan | env-check | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | security-import | security-supabase | db-test | launch-check | lgpd | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
       )
   } catch (err) {
     if (['graph', 'design-lint', 'security-scan', 'quality-scan', 'tests-scan', 'stack-scan', 'env-check', 'usage-sync', 'checkpoints-sync'].includes(command) && args.includes('--quiet')) log(`${command}: ${err.message}`)
