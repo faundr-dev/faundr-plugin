@@ -22,7 +22,7 @@ A parte "Detectado agora" vem de uma leitura automática dos arquivos: é o pont
 - `scripts`: os comandos que a pessoa realmente usa, com `what` em português simples.
 - `notes`: até 12 observações úteis — riscos ("o deploy é manual; ninguém publica sem rodar npm run deploy"), variáveis usadas no código que faltam no arquivo de exemplo, dúvidas reais.
 
-## 3. Formato (JSON) — salve em `.faundr/stack.json`
+## 3. Formato (JSON) — salve em `.faundr/painel/stack.json`
 
 ```json
 {
@@ -43,7 +43,7 @@ A parte "Detectado agora" vem de uma leitura automática dos arquivos: é o pont
 
 ## 4. Envie
 
-Salve com a ferramenta Write em `.faundr/stack.json` (na raiz do projeto ligado) e rode:
+Salve com a ferramenta Write em `.faundr/painel/stack.json` (na raiz do projeto ligado) e rode:
 
 `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" stack-save`
 

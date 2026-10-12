@@ -48,3 +48,9 @@ Seção Testes (bin/tests.mjs):
   do usuário e lê o relatório JSON (mutation-testing-report-schema, Apache-2.0); nenhum código do Stryker é empacotado. O catálogo da revisão com IA (skills/quality/catalog.md) e as
   skills quality e quality-fix adaptam a régua de confiança e os checklists do code-review e do pr-review-toolkit,
   as regras do code-simplifier e as 5 etiquetas de corte do Ponytail, reescritos em português.
+
+Navegador rápido (bin/browse.mjs, bin/browse-cdp.mjs, bin/browse-snapshot.js):
+  Porte em JavaScript do jev-ultrafast (browser-use/jev-ultrafast), Copyright (c) 2026 Browser Use,
+  licença MIT (licenses/jev-ultrafast-LICENSE). browse-snapshot.js é o snapshot.js original com campos de
+  senha liberados como alvo (valor oculto). Mudanças: laço em Node em vez de Python, sem o modelo de texto
+  (os valores vêm do agente), senhas por variável de ambiente, trava contra repetição e Chrome próprio.

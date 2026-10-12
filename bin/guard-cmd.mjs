@@ -7,6 +7,7 @@
 //   instalar pacote que não existe (barra) ou que é novo/quase sem uso (pergunta): nome inventado pela IA
 //   primeiro comando que pode mudar arquivos na sessão → ponto de volta
 //   aviso do detector de loop guardado → entregue ao agente
+//   git push na main com outra pessoa trabalhando no projeto → pergunta (o combinado é juntar pela mesa de trabalho)
 //
 // Regra de ouro dos hooks: nunca quebrar o agente. Qualquer erro → sai em silêncio (detalhes em ~/.faundr/hook.log).
 
@@ -18,6 +19,7 @@ import { classifyCommand, guardMessage, isReadOnly } from './command-guard.mjs'
 import { changesDatabase, remoteDatabases, remoteNote } from './env-target.mjs'
 import { takeLoopAlerts } from './loop.mjs'
 import { guardInstall } from './package-guard.mjs'
+import { pushWarning, readTeam } from './team.mjs'
 
 const CONFIG_DIR = path.join(os.homedir(), '.faundr')
 
@@ -55,6 +57,20 @@ function databaseNote(root, verdict, sql) {
   }
 }
 
+// Branch atual lida do .git/HEAD (sem abrir o git).
+function currentBranch(cwd) {
+  try {
+    const dir = gitRoot(cwd)
+    if (!dir) return null
+    let gitDir = path.join(dir, '.git')
+    if (fs.statSync(gitDir).isFile()) gitDir = path.resolve(dir, fs.readFileSync(gitDir, 'utf8').match(/gitdir:\s*(.+)/)[1].trim())
+    const head = fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf8').trim()
+    return head.startsWith('ref: refs/heads/') ? head.slice(16) : null
+  } catch {
+    return null
+  }
+}
+
 const reply = (output) => process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', ...output } }))
 
 async function main() {
@@ -80,6 +96,12 @@ async function main() {
     }
     log(`${verdict.level}: ${verdict.what} :: ${command.slice(0, 200)}`)
     return reply({ permissionDecision: verdict.level, permissionDecisionReason: guardMessage(verdict, { command, checkpoint, note: databaseNote(root, verdict, sql) }) })
+  }
+
+  const push = !sql && pushWarning(readTeam(root), payload.session_id, command, currentBranch(cwd))
+  if (push) {
+    log(`ask: push com o time ativo :: ${command.slice(0, 200)}`)
+    return reply({ permissionDecision: 'ask', permissionDecisionReason: push })
   }
 
   // Migração, seed ou script de banco: normal contra um banco local; com o .env apontando para a nuvem, pergunta.

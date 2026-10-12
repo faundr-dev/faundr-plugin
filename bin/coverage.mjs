@@ -6,9 +6,10 @@
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
+import { relPath } from './paths.mjs'
 
-export const COVERAGE_DIR = path.join('.faundr', 'tests', 'coverage')
-const PREV_FILE = path.join('.faundr', 'tests', 'coverage-prev.json')
+export const COVERAGE_DIR = path.join(relPath('tests'), 'coverage')
+const PREV_FILE = path.join(relPath('tests'), 'coverage-prev.json')
 const NOT_CODE = /(^|\/)(node_modules|dist|build|coverage|\.faundr)\/|\.(test|spec)\.[cm]?[jt]sx?$|\.d\.ts$/
 
 /** Argumentos extras para ligar a cobertura sem mexer na configuração do projeto (null = não dá). */

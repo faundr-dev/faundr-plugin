@@ -3,11 +3,12 @@
 //
 // Só NOMES: os valores dos .env nunca são lidos para fora daqui. A hospedagem vem da configuração versionada
 // (wrangler vars, vercel.json, netlify.toml, fly.toml, render.yaml, GitHub Actions) e, se a pessoa pedir
-// (faundr env-check --hosting), da CLI do provedor (lista só os nomes), guardada em .faundr/env-hosting.json.
+// (faundr env-check --hosting), da CLI do provedor (lista só os nomes), guardada em .faundr/verificacoes/env-hosting.json.
 
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
+import { faundrPath } from './paths.mjs'
 
 export const PUBLIC_PREFIX = /^(VITE_|NEXT_PUBLIC_|NUXT_PUBLIC_|EXPO_PUBLIC_|REACT_APP_|GATSBY_)/
 // PUBLIC_ só vai para o navegador no SvelteKit e no Astro; em outros projetos é um nome qualquer.
@@ -113,7 +114,7 @@ export function hostingProvider(files) {
 
 export function readHostingCache(root) {
   try {
-    return JSON.parse(fs.readFileSync(path.join(root, '.faundr', 'env-hosting.json'), 'utf8'))
+    return JSON.parse(fs.readFileSync(faundrPath(root, 'envHosting'), 'utf8'))
   } catch {
     return null
   }

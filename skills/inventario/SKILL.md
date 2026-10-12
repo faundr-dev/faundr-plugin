@@ -14,8 +14,8 @@ Não repita o que já está acima.
 
 ## 2. Descubra o que o app faz (sem ler o projeto inteiro)
 
-- Se não existir `.faundr/graph.json`, gere o mapa: `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" mapa`.
-- Leia a seção "Comunidades (navegação)" de `.faundr/GRAPH_REPORT.md`: cada comunidade é um grupo de código que trabalha junto.
+- Se não existir `.faundr/mapa/graph.json`, gere o mapa: `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" mapa`.
+- Leia a seção "Comunidades (navegação)" de `.faundr/mapa/GRAPH_REPORT.md`: cada comunidade é um grupo de código que trabalha junto.
 - Veja as telas e rotas (pastas como `routes`, `pages`, `app`, `screens`, `views`) e os pontos de entrada da API. Use `faundr graph-skeleton <arquivo>` para ver um arquivo sem lê-lo inteiro e `faundr graph-query "<tema>"` para confirmar o que uma parte faz.
 - Documentos do projeto (README, CONTEXT.md, docs/) ajudam a dar nome às coisas, mas só conte o que o código mostra que existe.
 

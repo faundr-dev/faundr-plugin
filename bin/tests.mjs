@@ -9,12 +9,13 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { COVERAGE_DIR, coverageArgs } from './coverage.mjs'
 import { subDirs } from './parts.mjs'
+import { relPath } from './paths.mjs'
 import { findSecrets, mask, projectFiles } from './security.mjs'
 
 export const TEST_FILE = /(^|\/)(__tests__|tests?|e2e|spec)\/.*\.[cm]?[jt]sx?$|\.(test|spec)\.[cm]?[jt]sx?$/
 export const PY_TEST_FILE = /(^|\/)(test_[^/]*|[^/]*_test)\.py$/
 const NOT_PROJECT = /(^|\/)(node_modules|dist|build|site-packages|\.?venv|env)\//
-const OUT_DIR = path.join('.faundr', 'tests')
+const OUT_DIR = path.normalize(relPath('tests'))
 const RUN_TIMEOUT = 15 * 60_000
 
 // Onde fica o executável de cada um dentro de node_modules (roda com o node atual: funciona igual no Windows).
@@ -247,7 +248,7 @@ export function insideDir(dir, list) {
 }
 
 /**
- * Roda um executor na pasta dele (dir, relativa à raiz) com o relatório em .faundr/tests/ da raiz, sem mexer na
+ * Roda um executor na pasta dele (dir, relativa à raiz) com o relatório em .faundr/verificacoes/testes/ da raiz, sem mexer na
  * configuração do projeto. files e exclude vêm relativos à raiz.
  */
 export function runTests(root, runner, { dir = '', python = null, changed = false, files = null, exclude = [], timeout = RUN_TIMEOUT, nodeArgs = null, coverage = false } = {}) {

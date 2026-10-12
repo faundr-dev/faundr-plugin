@@ -2,12 +2,13 @@
 // lê o graph.json e conta quem chama as funções dele ou importa o arquivo, para o agente conferir esses usos.
 import fs from 'node:fs'
 import path from 'node:path'
+import { faundrPath } from './paths.mjs'
 
 const USES = new Set(['calls', 'indirect_call', 'imports', 'imports_from', 're_exports', 'references', 'inherits', 'implements'])
 
 export function readGraph(root) {
   try {
-    return JSON.parse(fs.readFileSync(path.join(root, '.faundr', 'graph.json'), 'utf8'))
+    return JSON.parse(fs.readFileSync(faundrPath(root, 'graph'), 'utf8'))
   } catch {
     return null
   }

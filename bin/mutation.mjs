@@ -6,8 +6,9 @@
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
+import { relPath } from './paths.mjs'
 
-const DIR = path.join('.faundr', 'tests', 'mutation')
+const DIR = path.join(relPath('tests'), 'mutation')
 const BIN = 'node_modules/@stryker-mutator/core/bin/stryker.js'
 const RUNNER_PLUGIN = { vitest: '@stryker-mutator/vitest-runner', jest: '@stryker-mutator/jest-runner' }
 const CODE = /\.(m?[jt]sx?|cjs)$/

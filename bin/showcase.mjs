@@ -1,4 +1,4 @@
-// Vitrine do design (fase 2): réplicas dos componentes que o agente escreve em .faundr/showcase.json.
+// Vitrine do design (fase 2): réplicas dos componentes que o agente escreve em .faundr/painel/showcase.json.
 // Aqui, sem IA: descobrir como o CSS do projeto roda (Tailwind 4, Tailwind 3 ou CSS puro), juntar esse CSS
 // com as fontes (enviadas à parte, servidas pelo painel) e calcular a impressão digital dos arquivos de cada
 // componente — quando o arquivo muda, a réplica aparece como desatualizada no painel.
@@ -7,8 +7,9 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { inNodeModules, isClaudePlugin } from './parts.mjs'
+import { relPath } from './paths.mjs'
 
-export const SHOWCASE_FILE = '.faundr/showcase.json'
+export const SHOWCASE_FILE = relPath('showcase')
 // Marca que o painel troca pelo endereço das fontes (/api/showcase-font/<projeto>).
 export const FONT_BASE = '__FAUNDR_FONT__'
 

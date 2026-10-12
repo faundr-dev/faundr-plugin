@@ -1,9 +1,10 @@
 // Regras e decisões ligadas a arquivos (ideia do Graft, brain/attach.ts). O início da sessão traz a lista do servidor
-// e o plugin guarda em .faundr/rules.json; o guard (antes de cada edição, sem rede) entrega as que valem para o arquivo.
+// e o plugin guarda em .faundr/painel/rules.json; o guard (antes de cada edição, sem rede) entrega as que valem para o arquivo.
 import fs from 'node:fs'
 import path from 'node:path'
+import { faundrPath } from './paths.mjs'
 
-const rulesFile = (root) => path.join(root, '.faundr', 'rules.json')
+const rulesFile = (root) => faundrPath(root, 'rules')
 
 export function readRules(root) {
   try {
@@ -82,10 +83,10 @@ export function forbiddenNote(rel, hits) {
 }
 
 // ---- memória pelo assunto do pedido ----------------------------------------------------------
-// O início da sessão traz as regras e poucas decisões; as outras ficam numa cópia local (.faundr/memory.json) e o
+// O início da sessão traz as regras e poucas decisões; as outras ficam numa cópia local (.faundr/painel/memory.json) e o
 // hook do pedido (prompt-check.mjs, sem rede) entrega as que falam do mesmo assunto, cada uma uma vez por sessão.
 
-const memoryFile = (root) => path.join(root, '.faundr', 'memory.json')
+const memoryFile = (root) => faundrPath(root, 'memory')
 
 export function readMemoryIndex(root) {
   try {

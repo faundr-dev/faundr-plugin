@@ -25,7 +25,7 @@ Cada réplica é HTML estático que reproduz o visual de um componente, desenhad
 
 Abra o arquivo do componente (e o CSS da classe, quando for classe global) antes de escrever. Nunca replique pelo nome: pegue as classes e a estrutura reais.
 
-## 3. Escreva `.faundr/showcase.json`
+## 3. Escreva `.faundr/painel/showcase.json`
 
 ```json
 {

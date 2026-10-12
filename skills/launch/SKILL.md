@@ -11,8 +11,8 @@ Pedido do usuário: $ARGUMENTS
    - Se a saída disser que gravar/alterar/apagar não foram testados e você tiver o MCP do Supabase (ferramenta `execute_sql`), ofereça o teste completo. Diga em uma frase que ele roda no banco de verdade, mas cada tentativa é desfeita na hora (nada fica gravado nem apagado), e **peça o OK do usuário**. Com o OK:
      1. pegue o SQL com `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" db-test --sql`;
      2. rode-o **sem mudar nada** com `execute_sql` no projeto do Supabase cujo ref aparece em "Banco testado" (confira com `list_projects`);
-     3. salve a resposta inteira, como veio, em `.faundr/db-test-result.json` (ferramenta Write);
-     4. rode `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" db-test --result .faundr/db-test-result.json`.
+     3. salve a resposta inteira, como veio, em `.faundr/verificacoes/db-test-result.json` (ferramenta Write);
+     4. rode `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" db-test --result .faundr/verificacoes/db-test-result.json`.
    - Sem MCP: diga que o teste completo precisa do token pessoal do Supabase em SUPABASE_ACCESS_TOKEN (https://supabase.com/dashboard/account/tokens) e siga com a leitura.
    - Se o projeto não usa Supabase, pule este passo e diga isso.
 2. **Resto do checklist.** Rode `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" launch-check` (com `--url <site>` se o usuário passou um endereço ou se a saída disser que não sabe a URL do site no ar).

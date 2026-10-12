@@ -10273,8 +10273,8 @@ import crypto from "node:crypto";
 import fs6 from "node:fs";
 import path11 from "node:path";
 var EXTRACT_VERSION = 2;
-var cacheFile = (root) => path11.join(root, ".faundr", "extract-cache.json");
-var printsFile = (root) => path11.join(root, ".faundr", "fingerprints.json");
+var cacheFile = (root) => path11.join(root, ".faundr", "cache", "extract-cache.json");
+var printsFile = (root) => path11.join(root, ".faundr", "cache", "fingerprints.json");
 var hashText = (text) => crypto.createHash("sha1").update(text).digest("hex");
 var fileSetKey = (files) => hashText(files.map((f) => f.rel).sort().join("\n"));
 function loadCache(root, files) {
@@ -10453,7 +10453,7 @@ function displayLabel(rel, role, docTitle) {
 }
 
 // engine/src/pipeline.ts
-var OUT_DIR = ".faundr";
+var OUT_DIR = ".faundr/mapa";
 function gitCommit(root) {
   try {
     return execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || void 0;

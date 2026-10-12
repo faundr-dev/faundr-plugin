@@ -19,7 +19,7 @@ Quem vai ler é o dono do projeto, que pode não entender o próprio código. Re
 - Se já existe uma Visão anterior, **atualize-a**: mantenha o que continua verdadeiro, corrija o que mudou, mova itens entre "em andamento" e "pronto".
 - Coloque em `evidence` os caminhos de arquivo que comprovam cada item (1 a 4 por item).
 
-## 3. Formato (JSON) — salve em `.faundr/overview.json`
+## 3. Formato (JSON) — salve em `.faundr/painel/overview.json`
 
 ```json
 {
@@ -53,7 +53,7 @@ Preocupações abertas registradas no Faundr entram em `open_questions`. Tamanho
 
 ## 4. Envie
 
-Salve o arquivo com a ferramenta Write em `.faundr/overview.json` (na raiz do projeto ligado) e rode:
+Salve o arquivo com a ferramenta Write em `.faundr/painel/overview.json` (na raiz do projeto ligado) e rode:
 
 `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" overview-save`
 

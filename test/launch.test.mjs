@@ -65,7 +65,7 @@ test('política de privacidade: página = ok; só o texto = aviso; nada = falta'
 
 test('banco testado: lê o resultado salvo pelo db-test', () => {
   const now = Date.parse('2026-10-08T12:00:00Z')
-  const save = (r) => project({ '.faundr/db-test.json': JSON.stringify(r) })[0]
+  const save = (r) => project({ '.faundr/verificacoes/db-test.json': JSON.stringify(r) })[0]
   assert.equal(checkDbTest(project({})[0], now).status, 'nao-verificado')
   assert.equal(checkDbTest(save({ at: '2026-10-08T10:00:00Z', full: true, open: 0, tables: 3 }), now).status, 'ok')
   assert.equal(checkDbTest(save({ at: '2026-10-08T10:00:00Z', full: false, open: 0, tables: 3 }), now).status, 'aviso')
@@ -74,6 +74,6 @@ test('banco testado: lê o resultado salvo pelo db-test', () => {
 })
 
 test('URL de produção vem da Stack', () => {
-  const [d] = project({ '.faundr/stack.json': JSON.stringify({ environments: [{ name: 'Local', url: 'http://localhost:3000' }, { name: 'Produção', url: 'https://app.dev' }] }) })
+  const [d] = project({ '.faundr/painel/stack.json': JSON.stringify({ environments: [{ name: 'Local', url: 'http://localhost:3000' }, { name: 'Produção', url: 'https://app.dev' }] }) })
   assert.equal(productionUrl(d), 'https://app.dev')
 })

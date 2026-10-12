@@ -5,6 +5,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { faundrPath } from './paths.mjs'
 
 const MAX_FILE = 400_000
 const CODE = /\.(m?[jt]sx?|cjs|py|rb|go|php|rs|java|kt|cs|vue|svelte|astro|html|md|mdx|json|jsonc|toml|ya?ml)$/i
@@ -171,7 +172,7 @@ export function checkDbTest(root, now = Date.now()) {
   const key = 'banco-testado'
   let r
   try {
-    r = JSON.parse(fs.readFileSync(path.join(root, '.faundr', 'db-test.json'), 'utf8'))
+    r = JSON.parse(fs.readFileSync(faundrPath(root, 'dbTest'), 'utf8'))
   } catch {
     return { key, status: 'nao-verificado', detail: 'O banco ainda não foi testado como visitante. Rode faundr db-test (ou /faundr:launch).', evidence: [] }
   }
@@ -183,10 +184,10 @@ export function checkDbTest(root, now = Date.now()) {
   return { key, status: 'ok', detail: `Testado ${when}: ${r.tables} tabela(s), visitante e outra pessoa logada não leem, gravam nem apagam o que não devem.`, evidence: [] }
 }
 
-/** URL de produção pela Stack salva (.faundr/stack.json). */
+/** URL de produção pela Stack salva (.faundr/painel/stack.json). */
 export function productionUrl(root) {
   try {
-    const s = JSON.parse(fs.readFileSync(path.join(root, '.faundr', 'stack.json'), 'utf8'))
+    const s = JSON.parse(fs.readFileSync(faundrPath(root, 'stack'), 'utf8'))
     const env = (s.environments ?? []).find((e) => /produ|prod|live/i.test(e.name ?? '') && /^https?:\/\//.test(e.url ?? ''))
     if (env) return env.url
     return (s.hosting ?? []).find((h) => h.layer === 'front' && /^https?:\/\//.test(h.url ?? ''))?.url ?? null

@@ -130,13 +130,13 @@ test('graph-grep: agrupa pela função onde aparece e põe a mais usada primeiro
 
 test('grafo: cache por arquivo e atualização antes da consulta só com o que mudou', async () => {
   const { dir, graph } = await shop()
-  fs.mkdirSync(path.join(dir, '.faundr'), { recursive: true })
-  fs.writeFileSync(path.join(dir, '.faundr', 'graph.json'), JSON.stringify(graph))
+  fs.mkdirSync(path.join(dir, '.faundr', 'mapa'), { recursive: true })
+  fs.writeFileSync(path.join(dir, '.faundr', 'mapa', 'graph.json'), JSON.stringify(graph))
   assert.deepEqual(await refreshGraph(dir), { changed: [] })
   // Uma função nova no carrinho: só esse arquivo é lido de novo, e a busca já a encontra.
   fs.appendFileSync(path.join(dir, 'src/cart.mjs'), '\nexport function freeShipping(total) {\n  return total >= 20000\n}\n')
   assert.deepEqual(await refreshGraph(dir), { changed: ['src/cart.mjs'] })
-  const fresh = JSON.parse(fs.readFileSync(path.join(dir, '.faundr', 'graph.json'), 'utf8'))
+  const fresh = JSON.parse(fs.readFileSync(path.join(dir, '.faundr', 'mapa', 'graph.json'), 'utf8'))
   assert.ok(fresh.nodes.some((n) => n.label === 'freeShipping()'))
   // As comunidades antigas continuam (o painel recebe o grafo completo no fim da resposta).
   assert.equal(fresh.nodes.find((n) => n.label === 'applyCoupon()').community, graph.nodes.find((n) => n.label === 'applyCoupon()').community)
@@ -144,7 +144,7 @@ test('grafo: cache por arquivo e atualização antes da consulta só com o que m
   fs.writeFileSync(path.join(dir, 'src/orders.mjs'), "import { checkout } from './cart.mjs'\nexport const placeOrder = (items) => checkout(items)\n")
   assert.deepEqual(await refreshGraph(dir), { changed: ['src/orders.mjs'] })
   // Sem graph.json, não há o que atualizar.
-  fs.rmSync(path.join(dir, '.faundr', 'graph.json'))
+  fs.rmSync(path.join(dir, '.faundr', 'mapa', 'graph.json'))
   assert.equal(await refreshGraph(dir), null)
   fs.rmSync(dir, { recursive: true, force: true })
 })

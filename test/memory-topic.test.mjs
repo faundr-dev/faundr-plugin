@@ -61,8 +61,10 @@ test('regra dita no chat: avisa nas frases de regra, não nas outras', () => {
 })
 
 function run(script, args, { input = '', env = {}, cwd } = {}) {
+  // Rodando dentro do Claude Code, a sessão de quem roda os testes não pode vazar para o comando.
+  const { CLAUDE_CODE_SESSION_ID: _, ...parent } = process.env
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [path.join(BIN, script), ...args], { cwd, env: { ...process.env, ...env } })
+    const child = spawn(process.execPath, [path.join(BIN, script), ...args], { cwd, env: { ...parent, ...env } })
     let out = ''
     let err = ''
     child.stdout.on('data', (d) => (out += d))
@@ -75,8 +77,8 @@ function run(script, args, { input = '', env = {}, cwd } = {}) {
 function project() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-mem-'))
   fs.writeFileSync(path.join(root, '.faundr.json'), JSON.stringify({ projectId: 'p1' }))
-  fs.mkdirSync(path.join(root, '.faundr'))
-  fs.writeFileSync(path.join(root, '.faundr', 'memory.json'), JSON.stringify(INDEX))
+  fs.mkdirSync(path.join(root, '.faundr', 'painel'), { recursive: true })
+  fs.writeFileSync(path.join(root, '.faundr', 'painel', 'memory.json'), JSON.stringify(INDEX))
   return root
 }
 
@@ -130,7 +132,7 @@ test('decision: liga sozinha aos arquivos editados, avisa a parecida e --replace
     const r = await run('faundr.mjs', ['decision', 'Fonte Geist', '--replaces', 'Inter como fonte'], { cwd: root, env })
     assert.equal(calls[2].replaces, 'Inter como fonte', r.err)
     assert.match(r.out, /Substitui "Inter como fonte de texto"/)
-    const index = JSON.parse(fs.readFileSync(path.join(root, '.faundr', 'memory.json'), 'utf8'))
+    const index = JSON.parse(fs.readFileSync(path.join(root, '.faundr', 'painel', 'memory.json'), 'utf8'))
     assert.ok(!index.some((m) => m.id === 'd2') && index.some((m) => m.id === 'new2'))
   } finally {
     server.close()
