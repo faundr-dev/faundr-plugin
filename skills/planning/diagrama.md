@@ -9,6 +9,7 @@ Só com o OK do dono: gasta mais tokens que o normal. Vale para o diagrama de um
 - **Raias = quem faz** (de 2 a 5): ex. `Pessoa`, `Tela`, `Servidor`, `Banco`, `Serviço externo` (Pix, e-mail…). Use os nomes do projeto quando ajudar ("Tela do carrinho").
 - **Colunas = a ordem** (0, 1, 2…). Peças que acontecem no mesmo momento podem ficar na mesma coluna em raias diferentes. Nunca duas peças na mesma raia e coluna.
 - **Português simples** nos rótulos (até 32 caracteres; o detalhe vai em `sublabel`, até 48).
+- **Explicação de cada peça** em `detail` (até 400 caracteres, 2 a 3 frases): o que ela é, por que existe e o que acontece ali, para quem não programa. É o que abre quando o dono clica na peça no canvas. Pule só na pessoa e no resultado quando o rótulo já diz tudo.
 - Até 30 peças e 50 ligações; para uma funcionalidade, de 6 a 14 peças costuma bastar.
 
 ## Formato
@@ -27,7 +28,7 @@ Só com o OK do dono: gasta mais tokens que o normal. Vale para o diagrama de um
   "nodes": [
     { "id": "digita", "lane": "pessoa", "col": 0, "type": "person", "label": "Digita o cupom" },
     { "id": "aplicar", "lane": "tela", "col": 1, "type": "screen", "label": "Clica em Aplicar" },
-    { "id": "confere", "lane": "servidor", "col": 2, "type": "decision", "label": "Cupom vale?", "sublabel": "dentro do prazo e do limite" },
+    { "id": "confere", "lane": "servidor", "col": 2, "type": "decision", "label": "Cupom vale?", "sublabel": "dentro do prazo e do limite", "detail": "O servidor confere se o cupom existe, se ainda está no prazo e se não passou do limite de usos. A conferência fica no servidor para ninguém conseguir mudar o desconto pelo navegador." },
     { "id": "cupons", "lane": "banco", "col": 2, "type": "data", "label": "Tabela de cupons" },
     { "id": "invalido", "lane": "tela", "col": 3, "type": "error", "label": "Mostra: cupom inválido" },
     { "id": "total", "lane": "tela", "col": 4, "type": "end", "label": "Total com desconto" }
@@ -55,4 +56,4 @@ Só com o OK do dono: gasta mais tokens que o normal. Vale para o diagrama de um
 1. Escreva em `.faundr/painel/diagram.json`.
 2. Rode `faundr diagram-save` (para outra funcionalidade que não a atual: `--feature "<nome>"`).
 3. Se voltar uma lista de problemas, corrija **só** os pontos apontados e rode de novo. No máximo 2 correções; se ainda falhar, diga ao dono o que ficou faltando em vez de reescrever tudo.
-4. Diga em uma frase onde ver: página da funcionalidade no painel, em **Como vai funcionar**.
+4. Diga em uma frase onde ver: página da funcionalidade no painel, em **Como vai funcionar** (a arquitetura fica em **Arquitetura**, no menu do projeto, num canvas onde cada peça abre a explicação).

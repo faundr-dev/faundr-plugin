@@ -1498,7 +1498,7 @@ async function diagramSave(args) {
   } catch (err) {
     throw new Error(`Não consegui ler ${file} como JSON: ${err.message}`)
   }
-  // --architecture: a arquitetura do projeto inteiro (aba Arquitetura da Visão); sem ela, o diagrama da funcionalidade.
+  // --architecture: a arquitetura do projeto inteiro (seção Arquitetura do painel); sem ela, o diagrama da funcionalidade.
   const architecture = args.includes('--architecture')
   const feature = architecture ? null : await findFeature(flag(args, '--feature') ?? 'atual', currentFeature(root))
   const res = await fetch(`${config.apiUrl}/api/cli/diagrams`, {
@@ -1516,7 +1516,7 @@ async function diagramSave(args) {
     return
   }
   if (architecture) {
-    console.log(`Arquitetura do projeto salva (versão ${data.version}). Já aparece no painel, em Visão → Arquitetura.`)
+    console.log(`Arquitetura do projeto salva (versão ${data.version}). Já aparece no painel, em Arquitetura (menu do projeto).`)
     // Confere de novo na hora: a peça nova (ou a pasta acrescentada) já sai do "Fora do plano".
     return architectureCheck([]).catch((err) => console.log(`Não consegui conferir o código agora: ${err.message}`))
   }
@@ -1542,14 +1542,14 @@ async function architectureCheck(args) {
   const { spec } = await api({ action: 'architecture' })
   // --pull: grava a arquitetura atual para o agente editar (ex.: pôr uma pasta fora do plano nos paths de uma peça).
   if (args.includes('--pull')) {
-    if (!spec) return console.log('O projeto ainda não tem arquitetura (Visão → Arquitetura).')
+    if (!spec) return console.log('O projeto ainda não tem arquitetura (Arquitetura (menu do projeto)).')
     const file = ensureFaundrPath(root, 'architecture')
     fs.writeFileSync(file, JSON.stringify(spec, null, 2))
     const rel = path.relative(root, file).split(path.sep).join('/')
     return console.log(`Arquitetura atual em ${rel}. Edite e envie com: faundr diagram-save ${rel} --architecture`)
   }
   if (!spec?.nodes?.some((n) => Array.isArray(n.paths) && n.paths.length)) {
-    if (!quiet) console.log('O projeto não tem arquitetura com caminhos para conferir (Visão → Arquitetura).')
+    if (!quiet) console.log('O projeto não tem arquitetura com caminhos para conferir (Arquitetura (menu do projeto)).')
     return
   }
   const files = projectFiles(root).files
@@ -1570,7 +1570,7 @@ async function architectureCheck(args) {
   writeState(root, { architectureChecked: key })
   if (quiet) return
   const parts = Object.values(built)
-  console.log(`Arquitetura conferida: ${parts.filter((p) => p.built).length} de ${parts.length} partes com caminho já existem no código. Já aparece em Visão → Arquitetura.`)
+  console.log(`Arquitetura conferida: ${parts.filter((p) => p.built).length} de ${parts.length} partes com caminho já existem no código. Já aparece em Arquitetura (menu do projeto).`)
   if (outside.folders.length)
     console.log(`Fora do plano (${outside.total} arquivos de código em nenhuma parte): ${outside.folders.map((f) => `${f.folder} (${f.files})`).join(', ')}${outside.more ? ` e mais ${outside.more} pasta(s)` : ''}.`)
 }
