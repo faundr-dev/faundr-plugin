@@ -29,7 +29,7 @@
 //   faundr board [--all | --memory]             mostra o checklist (--memory: as regras e decisões confirmadas)
 //   faundr overview-context                    contexto para o agente escrever a Visão do projeto
 //   faundr overview-save [arquivo]              valida e envia a Visão (padrão: .faundr/painel/overview.json)
-//   faundr architecture-check [--quiet]        confere quais partes da arquitetura já existem no código (sem IA)
+//   faundr architecture-check [--quiet|--pull] confere quais partes da arquitetura já existem e o código fora do plano (sem IA); --pull grava a arquitetura para editar
 //   faundr diagram-save [arquivo] [--feature "<nome>" | --architecture]  envia o diagrama da funcionalidade ou a arquitetura do projeto (padrão: .faundr/painel/diagram.json)
 //   faundr stack-scan [--json]                 detecta a Stack sem IA (onde roda, linguagens, serviços, variáveis) e envia
 //   faundr env-check [--hosting] [--no-send]   variáveis por ambiente: código x exemplo x .env do computador x hospedagem (só nomes)
@@ -120,7 +120,7 @@ import { ensureFaundrPath, FAUNDR_DIR, FILES, faundrPath, organizeFaundrDir, rel
 import { classify, commandCwd, isPartial, maskCommand, outputSaysFailed, parseErrors, toolOutput } from './errors.mjs'
 import { allScripts } from './parts.mjs'
 import { findSecrets, guardContent, mask, maskPayload, projectFiles, projectMap, scanProject } from './security.mjs'
-import { checkBuilt } from './architecture.mjs'
+import { checkBuilt, newOffPlan, offPlan, readIgnore } from './architecture.mjs'
 import { parseImport, supabaseAdvisors } from './security-import.mjs'
 import { contextLines, findMap, resolvePosition } from './sourcemap.mjs'
 import { detectStack } from './stack.mjs'
@@ -529,7 +529,7 @@ async function hook(agent) {
   // Stack sem IA: pacotes, deploy e variáveis mudam pouco; só envia quando a impressão digital muda.
   if (startJobs) background.push(['stack-scan', '--quiet'])
   if (startJobs) background.push(['env-check', '--quiet'])
-  if (startJobs) background.push(['architecture-check', '--quiet'])
+  if (startJobs) background.push(['architecture-check', '--quiet', '--session', payload.session_id])
   // Pontos de volta no painel: no início (o que mudou desde o último) e no fim das respostas que mudaram arquivos.
   if (startJobs || (event === 'Stop' && fs.existsSync(editedFile(payload.session_id)))) background.push(['checkpoints-sync', '--quiet'])
   // Impacto: lembra a conversa desta sessão e reenvia o uso das anteriores (o fim delas costuma se perder).
@@ -1515,7 +1515,11 @@ async function diagramSave(args) {
     process.exitCode = 1
     return
   }
-  if (architecture) return console.log(`Arquitetura do projeto salva (versão ${data.version}). Já aparece no painel, em Visão → Arquitetura.`)
+  if (architecture) {
+    console.log(`Arquitetura do projeto salva (versão ${data.version}). Já aparece no painel, em Visão → Arquitetura.`)
+    // Confere de novo na hora: a peça nova (ou a pasta acrescentada) já sai do "Fora do plano".
+    return architectureCheck([]).catch((err) => console.log(`Não consegui conferir o código agora: ${err.message}`))
+  }
   console.log(`Diagrama salvo em "${data.feature}" (versão ${data.version}). Já aparece no painel, na página da funcionalidade, em Como vai funcionar.`)
 }
 
@@ -1536,17 +1540,53 @@ async function architectureCheck(args) {
   }
   const quiet = args.includes('--quiet')
   const { spec } = await api({ action: 'architecture' })
+  // --pull: grava a arquitetura atual para o agente editar (ex.: pôr uma pasta fora do plano nos paths de uma peça).
+  if (args.includes('--pull')) {
+    if (!spec) return console.log('O projeto ainda não tem arquitetura (Visão → Arquitetura).')
+    const file = ensureFaundrPath(root, 'architecture')
+    fs.writeFileSync(file, JSON.stringify(spec, null, 2))
+    const rel = path.relative(root, file).split(path.sep).join('/')
+    return console.log(`Arquitetura atual em ${rel}. Edite e envie com: faundr diagram-save ${rel} --architecture`)
+  }
   if (!spec?.nodes?.some((n) => Array.isArray(n.paths) && n.paths.length)) {
     if (!quiet) console.log('O projeto não tem arquitetura com caminhos para conferir (Visão → Arquitetura).')
     return
   }
-  const built = checkBuilt(spec, projectFiles(root).files)
-  const key = JSON.stringify(built)
+  const files = projectFiles(root).files
+  const built = checkBuilt(spec, files)
+  let ignore = []
+  try {
+    ignore = readIgnore(fs.readFileSync(path.join(root, '.faundrignore'), 'utf8'))
+  } catch {}
+  const { names, ...outside } = offPlan(spec, files, ignore)
+  // Pasta nova fora do plano: o próximo pedido desta sessão leva o aviso (uma vez; a seguinte já conhece a pasta).
+  const fresh = newOffPlan(names, readState(root).offPlanSeen)
+  const sid = flag(args, '--session')
+  if (fresh.length && sid) addSessionNotes(root, sid, [offPlanNote(fresh, outside)])
+  writeState(root, { offPlanSeen: names })
+  const key = JSON.stringify({ built, outside })
   if (readState(root).architectureChecked === key && quiet) return
-  await api({ action: 'built', built })
+  await api({ action: 'built', built, offPlan: outside })
   writeState(root, { architectureChecked: key })
+  if (quiet) return
   const parts = Object.values(built)
-  if (!quiet) console.log(`Arquitetura conferida: ${parts.filter((p) => p.built).length} de ${parts.length} partes com caminho já existem no código. Já aparece em Visão → Arquitetura.`)
+  console.log(`Arquitetura conferida: ${parts.filter((p) => p.built).length} de ${parts.length} partes com caminho já existem no código. Já aparece em Visão → Arquitetura.`)
+  if (outside.folders.length)
+    console.log(`Fora do plano (${outside.total} arquivos de código em nenhuma parte): ${outside.folders.map((f) => `${f.folder} (${f.files})`).join(', ')}${outside.more ? ` e mais ${outside.more} pasta(s)` : ''}.`)
+}
+
+function offPlanNote(fresh, outside) {
+  const count = new Map(outside.folders.map((f) => [f.folder, f.files]))
+  const list = fresh
+    .slice(0, 5)
+    .map((f) => (count.has(f) ? `${f} (${count.get(f)} arquivo${count.get(f) === 1 ? '' : 's'})` : f))
+    .join(', ')
+  return (
+    `apareceu código fora da arquitetura do projeto: ${list}${fresh.length > 5 ? ' e outras' : ''}. Diga isso ao usuário em uma linha e sugira, ` +
+    'olhando o código, se cabe numa parte que já existe (diga qual) ou se vira uma parte nova. Só mude a arquitetura com o OK dele: ' +
+    'faundr architecture-check --pull, acrescente a pasta nos paths da parte (ou crie a parte) e faundr diagram-save .faundr/painel/architecture.json --architecture. ' +
+    'Se for de propósito fora do plano, ele pode pôr a pasta no .faundrignore.'
+  )
 }
 
 async function stackApi(body) {

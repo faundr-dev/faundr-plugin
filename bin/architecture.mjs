@@ -37,3 +37,43 @@ export function checkBuilt(spec, files) {
   }
   return out
 }
+
+// Código fora do plano: arquivos de código que nenhuma peça da arquitetura cobre, agrupados por pasta. Só conta
+// código (testes, docs, configuração, imagens, fontes e arquivos gerados ficam de fora) para a lista não virar ruído.
+const CODE = /\.(m?[jt]sx?|cjs|cts|py|go|rs|rb|php|java|kt|swift|vue|svelte|astro|sql|cs|dart|ex|exs|scala|c|cc|cpp|h|hpp|lua|sh)$/i
+const NOISE = /(^|\/)(tests?|__tests__|__mocks__|specs?|e2e|bench|benchmarks?|fixtures?|examples?|docs?|\.github|\.vscode|\.husky)(\/|$)|\.(test|spec|stories|story|gen|generated|config|d)\.[^/]+$|(^|\/)(vite|vitest|jest|eslint|prettier|tailwind|postcss|playwright|tsup|rollup|webpack|babel|next|nuxt|astro|svelte|wrangler)\.[^/]*$/i
+export const OFF_PLAN_MAX = 10
+
+/** Lê as linhas do .faundrignore (mesmo formato simples do .gitignore: pasta ou arquivo por linha). */
+export function readIgnore(text) {
+  return (text ?? '')
+    .split(/\r?\n/)
+    .map((l) => l.trim().replace(/\\/g, '/').replace(/^\.?\//, ''))
+    .filter((l) => l && !l.startsWith('#'))
+}
+
+/**
+ * { folders: [{ folder, files }] (as maiores primeiro, até OFF_PLAN_MAX), more, total, names } ou null sem peça com
+ * paths. `names` tem todas as pastas (para achar as novas); não vai para o painel.
+ */
+export function offPlan(spec, files, ignore = []) {
+  const matchers = (spec?.nodes ?? []).flatMap((n) => (Array.isArray(n.paths) ? n.paths : [])).filter((p) => typeof p === 'string' && p.trim()).map(pathMatcher)
+  if (!matchers.length) return null
+  const ignored = ignore.map(pathMatcher)
+  const count = new Map()
+  for (const f of files) {
+    if (!f.includes('/') || !CODE.test(f) || NOISE.test(f) || ignored.some((m) => m(f)) || matchers.some((m) => m(f))) continue
+    const folder = f.split('/').slice(0, -1).slice(0, 2).join('/')
+    count.set(folder, (count.get(folder) ?? 0) + 1)
+  }
+  const all = [...count].map(([folder, n]) => ({ folder, files: n })).sort((a, b) => b.files - a.files || a.folder.localeCompare(b.folder))
+  const shown = all.slice(0, OFF_PLAN_MAX)
+  return { folders: shown, more: all.length - shown.length, total: all.reduce((s, f) => s + f.files, 0), names: all.map((f) => f.folder) }
+}
+
+/** Pastas fora do plano que não estavam na conferência anterior. Na primeira conferência nada é novo (o painel mostra). */
+export function newOffPlan(names, seen) {
+  if (!Array.isArray(seen)) return []
+  const before = new Set(seen)
+  return names.filter((n) => !before.has(n))
+}
