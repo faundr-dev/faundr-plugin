@@ -70,5 +70,6 @@ Nesta ordem:
    - raias = camadas: `Quem usa`, `Telas`, `Servidor`, `Dados`, `Serviços de fora` (só as que existem);
    - peças = as partes do sistema (as mesmas da Visão), e o `mainPath` é o momento principal passando por elas;
    - partes de etapas futuras entram com `sublabel` "etapa N", para o dono ver o caminho todo;
+   - cada peça que vira código ganha `paths` com as pastas ou arquivos planejados na stack que você escolheu (ex.: `"src/routes/agenda/**"`). Assim o painel mostra sozinho, a cada sessão, o que já foi construído e o que ainda é plano. Quando construir algo num lugar diferente do planejado, atualize os `paths` e envie de novo;
    - envie com `faundr diagram-save --architecture`. Aparece em Visão → Arquitetura.
 6. Mostre `faundr board` e diga onde ver: Visão (resumo e partes), Funcionalidades (as etapas) e, se desenhou, Visão → Arquitetura. Pergunte se pode começar pela etapa 1.

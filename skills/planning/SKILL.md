@@ -100,4 +100,4 @@ Nada de arquivos .md de plano: tudo vai para o painel, que o agente relê nas pr
 
 Se o pedido for só desenhar como uma funcionalidade já registrada vai funcionar, avise que gasta mais tokens, leia o código e as decisões dela (no máximo 6 leituras), siga `diagrama.md` com `--feature "<nome>"` e não refaça o planejamento.
 
-Se for desenhar a arquitetura de um projeto que já existe, avise do custo, use o mapa do código (`faundr graph-query`) e a Visão em vez de abrir muitos arquivos, e siga `diagrama.md` com as camadas e o `--architecture` descritos em `projeto.md` (passo 4.4). As partes que já existem entram com o nome real delas.
+Se for desenhar a arquitetura de um projeto que já existe, avise do custo, use o mapa do código (`faundr graph-query`) e a Visão em vez de abrir muitos arquivos, e siga `diagrama.md` com as camadas e o `--architecture` descritos em `projeto.md` (passo 4.5). As partes que já existem entram com o nome e os `paths` reais delas.

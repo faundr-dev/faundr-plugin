@@ -48,6 +48,7 @@ Só com o OK do dono: gasta mais tokens que o normal. Vale para o diagrama de um
 - `type` da peça: `person` (a pessoa), `screen` (tela ou botão), `action` (algo que o sistema faz), `decision` (uma pergunta com sim/não), `data` (onde o dado fica), `external` (serviço de fora), `error` (o que a pessoa vê quando dá errado), `end` (o resultado).
 - `kind` da ligação: `main` (sai sozinho para as ligações do `mainPath`), `normal`, `error` (quando dá errado), `back` (volta e tenta de novo).
 - `notes`: até 4 frases com o que não cabe no desenho (uma regra, um limite).
+- `paths` (opcional, na peça): até 5 caminhos de onde ela mora no código, relativos à raiz (`"src/routes/agenda/**"`, `"src/lib/cupom.ts"`). Na arquitetura, ponha em toda peça que vira código: o plugin confere sozinho, no início de cada sessão, quais já existem, e o painel mostra apagadas as que ainda são só plano. Deixe sem `paths` o que não é código do projeto (a pessoa, um serviço de fora).
 
 ## Enviar
 

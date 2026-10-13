@@ -29,6 +29,7 @@
 //   faundr board [--all | --memory]             mostra o checklist (--memory: as regras e decisões confirmadas)
 //   faundr overview-context                    contexto para o agente escrever a Visão do projeto
 //   faundr overview-save [arquivo]              valida e envia a Visão (padrão: .faundr/painel/overview.json)
+//   faundr architecture-check [--quiet]        confere quais partes da arquitetura já existem no código (sem IA)
 //   faundr diagram-save [arquivo] [--feature "<nome>" | --architecture]  envia o diagrama da funcionalidade ou a arquitetura do projeto (padrão: .faundr/painel/diagram.json)
 //   faundr stack-scan [--json]                 detecta a Stack sem IA (onde roda, linguagens, serviços, variáveis) e envia
 //   faundr env-check [--hosting] [--no-send]   variáveis por ambiente: código x exemplo x .env do computador x hospedagem (só nomes)
@@ -119,6 +120,7 @@ import { ensureFaundrPath, FAUNDR_DIR, FILES, faundrPath, organizeFaundrDir, rel
 import { classify, commandCwd, isPartial, maskCommand, outputSaysFailed, parseErrors, toolOutput } from './errors.mjs'
 import { allScripts } from './parts.mjs'
 import { findSecrets, guardContent, mask, maskPayload, projectFiles, projectMap, scanProject } from './security.mjs'
+import { checkBuilt } from './architecture.mjs'
 import { parseImport, supabaseAdvisors } from './security-import.mjs'
 import { contextLines, findMap, resolvePosition } from './sourcemap.mjs'
 import { detectStack } from './stack.mjs'
@@ -527,6 +529,7 @@ async function hook(agent) {
   // Stack sem IA: pacotes, deploy e variáveis mudam pouco; só envia quando a impressão digital muda.
   if (startJobs) background.push(['stack-scan', '--quiet'])
   if (startJobs) background.push(['env-check', '--quiet'])
+  if (startJobs) background.push(['architecture-check', '--quiet'])
   // Pontos de volta no painel: no início (o que mudou desde o último) e no fim das respostas que mudaram arquivos.
   if (startJobs || (event === 'Stop' && fs.existsSync(editedFile(payload.session_id)))) background.push(['checkpoints-sync', '--quiet'])
   // Impacto: lembra a conversa desta sessão e reenvia o uso das anteriores (o fim delas costuma se perder).
@@ -1514,6 +1517,36 @@ async function diagramSave(args) {
   }
   if (architecture) return console.log(`Arquitetura do projeto salva (versão ${data.version}). Já aparece no painel, em Visão → Arquitetura.`)
   console.log(`Diagrama salvo em "${data.feature}" (versão ${data.version}). Já aparece no painel, na página da funcionalidade, em Como vai funcionar.`)
+}
+
+// Planejado x construído (sem IA): pega a arquitetura do projeto, confere os caminhos de cada peça nos arquivos e
+// manda ao painel. Só envia quando o resultado muda.
+async function architectureCheck(args) {
+  const { root, projectId, config } = linkedProject()
+  const api = async (body) => {
+    const res = await fetch(`${config.apiUrl}/api/cli/diagrams`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${config.token}` },
+      body: JSON.stringify({ projectId, ...body }),
+      signal: AbortSignal.timeout(20_000),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.error ?? `Erro da API (${res.status})`)
+    return data
+  }
+  const quiet = args.includes('--quiet')
+  const { spec } = await api({ action: 'architecture' })
+  if (!spec?.nodes?.some((n) => Array.isArray(n.paths) && n.paths.length)) {
+    if (!quiet) console.log('O projeto não tem arquitetura com caminhos para conferir (Visão → Arquitetura).')
+    return
+  }
+  const built = checkBuilt(spec, projectFiles(root).files)
+  const key = JSON.stringify(built)
+  if (readState(root).architectureChecked === key && quiet) return
+  await api({ action: 'built', built })
+  writeState(root, { architectureChecked: key })
+  const parts = Object.values(built)
+  if (!quiet) console.log(`Arquitetura conferida: ${parts.filter((p) => p.built).length} de ${parts.length} partes com caminho já existem no código. Já aparece em Visão → Arquitetura.`)
 }
 
 async function stackApi(body) {
@@ -4047,6 +4080,7 @@ async function cli() {
     else if (command === 'overview-context') await overviewContext()
     else if (command === 'overview-save') await overviewSave(args)
     else if (command === 'diagram-save') await diagramSave(args)
+    else if (command === 'architecture-check') await architectureCheck(args)
     else if (command === 'handoff') await handoffCommand(args)
     else if (command === 'stack-scan') await stackScan(args)
     else if (command === 'env-check') await envCheck(args)
@@ -4113,10 +4147,10 @@ async function cli() {
     else if (command === 'errors-uptime') await errorsUptime(args)
     else
       console.log(
-        'comandos: login | link | status | browse | browse-key | checkpoint | checkpoints | restore | mapa | graph | graph-query | graph-path | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | memory-edit | workflow | skills | concern | resolve | start | done | focus | board | criteria | criteria-check | handoff | handover | weekly | resume | diagram-save | stack-scan | env-check | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | security-import | security-supabase | db-test | launch-check | lgpd | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
+        'comandos: login | link | status | browse | browse-key | checkpoint | checkpoints | restore | mapa | graph | graph-query | graph-path | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | memory-edit | workflow | skills | concern | resolve | start | done | focus | board | criteria | criteria-check | handoff | handover | weekly | resume | diagram-save | architecture-check | stack-scan | env-check | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | security-import | security-supabase | db-test | launch-check | lgpd | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
       )
   } catch (err) {
-    if (['skills', 'graph', 'design-lint', 'security-scan', 'quality-scan', 'tests-scan', 'stack-scan', 'env-check', 'usage-sync', 'checkpoints-sync'].includes(command) && args.includes('--quiet')) log(`${command}: ${err.message}`)
+    if (['skills', 'graph', 'design-lint', 'security-scan', 'quality-scan', 'tests-scan', 'stack-scan', 'env-check', 'usage-sync', 'checkpoints-sync', 'architecture-check'].includes(command) && args.includes('--quiet')) log(`${command}: ${err.message}`)
     else console.log(err.message)
     process.exit(1)
   }
