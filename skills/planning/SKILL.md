@@ -1,5 +1,5 @@
 ---
-description: Planeja uma funcionalidade com o dono antes de construir — mede o tamanho do pedido, olha o projeto antes de perguntar, faz poucas perguntas certeiras (com opções e recomendação), fecha um “pronto quando” que dá para conferir, mostra um resumo curto para aprovar e grava tudo no painel do Faundr. Use quando o usuário pedir algo novo para construir (uma tela, uma função, uma integração), quiser pensar ou planejar uma ideia, ou quando o Faundr avisar que o pedido parece trabalho novo.
+description: Planeja uma funcionalidade com o dono antes de construir — mede o tamanho do pedido, olha o projeto antes de perguntar, faz poucas perguntas certeiras (com opções e recomendação), fecha um “pronto quando” que dá para conferir, mostra um resumo curto para aprovar e grava tudo no painel do Faundr. Use quando o usuário pedir algo novo para construir (uma tela, uma função, uma integração), quiser pensar ou planejar uma ideia, ou quando o Faundr avisar que o pedido parece trabalho novo. Também desenha, se o dono quiser, um diagrama de como a funcionalidade vai funcionar (pedidos como “desenhe como isso vai funcionar”).
 argument-hint: [o que quer construir]
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *)
 ---
@@ -75,7 +75,9 @@ Decidi sozinho: <escolha 1>; <escolha 2>  (diga se quiser mudar algo)
 Depois: <próximas etapas, se houver>
 ```
 
-Pergunte: **"Algo errado ou faltando? Posso registrar e começar?"** Não comece a construir antes do OK. Se ele corrigir algo, ajuste o resumo e confirme só o que mudou.
+Pergunte: **"Algo errado ou faltando? Posso registrar e começar?"** Não comece a construir antes do OK.
+
+Quando a funcionalidade tem um fluxo com 3 ou mais partes (tela, servidor, banco, serviço de fora) ou um caminho de erro que importa, acrescente uma linha: "Se quiser, também desenho como vai funcionar, para ver no painel (gasta mais tokens que o normal)." Não ofereça em tarefa pequena. Se ele corrigir algo, ajuste o resumo e confirme só o que mudou.
 
 ## 7. Grave no Faundr (sem criar arquivos)
 
@@ -89,4 +91,10 @@ Nada de arquivos .md de plano: tudo vai para o painel, que o agente relê nas pr
 3. Os passos, em ordem: `faundr task "<passo>"` (de 3 a 8, cada um verificável).
 4. As etapas seguintes, cada uma depois da anterior:
    `faundr feature "<etapa 2>" --after atual --desc "<o que entra>"`, depois `faundr feature "<etapa 3>" --after "<etapa 2>" --desc "…"`.
-5. Mostre o checklist com `faundr board` e diga que ele já está no painel (Funcionalidades), com o critério de pronto. Então comece pelo primeiro passo.
+5. Mostre o checklist com `faundr board` e diga que ele já está no painel (Funcionalidades), com o critério de pronto.
+6. Se o dono pediu o diagrama, leia `${CLAUDE_PLUGIN_ROOT}/skills/planning/diagrama.md` e siga (escreve o JSON de uma vez, `faundr diagram-save`, no máximo 2 correções). Faça isso antes de construir: o desenho é do plano.
+7. Então comece pelo primeiro passo.
+
+## Só o diagrama
+
+Se o pedido for só desenhar como uma funcionalidade já registrada vai funcionar, avise que gasta mais tokens, leia o código e as decisões dela (no máximo 6 leituras), siga `diagrama.md` com `--feature "<nome>"` e não refaça o planejamento.

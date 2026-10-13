@@ -9,6 +9,7 @@ export const FAUNDR_DIR = '.faundr'
 export const FILES = {
   state: 'state.json',
   overview: 'painel/overview.json',
+  diagram: 'painel/diagram.json',
   stack: 'painel/stack.json',
   showcase: 'painel/showcase.json',
   memory: 'painel/memory.json',
@@ -66,7 +67,7 @@ const OLD_NAMES = {
   fingerprints: 'fingerprints.json',
 }
 
-export const README_VERSION = 1
+export const README_VERSION = 2
 
 const README = `<!-- faundr-leia-me v${README_VERSION} -->
 # Pasta do Faundr
@@ -76,7 +77,7 @@ Não edite à mão; o Faundr refaz o que faltar.
 
 | Pasta | O que tem | Quem usa |
 |---|---|---|
-| \`painel/\` | Cópias locais do painel: Visão (\`overview.json\`), Stack (\`stack.json\`), Vitrine (\`showcase.json\`), memória (\`memory.json\`) e regras por arquivo (\`rules.json\`) | As skills escrevem a Visão, a Stack e a Vitrine aqui antes de enviar; a memória e as regras vêm do painel no início da sessão |
+| \`painel/\` | Cópias locais do painel: Visão (\`overview.json\`), diagrama da funcionalidade (\`diagram.json\`), Stack (\`stack.json\`), Vitrine (\`showcase.json\`), memória (\`memory.json\`) e regras por arquivo (\`rules.json\`) | As skills escrevem a Visão, o diagrama, a Stack e a Vitrine aqui antes de enviar; a memória e as regras vêm do painel no início da sessão |
 | \`relatorios/\` | Pacote de passagem (\`PASSAGEM.md\`) e relatório de segurança (\`relatorio-seguranca.md\`) | Para ler ou mandar a alguém |
 | \`mapa/\` | Mapa do código (\`graph.json\`) e o resumo da arquitetura (\`GRAPH_REPORT.md\`) | As consultas \`faundr graph-*\`; o resumo só quando elas não bastam |
 | \`verificacoes/\` | Resultados de testes do banco, variáveis da hospedagem e testes do projeto (\`testes/\`) | O checklist de lançamento e o painel de qualidade |

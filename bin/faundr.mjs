@@ -14,7 +14,7 @@
 //   faundr graph-grep "<padrão>"               busca de texto agrupada por função, as mais usadas primeiro (--in pasta, -i)
 //   faundr feature "<título>" [--desc "..."] [--done-when "a; b"]  cria uma funcionalidade (com o critério de pronto) e a torna a atual
 //     --after <atual | nome>                   registra como a próxima etapa de outra (fica planejada; não vira a atual)
-//   faundr criteria ["<critério>"] | criteria-check <n> --met|--not-met [--note]   critério de pronto da funcionalidade atual
+//   faundr criteria ["<critério>"] [--remove <n>] | criteria-check <n> --met|--not-met [--note]   critério de pronto da funcionalidade atual
 //   faundr task "<descrição>" [--feature nome] adiciona tarefa ao checklist da funcionalidade atual (ou de outra etapa)
 //   faundr start|done "<trecho ou nº>"         marca tarefa como em andamento / concluída
 //   faundr decision "<título>" [--why "..."]   registra uma decisão técnica
@@ -29,6 +29,7 @@
 //   faundr board [--all | --memory]             mostra o checklist (--memory: as regras e decisões confirmadas)
 //   faundr overview-context                    contexto para o agente escrever a Visão do projeto
 //   faundr overview-save [arquivo]              valida e envia a Visão (padrão: .faundr/painel/overview.json)
+//   faundr diagram-save [arquivo] [--feature "<nome>"]  envia o diagrama da funcionalidade (padrão: .faundr/painel/diagram.json)
 //   faundr stack-scan [--json]                 detecta a Stack sem IA (onde roda, linguagens, serviços, variáveis) e envia
 //   faundr env-check [--hosting] [--no-send]   variáveis por ambiente: código x exemplo x .env do computador x hospedagem (só nomes)
 //   faundr handover [--out arquivo.md]          pacote de passagem: um documento para um dev assumir o projeto (padrão: .faundr/relatorios/PASSAGEM.md)
@@ -1172,6 +1173,11 @@ async function workCommand(command, args) {
     const target = flag(args, '--feature')
     const f = target ? await findFeature(target, current) : current ? { id: current } : null
     if (!f) throw new Error('Nenhuma funcionalidade atual: use --feature "<nome>" ou faundr focus "<nome>".')
+    const remove = Number(flag(args, '--remove'))
+    if (remove) {
+      const r = await memoryApi({ action: 'criteria-remove', featureId: f.id, index: remove })
+      return console.log(`Critério ${remove} removido de "${r.title}" (ficaram ${r.criteria.length}).`)
+    }
     if (!text) {
       const { features } = await memoryApi({ action: 'board', featureId: f.id })
       const list = features[0]?.criteria ?? []
@@ -1476,6 +1482,37 @@ async function overviewSave(args) {
     agentSessionId: process.env.CLAUDE_CODE_SESSION_ID ?? null,
   })
   console.log(`Visão do projeto salva: ${r.steps} passos em "como funciona", ${r.parts} partes. Já aparece em Visão no painel.`)
+}
+
+// Diagrama "como vai funcionar" da funcionalidade (skill planning, opcional): o servidor confere e devolve os erros
+// em português, para o Claude corrigir só o que falhou.
+async function diagramSave(args) {
+  const { root, projectId, config } = linkedProject()
+  const file = path.resolve(textArg(args) || faundrPath(root, 'diagram'))
+  let spec
+  try {
+    spec = JSON.parse(fs.readFileSync(file, 'utf8'))
+  } catch (err) {
+    throw new Error(`Não consegui ler ${file} como JSON: ${err.message}`)
+  }
+  const target = flag(args, '--feature')
+  const current = currentFeature(root)
+  const feature = await findFeature(target ?? 'atual', current)
+  const res = await fetch(`${config.apiUrl}/api/cli/diagrams`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${config.token}` },
+    body: JSON.stringify({ projectId, action: 'save', featureId: feature.id, spec }),
+    signal: AbortSignal.timeout(20_000),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error ?? `Erro da API (${res.status})`)
+  if (!data.saved) {
+    console.log(`O diagrama tem ${data.errors.length} problema(s). Corrija só estes pontos em ${file} e rode de novo:`)
+    for (const e of data.errors) console.log(`  - ${e}`)
+    process.exitCode = 1
+    return
+  }
+  console.log(`Diagrama salvo em "${data.feature}" (versão ${data.version}). Já aparece no painel, na página da funcionalidade, em Como vai funcionar.`)
 }
 
 async function stackApi(body) {
@@ -4008,6 +4045,7 @@ async function cli() {
     else if (['feature', 'task', 'decision', 'rule', 'concern', 'resolve', 'done', 'start', 'pegar', 'soltar', 'focus', 'board', 'criteria', 'criteria-check'].includes(command)) await work(command, args)
     else if (command === 'overview-context') await overviewContext()
     else if (command === 'overview-save') await overviewSave(args)
+    else if (command === 'diagram-save') await diagramSave(args)
     else if (command === 'handoff') await handoffCommand(args)
     else if (command === 'stack-scan') await stackScan(args)
     else if (command === 'env-check') await envCheck(args)
@@ -4074,7 +4112,7 @@ async function cli() {
     else if (command === 'errors-uptime') await errorsUptime(args)
     else
       console.log(
-        'comandos: login | link | status | browse | browse-key | checkpoint | checkpoints | restore | mapa | graph | graph-query | graph-path | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | memory-edit | workflow | skills | concern | resolve | start | done | focus | board | criteria | criteria-check | handoff | handover | weekly | resume | stack-scan | env-check | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | security-import | security-supabase | db-test | launch-check | lgpd | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
+        'comandos: login | link | status | browse | browse-key | checkpoint | checkpoints | restore | mapa | graph | graph-query | graph-path | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | memory-edit | workflow | skills | concern | resolve | start | done | focus | board | criteria | criteria-check | handoff | handover | weekly | resume | diagram-save | stack-scan | env-check | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | security-import | security-supabase | db-test | launch-check | lgpd | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
       )
   } catch (err) {
     if (['skills', 'graph', 'design-lint', 'security-scan', 'quality-scan', 'tests-scan', 'stack-scan', 'env-check', 'usage-sync', 'checkpoints-sync'].includes(command) && args.includes('--quiet')) log(`${command}: ${err.message}`)
