@@ -1,5 +1,5 @@
 ---
-description: Planeja uma funcionalidade com o dono antes de construir — mede o tamanho do pedido, olha o projeto antes de perguntar, faz poucas perguntas certeiras (com opções e recomendação), fecha um “pronto quando” que dá para conferir, mostra um resumo curto para aprovar e grava tudo no painel do Faundr. Use quando o usuário pedir algo novo para construir (uma tela, uma função, uma integração), quiser pensar ou planejar uma ideia, ou quando o Faundr avisar que o pedido parece trabalho novo. Também desenha, se o dono quiser, um diagrama de como a funcionalidade vai funcionar (pedidos como “desenhe como isso vai funcionar”).
+description: Planeja uma funcionalidade com o dono antes de construir — mede o tamanho do pedido, olha o projeto antes de perguntar, faz poucas perguntas certeiras (com opções e recomendação), fecha um “pronto quando” que dá para conferir, mostra um resumo curto para aprovar e grava tudo no painel do Faundr. Use quando o usuário pedir algo novo para construir (uma tela, uma função, uma integração), quiser pensar ou planejar uma ideia, ou quando o Faundr avisar que o pedido parece trabalho novo. No começo de um projeto novo, escreve a Visão, as etapas e, se o dono quiser, a arquitetura. Também desenha, se o dono quiser, um diagrama de como a funcionalidade vai funcionar (pedidos como “desenhe como isso vai funcionar” ou “desenhe a arquitetura do projeto”).
 argument-hint: [o que quer construir]
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *)
 ---
@@ -16,6 +16,7 @@ Diga em uma linha qual é o tamanho e o que vai fazer. Em funcionalidade e vári
 - **Já existe** (o passo 2 mostra que o projeto já faz quase tudo): diga onde está e o que falta, e pergunte só sobre o que falta. Muitas vezes vira tarefa rápida ou só ligar algo.
 - **Funcionalidade** (uma coisa nova que a pessoa usa): siga os passos 2 a 7.
 - **Várias etapas** (MVP e depois, "primeiro X, depois Y", grande demais para uma sessão): siga 2 a 7 só para a **primeira** etapa; as seguintes ficam registradas em uma linha cada (passo 7).
+- **Projeto novo** (o dono descreve um produto inteiro, ou a pasta ainda não tem código nem funcionalidades): leia `${CLAUDE_PLUGIN_ROOT}/skills/planning/projeto.md` e siga o roteiro de começo de projeto (Visão, etapas, decisões e, se ele quiser, a arquitetura).
 - **Continuação** da funcionalidade atual ou etapa já planejada (`faundr focus`): não replaneje; só confirme o que mudou, se algo mudou.
 
 O usuário pode mudar o tamanho ("é maior do que isso", "só faz"). Se ele disser para não perguntar, vá direto ao passo 6 com o que dá para decidir sozinho.
@@ -98,3 +99,5 @@ Nada de arquivos .md de plano: tudo vai para o painel, que o agente relê nas pr
 ## Só o diagrama
 
 Se o pedido for só desenhar como uma funcionalidade já registrada vai funcionar, avise que gasta mais tokens, leia o código e as decisões dela (no máximo 6 leituras), siga `diagrama.md` com `--feature "<nome>"` e não refaça o planejamento.
+
+Se for desenhar a arquitetura de um projeto que já existe, avise do custo, use o mapa do código (`faundr graph-query`) e a Visão em vez de abrir muitos arquivos, e siga `diagrama.md` com as camadas e o `--architecture` descritos em `projeto.md` (passo 4.4). As partes que já existem entram com o nome real delas.

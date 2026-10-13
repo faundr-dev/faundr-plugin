@@ -29,7 +29,7 @@
 //   faundr board [--all | --memory]             mostra o checklist (--memory: as regras e decisões confirmadas)
 //   faundr overview-context                    contexto para o agente escrever a Visão do projeto
 //   faundr overview-save [arquivo]              valida e envia a Visão (padrão: .faundr/painel/overview.json)
-//   faundr diagram-save [arquivo] [--feature "<nome>"]  envia o diagrama da funcionalidade (padrão: .faundr/painel/diagram.json)
+//   faundr diagram-save [arquivo] [--feature "<nome>" | --architecture]  envia o diagrama da funcionalidade ou a arquitetura do projeto (padrão: .faundr/painel/diagram.json)
 //   faundr stack-scan [--json]                 detecta a Stack sem IA (onde roda, linguagens, serviços, variáveis) e envia
 //   faundr env-check [--hosting] [--no-send]   variáveis por ambiente: código x exemplo x .env do computador x hospedagem (só nomes)
 //   faundr handover [--out arquivo.md]          pacote de passagem: um documento para um dev assumir o projeto (padrão: .faundr/relatorios/PASSAGEM.md)
@@ -1495,13 +1495,13 @@ async function diagramSave(args) {
   } catch (err) {
     throw new Error(`Não consegui ler ${file} como JSON: ${err.message}`)
   }
-  const target = flag(args, '--feature')
-  const current = currentFeature(root)
-  const feature = await findFeature(target ?? 'atual', current)
+  // --architecture: a arquitetura do projeto inteiro (aba Arquitetura da Visão); sem ela, o diagrama da funcionalidade.
+  const architecture = args.includes('--architecture')
+  const feature = architecture ? null : await findFeature(flag(args, '--feature') ?? 'atual', currentFeature(root))
   const res = await fetch(`${config.apiUrl}/api/cli/diagrams`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${config.token}` },
-    body: JSON.stringify({ projectId, action: 'save', featureId: feature.id, spec }),
+    body: JSON.stringify({ projectId, action: 'save', kind: architecture ? 'architecture' : 'feature', featureId: feature?.id, spec }),
     signal: AbortSignal.timeout(20_000),
   })
   const data = await res.json().catch(() => ({}))
@@ -1512,6 +1512,7 @@ async function diagramSave(args) {
     process.exitCode = 1
     return
   }
+  if (architecture) return console.log(`Arquitetura do projeto salva (versão ${data.version}). Já aparece no painel, em Visão → Arquitetura.`)
   console.log(`Diagrama salvo em "${data.feature}" (versão ${data.version}). Já aparece no painel, na página da funcionalidade, em Como vai funcionar.`)
 }
 

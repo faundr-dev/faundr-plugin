@@ -1,6 +1,6 @@
 # Diagrama "como vai funcionar"
 
-Só com o OK do dono: gasta mais tokens que o normal. Escreva o JSON **de uma vez**, sem planejar o desenho em texto antes: você não posiciona nada, só diz em que raia e em que coluna cada peça fica; o painel desenha.
+Só com o OK do dono: gasta mais tokens que o normal. Vale para o diagrama de uma funcionalidade e para a arquitetura do projeto (camadas e `--architecture` em `projeto.md`). Escreva o JSON **de uma vez**, sem planejar o desenho em texto antes: você não posiciona nada, só diz em que raia e em que coluna cada peça fica; o painel desenha.
 
 ## O que mostrar
 
