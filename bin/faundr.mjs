@@ -595,6 +595,9 @@ async function hook(agent) {
   // Foto do time: cópia local para os avisos do pedido, da edição e do push (que não usam a rede).
   if (answer.team) writeTeam(path.dirname(linkFile), answer.team)
   if (Array.isArray(answer.inbox)) writeInbox(path.dirname(linkFile), answer.inbox)
+  // Escolhas da barra do terminal (o painel liga e desliga cada item): chegam no início, a cada pedido e no fim da
+  // resposta, para uma mudança no painel valer sem reiniciar; a barra lê sem rede a cada atualização.
+  if (answer.bar !== undefined) fs.writeFileSync(ensureFaundrPath(path.dirname(linkFile), 'bar'), JSON.stringify(answer.bar ?? {}))
   // Plano aprovado virou funcionalidade: passa a ser a atual desta pasta.
   if (answer.currentFeatureId) setCurrentFeature(path.dirname(linkFile), answer.currentFeatureId, payload.session_id)
   if (event === 'SessionStart') {
@@ -606,8 +609,6 @@ async function hook(agent) {
     if (Array.isArray(answer.workflows)) writeWorkflows(root, answer.workflows)
     // Skills ligadas com os assuntos: o hook do pedido avisa quando o pedido bate com uma delas.
     if (Array.isArray(answer.skills)) writeSkillIndex(root, answer.skills)
-    // Escolhas da barra do terminal (o painel liga e desliga cada item); a barra lê sem rede a cada atualização.
-    if (answer.bar !== undefined) fs.writeFileSync(ensureFaundrPath(root, 'bar'), JSON.stringify(answer.bar ?? {}))
     // Todas as regras e decisões: o hook do pedido entrega as do assunto; as que o início já levou não se repetem.
     if (Array.isArray(answer.memoryIndex)) {
       writeMemoryIndex(root, answer.memoryIndex)
