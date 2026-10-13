@@ -53,6 +53,8 @@ export function parseBrowseArgs(argv, env = process.env) {
     else if (a === '--value') out.values.push(argv[++i])
     else if (a === '--show') out.headless = false
     else if (a === '--chrome') out.chrome = true
+    else if (a === '--shot') out.shot = argv[++i]
+    else if (a === '--style') out.style = true
     else if (a === '--trace') out.trace = argv[++i]
     else if (a === '--secret-env') {
       // Senha vem de variável de ambiente: não aparece no comando, no log nem para o Jev.
@@ -63,12 +65,39 @@ export function parseBrowseArgs(argv, env = process.env) {
   }
   if (!out.url || !out.goal)
     throw new Error(
-      'uso: faundr browse --url <endereço> --goal "<objetivo>" [--value "<texto>"]... [--secret-env VAR] [--show | --chrome]',
+      'uso: faundr browse --url <endereço> --goal "<objetivo>" [--value "<texto>"]... [--secret-env VAR] [--show | --chrome] [--shot <arquivo.png>] [--style]',
     )
   // Valores entre aspas no próprio objetivo também valem.
   for (const m of out.goal.matchAll(/["“]([^"”]+)["”]/g)) if (!out.values.includes(m[1])) out.values.push(m[1])
   return out
 }
+
+// --style: o que a página mais usa (fonte, tamanho, cor do texto, fundo, canto, sombra), medido nos elementos visíveis.
+// O Jev não vê cor nem layout; isto e o print (--shot) são para o Claude analisar o design.
+const STYLE_SCRIPT = `(() => {
+  const top = (m, n = 6) => [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, n).map(([v, c]) => v + ' (' + c + ')')
+  const count = (m, v) => v && m.set(v, (m.get(v) || 0) + 1)
+  const fonts = new Map(), sizes = new Map(), colors = new Map(), backgrounds = new Map(), radii = new Map(), shadows = new Map(), headings = []
+  for (const el of [...document.querySelectorAll('body *')].slice(0, 4000)) {
+    const r = el.getBoundingClientRect()
+    if (!r.width || !r.height || r.bottom < 0 || r.top > innerHeight * 3) continue
+    const s = getComputedStyle(el)
+    if (s.visibility === 'hidden' || s.display === 'none') continue
+    const text = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())
+    if (text) {
+      count(fonts, s.fontFamily.split(',')[0].replace(/["']/g, '').trim())
+      count(sizes, s.fontSize + '/' + s.fontWeight)
+      count(colors, s.color)
+    }
+    if (s.backgroundColor !== 'rgba(0, 0, 0, 0)' && r.width * r.height > 2000) count(backgrounds, s.backgroundColor)
+    if (s.borderRadius !== '0px') count(radii, s.borderRadius)
+    if (s.boxShadow !== 'none') count(shadows, s.boxShadow.slice(0, 60))
+    if (/^H[1-3]$/.test(el.tagName) && headings.length < 6)
+      headings.push(el.tagName + ' ' + s.fontSize + '/' + s.fontWeight + ' ' + s.fontFamily.split(',')[0].replace(/["']/g, '') + ': ' + el.innerText.trim().slice(0, 50))
+  }
+  return { fontes: top(fonts, 4), tamanhos: top(sizes, 8), cores_do_texto: top(colors), fundos: top(backgrounds), cantos: top(radii), sombras: top(shadows, 3), titulos: headings,
+    fundo_da_pagina: getComputedStyle(document.body).backgroundColor, largura_da_tela: innerWidth }
+})()`
 
 class Browser {
   /** tab: a ponte já entrega uma aba do Chrome do dono (sem criar alvo nem mudar o tamanho da tela dele). */
@@ -473,6 +502,16 @@ export async function browse(args, { key, profile, log = () => {} }) {
     cdp_calls: browser.cdpCalls,
     final: page ? { url: page.url, title: page.title, text: page.text.slice(0, 1500) } : null,
     steps: history,
+  }
+  if (page && args.style) result.style = await browser.evaluate(STYLE_SCRIPT).catch(() => null)
+  if (page && args.shot) {
+    try {
+      const { data } = await browser.call('Page.captureScreenshot', { format: 'png' })
+      writeFileSync(args.shot, Buffer.from(data, 'base64'))
+      result.shot = args.shot
+    } catch (e) {
+      result.shot_error = e.message
+    }
   }
   if (trace) writeFileSync(args.trace, JSON.stringify(trace, null, 1))
   cdp.close()

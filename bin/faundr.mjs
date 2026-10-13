@@ -123,6 +123,8 @@ import { contextLines, findMap, resolvePosition } from './sourcemap.mjs'
 import { detectStack } from './stack.mjs'
 import { graphFooter, rememberTranscript, transcriptUsage, transcriptsToSync } from './usage.mjs'
 import { dependentsNote, readGraph } from './dependents.mjs'
+import { readSkillIndex, scanSkills, writeSkillIndex } from './skills.mjs'
+import { parseItem, workflowsForFile, workflowsOnce, writeWorkflows } from './workflows.mjs'
 import { forbiddenIn, forbiddenNote, globalRules, readMemoryIndex, readRules, rulesFor, rulesNote, writeMemoryIndex, writeRules } from './rules.mjs'
 import { installStatusline, statusFromBoard, statusLine } from './statusline.mjs'
 import { agentsBlock, removeBlock, upsertBlock } from './agents-md.mjs'
@@ -518,6 +520,8 @@ async function hook(agent) {
   // Testes: só o inventário (sem rodar nada; os testes só rodam quando pedirem).
   if (startJobs) background.push(['tests-scan', '--quiet'])
   if (startJobs) background.push(['status-refresh'])
+  // Skills conectadas: relê as do computador (projeto, pessoais e plugins) e só envia quando a lista mudou.
+  if (startJobs) background.push(['skills', 'scan', '--quiet'])
   if (startJobs && readState(path.dirname(linkFile)).agentsMd?.length) background.push(['agents-md', '--sync', '--quiet'])
   // Stack sem IA: pacotes, deploy e variáveis mudam pouco; só envia quando a impressão digital muda.
   if (startJobs) background.push(['stack-scan', '--quiet'])
@@ -598,6 +602,10 @@ async function hook(agent) {
     const root = path.dirname(linkFile)
     // Regras ligadas a arquivos: cópia local para o guard entregar antes de cada edição (ele não usa a rede).
     if (Array.isArray(answer.anchoredRules)) writeRules(root, answer.anchoredRules)
+    // Workflows ativos: o hook do pedido e o guard avisam quando o assunto ou o arquivo bate (sem rede).
+    if (Array.isArray(answer.workflows)) writeWorkflows(root, answer.workflows)
+    // Skills ligadas com os assuntos: o hook do pedido avisa quando o pedido bate com uma delas.
+    if (Array.isArray(answer.skills)) writeSkillIndex(root, answer.skills)
     // Todas as regras e decisões: o hook do pedido entrega as do assunto; as que o início já levou não se repetem.
     if (Array.isArray(answer.memoryIndex)) {
       writeMemoryIndex(root, answer.memoryIndex)
@@ -951,6 +959,152 @@ async function memoryEdit(args) {
   console.log(
     `${name}: ${r.title}\n${r.paths.length ? `Ligada a ${r.paths.join(', ')}: chega antes de editar esses arquivos e quando o pedido falar do assunto.` : r.kind === 'rule' ? 'Vale para o projeto todo: entra no início de toda sessão e nos subagentes.' : 'Vale para o projeto todo: entra no início da sessão quando é recente, e quando o pedido falar do assunto.'}`,
   )
+}
+
+// Workflows do projeto: o Claude lista, lê os passos e cria rascunho; aprovar e editar ficam com o dono no painel.
+async function workflowApi(body) {
+  const { projectId, config } = linkedProject()
+  const res = await fetch(`${config.apiUrl}/api/cli/workflows`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${config.token}` },
+    body: JSON.stringify({ projectId, ...body }),
+    signal: AbortSignal.timeout(15_000),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error ?? `Erro da API (${res.status})`)
+  return data
+}
+
+const WORKFLOW_USAGE = `uso:
+  faundr workflow list
+  faundr workflow show <W-n ou nome>
+  faundr workflow draft "<nome>" --when "<quando usar>" --topic "<assunto>"... [--file "<caminho ou padrão>"]... --step "<passo>"...
+  faundr workflow run <W-n> --why "<pedido em uma linha>"      (começa a seguir; passo 1 em andamento)
+  faundr workflow step <W-n> <passo> [--wait | --skip | --done] [--note "<nota>"]
+  faundr workflow done <W-n> [--note "<resultado>"]   |   faundr workflow stop <W-n>
+Passo: texto livre (tarefa) ou com tipo na frente: "skill: faundr:design", "agentes 3: ler o código", "comando: npm test", "perguntar: qual repositório?", "esperar: os testes passarem". Ao mesmo tempo: "paralelo: skill: faundr:design | comando: npm test". Detalhe depois de " — ".`
+
+async function workflowCommand(args) {
+  const [sub, ...rest] = args
+  if (sub === 'list' || !sub) {
+    const { workflows } = await workflowApi({ action: 'list' })
+    if (!workflows.length) return console.log('Nenhum workflow neste projeto ainda. O dono cria no painel (Workflows) ou você propõe um: faundr workflow draft.')
+    const LABEL = { active: 'ativo', draft: 'rascunho', off: 'desligado' }
+    for (const w of workflows)
+      console.log(`${w.ref} ${w.name} [${LABEL[w.status] ?? w.status}, ${w.steps} passo(s)]${w.trigger ? ` — quando: ${w.trigger}` : ''}${w.topics.length ? ` · assuntos: ${w.topics.join(', ')}` : ''}`)
+    return
+  }
+  if (sub === 'show') {
+    const query = textArg(rest)
+    if (!query) throw new Error(WORKFLOW_USAGE)
+    const w = await workflowApi({ action: 'show', query })
+    console.log(w.text)
+    if (w.status === 'active')
+      console.log(
+        `\nMarque o progresso para o time ver no canvas: comece com faundr workflow run ${w.ref} --why "<pedido>", avance com faundr workflow step ${w.ref} <n> (--wait no passo de perguntar ao dono, --skip se não se aplica, com --note "<por quê>") e feche com faundr workflow done ${w.ref}.`,
+      )
+    if (w.status === 'draft') console.log('\n(Rascunho: ainda não vale. O dono aprova no painel, em Workflows.)')
+    if (w.status === 'off') console.log('\n(Desligado pelo dono: não siga sem ele pedir.)')
+    return
+  }
+  if (sub === 'draft') {
+    const name = textArg(rest)
+    const steps = flags(rest, '--step').map(parseItem).filter(Boolean)
+    if (!name || !steps.length) throw new Error(WORKFLOW_USAGE)
+    const r = await workflowApi({
+      action: 'draft',
+      name,
+      trigger: flag(rest, '--when') ?? '',
+      topics: flags(rest, '--topic'),
+      paths: flags(rest, '--file'),
+      steps,
+    })
+    if (!r.created) return console.log(`Já existe um workflow com esse nome (${r.ref}). Não mudei nada: quem edita é o dono, no painel (Workflows).`)
+    return console.log(`Rascunho salvo: ${r.ref} ${name} (${steps.length} passo(s)). Ele só passa a valer quando o dono aprovar no painel, em Workflows, onde também pode editar os passos no canvas.`)
+  }
+  if (['run', 'step', 'done', 'stop'].includes(sub)) {
+    const [query, n] = rest.filter((a, i) => !a.startsWith('--') && !(i > 0 && ['--why', '--note'].includes(rest[i - 1])))
+    if (!query || (sub === 'step' && !Number(n))) throw new Error(WORKFLOW_USAGE)
+    const mark = rest.includes('--wait') ? 'waiting' : rest.includes('--skip') ? 'skip' : rest.includes('--done') ? 'done' : 'doing'
+    const r = await workflowApi({
+      action: sub,
+      query,
+      ...(sub === 'run' && { reason: flag(rest, '--why') ?? '' }),
+      ...(sub === 'step' && { step: Number(n), mark }),
+      note: flag(rest, '--note') ?? '',
+      agentSessionId: process.env.CLAUDE_CODE_SESSION_ID ?? null,
+    })
+    const STATUS = { running: 'em andamento', waiting: 'esperando o dono', done: 'concluído', stopped: 'parado' }
+    return console.log(`${r.ref} ${STATUS[r.status] ?? r.status}: ${r.progress}.${r.status === 'waiting' ? ' O canvas mostra que é a vez do dono.' : ''}`)
+  }
+  throw new Error(WORKFLOW_USAGE)
+}
+
+// Skills conectadas (/faundr:skills): lê as skills do computador e liga ao projeto no Faundr.
+async function skillsApi(body) {
+  const { projectId, config } = linkedProject()
+  const res = await fetch(`${config.apiUrl}/api/cli/skills`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${config.token}` },
+    body: JSON.stringify({ projectId, ...body }),
+    signal: AbortSignal.timeout(15_000),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error ?? `Erro da API (${res.status})`)
+  return data
+}
+
+const SKILLS_USAGE = `uso:
+  faundr skills scan            (lê as skills do projeto, as suas e as dos plugins e liga ao Faundr)
+  faundr skills list            (as skills do projeto, com origem e quando usar)
+  faundr skills when "<nome>" --when "<quando usar, uma frase>" --topic "<assunto>"...`
+
+const SOURCE_LABEL = { projeto: 'do projeto', pessoal: 'pessoal', plugin: 'de plugin' }
+
+async function skillsCommand(args) {
+  const [sub, ...rest] = args
+  const { root } = linkedProject()
+  if (sub === 'scan') {
+    const found = scanSkills(root)
+    // Só envia quando a lista mudou desde a última leitura nesta pasta (a cada sessão, sem gastar rede à toa).
+    const sig = createHash('sha256').update(JSON.stringify(found)).digest('hex').slice(0, 16)
+    if (rest.includes('--quiet') && readState(root).skillsSig === sig) return
+    const r = await skillsApi({ action: 'sync', skills: found })
+    writeState(root, { skillsSig: sig })
+    if (rest.includes('--quiet')) return
+    const by = (s) => found.filter((x) => x.source === s).length
+    console.log(`${found.length} skills neste computador: ${by('projeto')} do projeto, ${by('pessoal')} pessoais, ${by('plugin')} de plugins. No Faundr: ${r.total}.`)
+    if (r.added.length) console.log(r.added.length > 15 ? `${r.added.length} novas.` : `Novas: ${r.added.join(', ')}`)
+    if (r.missing.length) console.log(`Não estão mais aqui: ${r.missing.join(', ')}`)
+    if (r.needWhen.length)
+      console.log(`\nSem "quando usar" (${r.needWhen.length}): ${r.needWhen.slice(0, 40).join(', ')}${r.needWhen.length > 40 ? '…' : ''}\nPara cada uma, leia a descrição (faundr skills list) e grave: faundr skills when "<nome>" --when "<quando usar>" --topic "<assunto>"`)
+    return
+  }
+  if (sub === 'list' || !sub) {
+    const { skills } = await skillsApi({ action: 'list' })
+    if (!skills.length) return console.log('Nenhuma skill conectada ainda. Rode: faundr skills scan')
+    for (const src of ['projeto', 'pessoal', 'plugin']) {
+      const list = skills.filter((s) => s.source === src && !s.missing)
+      if (!list.length) continue
+      console.log(`\n## ${list.length} ${SOURCE_LABEL[src]}`)
+      for (const s of list)
+        console.log(
+          `- ${s.name}${s.manual ? ' [só a pessoa chama]' : ''}${s.enabled ? '' : ' [desligada]'}${s.when_to_use ? ` — quando: ${s.when_to_use}` : ` — ${s.description.slice(0, 140)}`}${s.topics.length ? ` · assuntos: ${s.topics.join(', ')}` : ''}`,
+        )
+    }
+    return
+  }
+  if (sub === 'when') {
+    const name = textArg(rest)
+    const when = flag(rest, '--when')
+    const topics = flags(rest, '--topic')
+    if (!name || (when === undefined && !topics.length)) throw new Error(SKILLS_USAGE)
+    await skillsApi({ action: 'when', name, when, ...(topics.length && { topics }) })
+    // A cópia local do aviso pelo assunto passa a valer já nesta sessão.
+    writeSkillIndex(root, readSkillIndex(root).map((s) => (s.name === name ? { ...s, ...(when !== undefined && { when }), ...(topics.length && { topics }) } : s)))
+    return console.log(`${name}: ${when ? `quando ${when}` : ''}${topics.length ? ` · assuntos: ${topics.join(', ')}` : ''}`)
+  }
+  throw new Error(SKILLS_USAGE)
 }
 
 async function work(command, args) {
@@ -2804,6 +2958,16 @@ function rulesOnce(root, sid, rel) {
   }
 }
 
+// Workflow ligado ao arquivo, cada um uma vez por sessão.
+function workflowsFileOnce(root, sid, rel) {
+  try {
+    return workflowsOnce(root, sid, (list, ids) => workflowsForFile(list, rel, ids), `A edição de ${rel}`)
+  } catch (err) {
+    log(`guard workflows: ${err?.message ?? err}`)
+    return null
+  }
+}
+
 // Regra do time com padrão proibido que a mudança traz: avisa a cada edição (não só a primeira).
 function forbiddenCheck(root, rel, content) {
   try {
@@ -2900,6 +3064,7 @@ async function guard() {
     ...loopNotes(payload.session_id, file, rel),
     forbiddenCheck(path.dirname(linkFile), rel, content),
     rulesOnce(path.dirname(linkFile), payload.session_id, rel),
+    workflowsFileOnce(path.dirname(linkFile), payload.session_id, rel),
     teamOnce(path.dirname(linkFile), payload.session_id, rel),
     payload.tool_name !== 'Write' && dependentsOnce(path.dirname(linkFile), payload.session_id, rel),
   ].filter(Boolean)
@@ -3871,6 +4036,8 @@ async function cli() {
     else if (command === 'quality-review-done') await qualityReviewDone(args)
     else if (command === 'quality-rule') await qualityRule(args)
     else if (command === 'memory-edit') await memoryEdit(args)
+    else if (command === 'workflow') await workflowCommand(args)
+    else if (command === 'skills') await skillsCommand(args)
     else if (command === 'quality-ladder') await qualityLadder(args)
     else if (command === 'tests-scan') await testsScan(args)
     else if (command === 'tests-run') await testsRun(args)
@@ -3889,10 +4056,10 @@ async function cli() {
     else if (command === 'errors-uptime') await errorsUptime(args)
     else
       console.log(
-        'comandos: login | link | status | browse | browse-key | checkpoint | checkpoints | restore | mapa | graph | graph-query | graph-path | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | memory-edit | concern | resolve | start | done | focus | board | criteria | criteria-check | handoff | handover | weekly | resume | stack-scan | env-check | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | security-import | security-supabase | db-test | launch-check | lgpd | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
+        'comandos: login | link | status | browse | browse-key | checkpoint | checkpoints | restore | mapa | graph | graph-query | graph-path | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | memory-edit | workflow | skills | concern | resolve | start | done | focus | board | criteria | criteria-check | handoff | handover | weekly | resume | stack-scan | env-check | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | security-import | security-supabase | db-test | launch-check | lgpd | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
       )
   } catch (err) {
-    if (['graph', 'design-lint', 'security-scan', 'quality-scan', 'tests-scan', 'stack-scan', 'env-check', 'usage-sync', 'checkpoints-sync'].includes(command) && args.includes('--quiet')) log(`${command}: ${err.message}`)
+    if (['skills', 'graph', 'design-lint', 'security-scan', 'quality-scan', 'tests-scan', 'stack-scan', 'env-check', 'usage-sync', 'checkpoints-sync'].includes(command) && args.includes('--quiet')) log(`${command}: ${err.message}`)
     else console.log(err.message)
     process.exit(1)
   }

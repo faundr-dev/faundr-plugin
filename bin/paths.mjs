@@ -13,6 +13,8 @@ export const FILES = {
   showcase: 'painel/showcase.json',
   memory: 'painel/memory.json',
   rules: 'painel/rules.json',
+  workflows: 'painel/workflows.json',
+  skills: 'painel/skills.json',
   handover: 'relatorios/PASSAGEM.md',
   securityReport: 'relatorios/relatorio-seguranca.md',
   graph: 'mapa/graph.json',
