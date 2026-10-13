@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
-import { changesSince, createCheckpoint, ensureSessionCheckpoint, findCheckpoint, listCheckpoints, restoreCheckpoint } from '../bin/checkpoints.mjs'
+import { changesSince, createCheckpoint, ensureSessionCheckpoint, findCheckpoint, listCheckpoints, restoreCheckpoint, restoreSummary } from '../bin/checkpoints.mjs'
 
 const git = (root, ...args) => spawnSync('git', args, { cwd: root, encoding: 'utf8' })
 
@@ -90,4 +90,26 @@ test('repositório sem nenhum commit também funciona', () => {
   fs.writeFileSync(path.join(root, 'a.txt'), '2\n')
   restoreCheckpoint(root, c)
   assert.equal(read(root, 'a.txt'), '1\n')
+})
+
+test('a volta explica o que se perde, o que é apagado e o que não muda', () => {
+  const point = { at: '2026-10-13T16:17:00Z', reason: 'antes da primeira mudança da sessão' }
+  const text = restoreSummary(point, [
+    { status: 'alterado', path: 'src/login.ts' },
+    { status: 'criado', path: 'src/novo.ts' },
+    { status: 'apagado', path: 'src/velho.ts' },
+  ])
+  assert.match(text, /1 voltam como eram; as mudanças feitas neles depois do ponto se perdem: src\/login\.ts/)
+  assert.match(text, /1 criados depois do ponto são apagados: src\/novo\.ts/)
+  assert.match(text, /1 apagados depois do ponto voltam: src\/velho\.ts/)
+  assert.match(text, /não muda: o \.env.*banco de dados/)
+  assert.match(restoreSummary(point, []), /nada muda/)
+})
+
+test('a volta avisa quando pacotes ou migrações do banco mudam', () => {
+  const point = { at: '2026-10-06T12:00:00Z', reason: 'antes da primeira mudança da sessão' }
+  const text = restoreSummary(point, [{ status: 'alterado', path: 'package.json' }, { status: 'criado', path: 'supabase/migrations/0068_x.sql' }])
+  assert.match(text, /npm install/)
+  assert.match(text, /o banco não volta/)
+  assert.doesNotMatch(restoreSummary(point, [{ status: 'alterado', path: 'src/a.ts' }]), /Atenção/)
 })

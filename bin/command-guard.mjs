@@ -144,6 +144,9 @@ export function classifyCommand(command, { cwd, sql = false } = {}) {
     if (!found || (r.level === 'deny' && found.level !== 'deny')) found = r
   }
   for (const seg of segs) {
+    // Voltar para um ponto de volta troca arquivos: o usuário confirma no terminal, vendo o que muda.
+    const restore = !TEXT_PROGRAMS.has(seg.program) && seg.text.match(/\bfaundr(?:\.mjs)?["']?\s+restore\s+["']?([\w#.-]+).*\s--yes\b/i)
+    if (restore) keep({ level: 'ask', what: 'volta os arquivos para um ponto de volta', files: false, restore: restore[1] })
     keep(removal(seg, cwd))
     if (seg.program === 'git') {
       const rest = seg.words.join(' ')

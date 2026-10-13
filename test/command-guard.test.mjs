@@ -104,3 +104,11 @@ test('mensagens em português simples', () => {
   const deny = classifyCommand('rm -rf ~', { cwd })
   assert.match(guardMessage(deny, { command: 'rm -rf ~' }), /Barrado.*ele mesmo roda/)
 })
+
+test('voltar para um ponto de volta sempre pergunta no terminal', () => {
+  for (const cmd of ['faundr restore 2 --yes', 'node "C:/x/plugin/bin/faundr.mjs" restore dc4b7a3ea9 --yes', 'node /p/bin/faundr.mjs restore #3 --yes'])
+    assert.equal(classifyCommand(cmd, { cwd })?.level, 'ask', cmd)
+  assert.equal(classifyCommand('faundr restore 2 --yes', { cwd }).restore, '2')
+  for (const cmd of ['faundr restore 2', 'faundr checkpoints', 'git commit -m "faundr restore 2 --yes"'])
+    assert.notEqual(classifyCommand(cmd, { cwd })?.restore, '2', cmd)
+})

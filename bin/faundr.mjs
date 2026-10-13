@@ -117,7 +117,7 @@ import { buildShowcase, detectRuntime, readShowcase, SHOWCASE_FILE, showcaseHash
 import { ensureFaundrPath, FAUNDR_DIR, FILES, faundrPath, organizeFaundrDir, relPath } from './paths.mjs'
 import { classify, commandCwd, isPartial, maskCommand, outputSaysFailed, parseErrors, toolOutput } from './errors.mjs'
 import { allScripts } from './parts.mjs'
-import { findSecrets, guardContent, mask, projectFiles, projectMap, scanProject } from './security.mjs'
+import { findSecrets, guardContent, mask, maskPayload, projectFiles, projectMap, scanProject } from './security.mjs'
 import { parseImport, supabaseAdvisors } from './security-import.mjs'
 import { contextLines, findMap, resolvePosition } from './sourcemap.mjs'
 import { detectStack } from './stack.mjs'
@@ -138,7 +138,7 @@ import { browse, parseBrowseArgs } from './browse.mjs'
 import { privacyScan } from './privacy.mjs'
 import { envMatrix, hostingFromCli, hostingProvider } from './env-matrix.mjs'
 import { anonReads, dbFindings, dbSummary, exposedTables, migrationTables, parseProbe, PROBE_SQL, probeWithToken, supabaseTarget } from './db-test.mjs'
-import { changesSince, createCheckpoint, currentTree, describeChanges, ensureSessionCheckpoint, findCheckpoint, gitRoot, listCheckpoints, restoreCheckpoint } from './checkpoints.mjs'
+import { changesSince, createCheckpoint, currentTree, describeChanges, ensureSessionCheckpoint, findCheckpoint, gitRoot, listCheckpoints, restoreCheckpoint, restoreSummary } from './checkpoints.mjs'
 
 const CONFIG_DIR = path.join(os.homedir(), '.faundr')
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json')
@@ -583,7 +583,7 @@ async function hook(agent) {
       at: startedAt,
       ack: takeAcks(path.dirname(linkFile), payload.session_id),
       currentFeatureId: currentFeature(path.dirname(linkFile), payload.session_id),
-      payload,
+      payload: maskPayload(payload),
       usage,
     }),
     signal: AbortSignal.timeout(timeout),
@@ -3248,7 +3248,7 @@ async function checkpointsSync(args) {
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data.error ?? `Erro da API (${res.status})`)
   writeState(root, { checkpointsSynced: { newest: all[0].commit, tree: now } })
-  if (!args.includes('--quiet')) console.log(`${data.saved ?? 0} pontos de volta enviados ao painel (Atividade → Pontos de volta).`)
+  if (!args.includes('--quiet')) console.log(`${data.saved ?? 0} pontos de volta enviados ao painel (Proteção → Pontos de volta).`)
 }
 
 function restoreCommand(args) {
@@ -3260,11 +3260,8 @@ function restoreCommand(args) {
   const changes = changesSince(root, c)
   if (!changes.length) return console.log(`Os arquivos já estão iguais ao ponto de ${when(c.at)}; nada a fazer.`)
   if (!args.includes('--yes')) {
-    console.log(`Voltar para o ponto de ${when(c.at)} (${c.reason}) desfaz isto:`)
-    for (const ch of changes.slice(0, 40)) console.log(`  ${ch.status === 'criado' ? 'apaga (foi criado depois)' : ch.status === 'apagado' ? 'traz de volta (foi apagado depois)' : 'volta como era'}: ${ch.path}`)
-    if (changes.length > 40) console.log(`  … e mais ${changes.length - 40}`)
-    console.log('O estado atual é salvo antes, como um ponto de volta novo: dá para desfazer a volta. Arquivos fora do git (.env, node_modules) e o banco de dados não mudam.')
-    return console.log(`Para confirmar: faundr restore ${c.n} --yes`)
+    console.log(restoreSummary(c, changes, { max: 40 }))
+    return console.log(`Mostre isto ao usuário e só confirme com o OK dele: faundr restore ${c.n} --yes`)
   }
   const r = restoreCheckpoint(root, c)
   console.log(`Pronto: arquivos de volta ao ponto de ${when(c.at)} (${r.restored.length} restaurados, ${r.removed.length} apagados).`)

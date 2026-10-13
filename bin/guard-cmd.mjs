@@ -14,7 +14,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { createCheckpoint, ensureSessionCheckpoint, gitRoot } from './checkpoints.mjs'
+import { changesSince, createCheckpoint, ensureSessionCheckpoint, findCheckpoint, gitRoot, restoreSummary } from './checkpoints.mjs'
 import { classifyCommand, guardMessage, isReadOnly } from './command-guard.mjs'
 import { changesDatabase, remoteDatabases, remoteNote } from './env-target.mjs'
 import { takeLoopAlerts } from './loop.mjs'
@@ -57,6 +57,18 @@ function databaseNote(root, verdict, sql) {
   }
 }
 
+// Pergunta da volta a um ponto: o que muda nos arquivos, para o usuário aprovar sabendo o que perde.
+function restoreReason(cwd, which) {
+  try {
+    const repo = gitRoot(cwd)
+    const c = repo && findCheckpoint(repo, which)
+    if (c) return `[Faundr] ${restoreSummary(c, changesSince(repo, c))}\nAprove só se for isso mesmo.`
+  } catch (err) {
+    log(`volta: ${err.message}`)
+  }
+  return '[Faundr] Atenção: este comando volta os arquivos para um ponto de volta. As mudanças feitas depois dele saem dos arquivos (o estado de agora fica salvo). Aprove só se for isso mesmo.'
+}
+
 // Branch atual lida do .git/HEAD (sem abrir o git).
 function currentBranch(cwd) {
   try {
@@ -95,6 +107,7 @@ async function main() {
       }
     }
     log(`${verdict.level}: ${verdict.what} :: ${command.slice(0, 200)}`)
+    if (verdict.restore) return reply({ permissionDecision: 'ask', permissionDecisionReason: restoreReason(cwd, verdict.restore) })
     return reply({ permissionDecision: verdict.level, permissionDecisionReason: guardMessage(verdict, { command, checkpoint, note: databaseNote(root, verdict, sql) }) })
   }
 

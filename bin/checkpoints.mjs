@@ -215,6 +215,31 @@ function cleanMarkers(configDir, now) {
   } catch {}
 }
 
+// O que voltar para o ponto faz com os arquivos, em português simples, para o usuário decidir.
+// `changes` = changesSince(ponto): o que mudou depois dele (alterado, criado, apagado).
+export function restoreSummary(checkpoint, changes, { max = 8 } = {}) {
+  const when = new Date(checkpoint.at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+  const head = `Voltar para o ponto de ${when} (${checkpoint.reason}).`
+  if (!changes.length) return `${head} Os arquivos já estão iguais a este ponto: nada muda.`
+  const list = (items) => `${items.slice(0, max).map((c) => c.path).join(', ')}${items.length > max ? ` e mais ${items.length - max}` : ''}`
+  const of = (s) => changes.filter((c) => c.status === s)
+  const lines = [head, 'O que acontece com os arquivos:']
+  if (of('alterado').length)
+    lines.push(`- ${of('alterado').length} voltam como eram; as mudanças feitas neles depois do ponto se perdem: ${list(of('alterado'))}`)
+  if (of('criado').length) lines.push(`- ${of('criado').length} criados depois do ponto são apagados: ${list(of('criado'))}`)
+  if (of('apagado').length) lines.push(`- ${of('apagado').length} apagados depois do ponto voltam: ${list(of('apagado'))}`)
+  // O que fica fora da foto e pode não bater com os arquivos de volta.
+  if (changes.some((c) => /(^|\/)(package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|requirements\.txt|pyproject\.toml)$/.test(c.path)))
+    lines.push('Atenção: a lista de pacotes muda. Depois da volta, rode a instalação (ex.: npm install) para os pacotes baterem com o código.')
+  if (changes.some((c) => /(^|\/)(migrations?|prisma)\//i.test(c.path)))
+    lines.push('Atenção: arquivos de migração do banco mudam, mas o banco não volta. Se alguma migração já foi aplicada, o código antigo pode não bater com o banco.')
+  lines.push(
+    'O que não muda: o .env, o node_modules, o banco de dados e os commits do git.',
+    'O estado de agora é salvo antes, como um ponto de volta novo: dá para desfazer a volta.',
+  )
+  return lines.join('\n')
+}
+
 // Resumo em português simples de uma lista de mudanças: "3 alterados, 1 criado (a.ts, b.ts, …)".
 export function describeChanges(changes, max = 4) {
   if (!changes.length) return 'nada mudou desde então'

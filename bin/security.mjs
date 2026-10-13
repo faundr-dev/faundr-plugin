@@ -166,6 +166,29 @@ function decodeJwt(token) {
 }
 
 /** Procura chaves num texto. Devolve { ruleId, secret, index, confidence, dangerous }. */
+// Chaves e senhas que o Claude leu ou digitou não saem do computador: cada texto do evento do diário passa
+// pelas regras antes de ir para o Faundr.
+// Formatos comuns que as regras acima podem não pegar (a mesma lista do servidor, em src/lib/redact.ts).
+const COMMON_SECRETS = [
+  [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----|$)/g, '[chave privada]'],
+  [/\b(AKIA|ASIA)[0-9A-Z]{16}\b/g, '$1***'],
+  [/\b(sk-ant-|sk-proj-|sk-|sk_live_|sk_test_|rk_live_|pk_live_|ghp_|gho_|ghs_|ghu_|github_pat_|glpat-|xox[abprs]-|AIza|SG\.|sbp_|sb_secret_)[A-Za-z0-9_\-.]{12,}/g, '$1***'],
+  [/\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, 'eyJ***'],
+  [/\b([a-z][a-z0-9+.-]*:\/\/[^:\/\s@]+:)[^@\s\/]{3,}@/gi, '$1***@'],
+  [/\b((?:password|passwd|senha|secret|api[_-]?key|access[_-]?token|auth[_-]?token|private[_-]?key|client[_-]?secret)["']?\s*[:=]\s*["']?)[^\s"',;&]{6,}/gi, '$1***'],
+]
+export function maskPayload(value) {
+  if (typeof value === 'string') {
+    if (value.length < 8) return value
+    let out = value
+    for (const s of findSecrets(value)) out = out.replaceAll(s.secret, mask(s.secret))
+    return COMMON_SECRETS.reduce((text, [re, to]) => text.replace(re, to), out)
+  }
+  if (Array.isArray(value)) return value.map(maskPayload)
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, maskPayload(v)]))
+  return value
+}
+
 export function findSecrets(text, rel = '') {
   const lowerText = text.toLowerCase()
   const out = []
