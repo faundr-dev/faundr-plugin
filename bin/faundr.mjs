@@ -126,7 +126,7 @@ import { dependentsNote, readGraph } from './dependents.mjs'
 import { readSkillIndex, scanSkills, writeSkillIndex } from './skills.mjs'
 import { parseItem, workflowsForFile, workflowsOnce, writeWorkflows } from './workflows.mjs'
 import { forbiddenIn, forbiddenNote, globalRules, readMemoryIndex, readRules, rulesFor, rulesNote, writeMemoryIndex, writeRules } from './rules.mjs'
-import { installStatusline, statusFromBoard, statusLine } from './statusline.mjs'
+import { installStatusline, metersSnapshot, statusFromBoard, statusLine } from './statusline.mjs'
 import { agentsBlock, removeBlock, upsertBlock } from './agents-md.mjs'
 import { editLoopNote, proofNeeded, recordCheck, recordEdit, takeLoopAlerts } from './loop.mjs'
 import { launchChecks } from './launch.mjs'
@@ -568,6 +568,9 @@ async function hook(agent) {
     } catch (err) {
       log(`usage: ${err.message}`)
     }
+    // Contexto e janelas de 5 h e da semana que a barra viu nesta sessão (só com a barra do Faundr ligada).
+    const meters = readJson(faundrPath(path.dirname(linkFile), 'meters'))
+    if (usage && meters && (!meters.session_id || meters.session_id === payload.session_id)) usage.meters = meters
   }
   const request = fetch(`${apiUrl}/api/hooks/event`, {
     method: 'POST',
@@ -3894,6 +3897,14 @@ async function statusline() {
   // Contexto, janelas de uso e custo vêm do próprio Claude Code (stdin); a largura, de COLUMNS.
   const width = Number(process.env.COLUMNS) > 20 ? Number(process.env.COLUMNS) - 2 : 120
   process.stdout.write(statusLine(readState(root).status, { graph, input, prefs: readJson(faundrPath(root, 'bar')) ?? undefined, width }))
+  // Insights: guarda os medidores para o fim da resposta enviar. Só grava quando mudam (ou a cada minuto).
+  const meters = metersSnapshot(input)
+  if (meters) {
+    const file = faundrPath(root, 'meters')
+    const prev = readJson(file)
+    const same = prev && JSON.stringify({ ...prev, at: 0 }) === JSON.stringify({ ...meters, at: 0 })
+    if (!same || meters.at - (prev.at ?? 0) > 60_000) fs.writeFileSync(ensureFaundrPath(root, 'meters'), JSON.stringify(meters))
+  }
 }
 
 // O que o Impacto receberia desta sessão (docs/impacto-contrato.md): só números, lidos da conversa.

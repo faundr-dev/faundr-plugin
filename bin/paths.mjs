@@ -28,6 +28,8 @@ export const FILES = {
   fingerprints: 'cache/fingerprints.json',
   team: 'cache/team.json',
   inbox: 'cache/inbox.json',
+  // Contexto e janelas de uso que o Claude Code mandou para a barra (vão ao painel no fim da resposta).
+  meters: 'cache/meters.json',
   // Prints dos pedidos da extensão do Chrome (faundr fila --print).
   requestShots: 'pedidos',
 }

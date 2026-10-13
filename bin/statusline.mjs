@@ -102,6 +102,31 @@ export function meterItems(input, prefs = DEFAULT_BAR, now = Date.now()) {
 }
 
 /**
+ * Os medidores que o Claude Code mandou para a barra, para o painel (Insights): contexto e janelas de 5 horas e da
+ * semana. A barra guarda em .faundr/cache/meters.json e o fim da resposta envia junto com o uso. Null sem nenhum.
+ */
+export function metersSnapshot(input, now = Date.now()) {
+  const ctx = pctOf(input?.context_window?.used_percentage)
+  const win = (key) => {
+    const w = input?.rate_limits?.[key]
+    const p = pctOf(w?.used_percentage)
+    return p === null ? null : { pct: Math.round(p * 10) / 10, resets_at: pctOf(Number(w?.resets_at)) }
+  }
+  const five = win('five_hour')
+  const week = win('seven_day')
+  if (ctx === null && !five && !week) return null
+  return {
+    session_id: typeof input?.session_id === 'string' ? input.session_id : null,
+    context_pct: ctx === null ? null : Math.round(ctx * 10) / 10,
+    context_size: pctOf(input?.context_window?.context_window_size),
+    five_hour: five,
+    seven_day: week,
+    model: typeof input?.model?.display_name === 'string' ? input.model.display_name.slice(0, 60) : null,
+    at: now,
+  }
+}
+
+/**
  * A barra. `graph`: 'fresh' | 'stale' | null (sem grafo). Com os dados do Claude Code (`input`), os medidores vão no
  * fim da linha; se não couberem na largura, descem para uma segunda linha.
  */

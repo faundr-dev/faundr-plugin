@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
-import { bar, barPrefs, installStatusline, launcherSource, meterItems, resetText, statusFromBoard, statusLine, visible } from '../bin/statusline.mjs'
+import { bar, barPrefs, installStatusline, launcherSource, meterItems, metersSnapshot, resetText, statusFromBoard, statusLine, visible } from '../bin/statusline.mjs'
 
 const board = {
   projectName: 'Lojinha',
@@ -97,4 +97,26 @@ test('prévia do painel igual à barra do plugin (mesmos itens, mesmo texto)', a
     const plain = statusLine(s.status, { graph: s.graph, input, prefs, now, width: 400 }).replace(/\u001b\[7m (.*?) \u001b\[27m/g, '$1').replace(/\u001b\[[0-9;]*m/g, '')
     assert.equal(plain, panel.previewParts(panel.barPrefs(prefs)).map((p) => p.text).join(' · '))
   }
+})
+
+test('medidores para o painel: contexto e janelas arredondados; sem nenhum, null', () => {
+  const snap = metersSnapshot(
+    {
+      session_id: 's1',
+      model: { display_name: 'Opus' },
+      context_window: { used_percentage: 42.37, context_window_size: 200000 },
+      rate_limits: { five_hour: { used_percentage: 61.04, resets_at: 1760000000 } },
+    },
+    5,
+  )
+  assert.deepEqual(snap, {
+    session_id: 's1',
+    context_pct: 42.4,
+    context_size: 200000,
+    five_hour: { pct: 61, resets_at: 1760000000 },
+    seven_day: null,
+    model: 'Opus',
+    at: 5,
+  })
+  assert.equal(metersSnapshot({ model: { display_name: 'Opus' } }), null)
 })
