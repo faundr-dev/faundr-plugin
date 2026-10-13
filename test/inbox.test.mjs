@@ -33,3 +33,17 @@ test('sem sessão ou sem arquivo: nada quebra', () => {
   assert.deepEqual(takeInbox(root, 's1'), [])
   assert.deepEqual(takeAcks(root, 's1'), [])
 })
+
+test('aviso de uma sessão: só ela recebe, uma vez, junto com a caixa', async () => {
+  const { addSessionNotes } = await import('../bin/inbox.mjs')
+  const root = tmp()
+  writeInbox(root, [item('a')])
+  addSessionNotes(root, 's1', ['Ana parou o workflow W-2'])
+  assert.deepEqual(takeInbox(root, 's2'), ['texto a'])
+  assert.deepEqual(takeInbox(root, 's1'), ['[Faundr] Ana parou o workflow W-2'])
+  assert.deepEqual(takeInbox(root, 's1'), [])
+  // O servidor regrava a caixa: o aviso que ainda não foi entregue continua lá.
+  addSessionNotes(root, 's3', ['W-2 mudou'])
+  writeInbox(root, [])
+  assert.deepEqual(takeInbox(root, 's3'), ['[Faundr] W-2 mudou'])
+})

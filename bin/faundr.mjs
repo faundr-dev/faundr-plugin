@@ -132,7 +132,7 @@ import { editLoopNote, proofNeeded, recordCheck, recordEdit, takeLoopAlerts } fr
 import { launchChecks } from './launch.mjs'
 import { machineName } from './live.mjs'
 import { fileWarning, readTeam, teamLines, writeTeam } from './team.mjs'
-import { takeAcks, takeInbox, writeInbox } from './inbox.mjs'
+import { addSessionNotes, takeAcks, takeInbox, writeInbox } from './inbox.mjs'
 import { escutar } from './listen.mjs'
 import { browse, parseBrowseArgs } from './browse.mjs'
 import { privacyScan } from './privacy.mjs'
@@ -598,6 +598,8 @@ async function hook(agent) {
   // Foto do time: cópia local para os avisos do pedido, da edição e do push (que não usam a rede).
   if (answer.team) writeTeam(path.dirname(linkFile), answer.team)
   if (Array.isArray(answer.inbox)) writeInbox(path.dirname(linkFile), answer.inbox)
+  // Avisos desta sessão (workflow parado pelo painel ou mudado no meio): o hook do próximo pedido entrega.
+  if (Array.isArray(answer.sessionNotes)) addSessionNotes(path.dirname(linkFile), payload.session_id, answer.sessionNotes)
   // Escolhas da barra do terminal (o painel liga e desliga cada item): chegam no início, a cada pedido e no fim da
   // resposta, para uma mudança no painel valer sem reiniciar; a barra lê sem rede a cada atualização.
   if (answer.bar !== undefined) fs.writeFileSync(ensureFaundrPath(path.dirname(linkFile), 'bar'), JSON.stringify(answer.bar ?? {}))
@@ -1041,7 +1043,10 @@ async function workflowCommand(args) {
       agentSessionId: process.env.CLAUDE_CODE_SESSION_ID ?? null,
     })
     const STATUS = { running: 'em andamento', waiting: 'esperando o dono', done: 'concluído', stopped: 'parado' }
-    return console.log(`${r.ref} ${STATUS[r.status] ?? r.status}: ${r.progress}.${r.status === 'waiting' ? ' O canvas mostra que é a vez do dono.' : ''}`)
+    console.log(`${r.ref} ${STATUS[r.status] ?? r.status}: ${r.progress}.${r.status === 'waiting' ? ' O canvas mostra que é a vez do dono.' : ''}`)
+    // Avisos do time: outra pessoa seguindo o mesmo workflow agora, ou o workflow mudou no painel depois que começou.
+    for (const note of r.notes ?? []) console.log(note)
+    return
   }
   throw new Error(WORKFLOW_USAGE)
 }
