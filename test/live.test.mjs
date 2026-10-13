@@ -16,6 +16,9 @@ test('estado ao vivo: não manda conteúdo de arquivo nem o comando inteiro', ()
   const write = livePayload({ hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: '/proj/a.ts', content: 'SEGREDO=1' } })
   assert.equal(write.tool_input.file_path, '/proj/a.ts')
   assert.ok(!JSON.stringify(write).includes('SEGREDO'))
+  const skill = livePayload({ hook_event_name: 'PreToolUse', tool_name: 'Skill', tool_input: { skill: 'faundr:design', args: '--files segredo.ts' } })
+  assert.equal(skill.tool_input.skill, 'faundr:design')
+  assert.ok(!JSON.stringify(skill).includes('segredo'))
 })
 
 test('nome do computador: o da configuração vale mais que o do sistema', () => {

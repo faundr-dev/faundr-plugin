@@ -606,6 +606,8 @@ async function hook(agent) {
     if (Array.isArray(answer.workflows)) writeWorkflows(root, answer.workflows)
     // Skills ligadas com os assuntos: o hook do pedido avisa quando o pedido bate com uma delas.
     if (Array.isArray(answer.skills)) writeSkillIndex(root, answer.skills)
+    // Escolhas da barra do terminal (o painel liga e desliga cada item); a barra lê sem rede a cada atualização.
+    if (answer.bar !== undefined) fs.writeFileSync(ensureFaundrPath(root, 'bar'), JSON.stringify(answer.bar ?? {}))
     // Todas as regras e decisões: o hook do pedido entrega as do assunto; as que o início já levou não se repetem.
     if (Array.isArray(answer.memoryIndex)) {
       writeMemoryIndex(root, answer.memoryIndex)
@@ -3888,7 +3890,9 @@ async function statusline() {
   const { projectId } = readJson(linkFile) ?? {}
   const hasGraph = fs.existsSync(faundrPath(root, 'graph'))
   const graph = hasGraph ? (projectId && fs.existsSync(dirtyFile(projectId)) ? 'stale' : 'fresh') : null
-  process.stdout.write(statusLine(readState(root).status, { graph }))
+  // Contexto, janelas de uso e custo vêm do próprio Claude Code (stdin); a largura, de COLUMNS.
+  const width = Number(process.env.COLUMNS) > 20 ? Number(process.env.COLUMNS) - 2 : 120
+  process.stdout.write(statusLine(readState(root).status, { graph, input, prefs: readJson(faundrPath(root, 'bar')) ?? undefined, width }))
 }
 
 // O que o Impacto receberia desta sessão (docs/impacto-contrato.md): só números, lidos da conversa.

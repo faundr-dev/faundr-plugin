@@ -8,6 +8,11 @@
       "name": "faundr",
       "source": "./",
       "description": "Conecta suas sessões do Claude Code à plataforma Faundr."
+    },
+    {
+      "name": "faundr-mod",
+      "source": "./mod",
+      "description": "Mod do Faundr: aviso em 80% e 95% do contexto e dos limites de uso, e faixa acima do prompt com as barras."
     }
   ],
   "description": "Plugin do Faundr para o Claude Code: memória, funcionalidades, design, segurança, qualidade, testes e erros do seu projeto num painel."

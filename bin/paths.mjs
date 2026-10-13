@@ -15,6 +15,7 @@ export const FILES = {
   rules: 'painel/rules.json',
   workflows: 'painel/workflows.json',
   skills: 'painel/skills.json',
+  bar: 'painel/bar.json',
   handover: 'relatorios/PASSAGEM.md',
   securityReport: 'relatorios/relatorio-seguranca.md',
   graph: 'mapa/graph.json',

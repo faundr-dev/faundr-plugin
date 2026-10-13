@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
-import { installStatusline, launcherSource, statusFromBoard, statusLine } from '../bin/statusline.mjs'
+import { bar, barPrefs, installStatusline, launcherSource, meterItems, resetText, statusFromBoard, statusLine, visible } from '../bin/statusline.mjs'
 
 const board = {
   projectName: 'Lojinha',
@@ -40,4 +40,61 @@ test('instalar a barra: lançador fixo, não troca uma barra que já existe sem 
   assert.equal(JSON.parse(fs.readFileSync(path.join(configDir, 'settings.json'), 'utf8')).model, 'opus')
   assert.match(launcherSource('/x/bin/faundr.mjs'), /process\.argv\.splice\(2, 0, 'statusline'\)/)
   fs.rmSync(home, { recursive: true, force: true })
+})
+
+// 12/10/2026 15:00 no fuso local; zera às 18:40 do mesmo dia e no sábado às 09:00.
+const NOW = new Date(2026, 9, 12, 15, 0).getTime()
+const sec = (d) => Math.round(d.getTime() / 1000)
+const INPUT = {
+  context_window: { used_percentage: 42, context_window_size: 200000 },
+  rate_limits: { five_hour: { used_percentage: 23.5, resets_at: sec(new Date(2026, 9, 12, 18, 40)) }, seven_day: { used_percentage: 61, resets_at: sec(new Date(2026, 9, 17, 9, 0)) } },
+  cost: { total_cost_usd: 1.234 },
+}
+
+test('medidores: barra de 5 blocos, horário em que zera e custo desligado por padrão', () => {
+  assert.deepEqual([bar(0), bar(1), bar(20), bar(42), bar(100), bar(140)], ['░░░░░', '█░░░░', '█░░░░', '███░░', '█████', '█████'])
+  assert.equal(resetText(sec(new Date(2026, 9, 12, 18, 40)), NOW), '18:40')
+  assert.equal(resetText(sec(new Date(2026, 9, 17, 9, 0)), NOW), 'sáb 09:00')
+  assert.equal(resetText('x', NOW), null)
+  assert.deepEqual(meterItems(INPUT, undefined, NOW), ['ctx ███░░ 42%', '5h ██░░░ 24%', 'sem ████░ 61%'])
+  assert.deepEqual(meterItems(INPUT, { items: { custo: true, semana: false } }, NOW), ['ctx ███░░ 42%', '5h ██░░░ 24%', 'US$ 1,23'])
+  // Sem dados (começo da sessão, plano sem limites): nada aparece.
+  assert.deepEqual(meterItems({ context_window: { used_percentage: null } }, undefined, NOW), [])
+})
+
+test('aviso: 80% em negrito com a dica, 95% invertido; desligado, só a barra', () => {
+  const hot = { context_window: { used_percentage: 85 }, rate_limits: { five_hour: { used_percentage: 96, resets_at: sec(new Date(2026, 9, 12, 18, 40)) } } }
+  const [ctx, five] = meterItems(hot, undefined, NOW)
+  assert.equal(ctx, '\u001b[1mctx █████ 85% hora de /compact\u001b[22m')
+  assert.equal(five, '\u001b[7m 5h █████ 96% zera 18:40 \u001b[27m')
+  assert.deepEqual(meterItems(hot, { alerts: false }, NOW), ['ctx █████ 85%', '5h █████ 96%'])
+  assert.equal(visible(ctx), 'ctx █████ 85% hora de /compact'.length)
+})
+
+test('barra com medidores: no fim da linha se couber, senão na segunda linha; itens desligados somem', () => {
+  const s = { projectName: 'Lojinha', feature: { title: 'Frete', done: 1, total: 3, next: 'Testes' }, concerns: 0 }
+  assert.equal(statusLine(s, { input: INPUT, now: NOW }), 'Faundr · Lojinha · Frete 1/3 · agora: Testes · ctx ███░░ 42% · 5h ██░░░ 24% · sem ████░ 61%')
+  assert.equal(statusLine(s, { input: INPUT, now: NOW, width: 50 }), 'Faundr · Lojinha · Frete 1/3 · agora: Testes\nctx ███░░ 42% · 5h ██░░░ 24% · sem ████░ 61%')
+  const only = { items: { projeto: false, funcionalidade: false, passo: false, grafo: false, preocupacoes: false } }
+  assert.equal(statusLine(s, { input: INPUT, now: NOW, prefs: only }), 'ctx ███░░ 42% · 5h ██░░░ 24% · sem ████░ 61%')
+  assert.deepEqual(barPrefs({ items: { contexto: 'sim', nada: true }, alerts: 1 }), { items: barPrefs({}).items, alerts: true })
+})
+
+test('prévia do painel igual à barra do plugin (mesmos itens, mesmo texto)', async () => {
+  const panel = await import('../../src/lib/statusbar.ts')
+  assert.deepEqual(panel.BAR_ITEMS.map((i) => [i.key, i.on]), Object.entries(barPrefs({}).items))
+  const s = panel.PREVIEW_SAMPLE
+  const now = new Date(2026, 9, 12, 15, 0).getTime()
+  const input = {
+    context_window: { used_percentage: s.context },
+    rate_limits: {
+      five_hour: { used_percentage: s.fiveHour.pct, resets_at: Math.round(new Date(2026, 9, 12, 18, 40).getTime() / 1000) },
+      seven_day: { used_percentage: s.week.pct, resets_at: Math.round(new Date(2026, 9, 17, 9, 0).getTime() / 1000) },
+    },
+    cost: { total_cost_usd: s.usd },
+  }
+  for (const prefs of [{}, { items: { custo: true, grafo: false } }, { alerts: false }]) {
+    const plain = statusLine(s.status, { graph: s.graph, input, prefs, now, width: 400 }).replace(/\u001b\[7m (.*?) \u001b\[27m/g, '$1').replace(/\u001b\[[0-9;]*m/g, '')
+    assert.equal(plain, panel.previewParts(panel.barPrefs(prefs)).map((p) => p.text).join(' · '))
+  }
 })

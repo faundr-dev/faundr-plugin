@@ -1,0 +1,7 @@
+{
+  "name": "faundr-mod",
+  "version": "0.1.0",
+  "description": "Mod do Faundr para o Claude Code: aviso quando o contexto ou o limite de uso passa de 80% e 95%, e faixa acima do prompt com as barras.",
+  "author": { "name": "Faundr" },
+  "types": "./types/index.d.ts"
+}

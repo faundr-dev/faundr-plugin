@@ -35,4 +35,4 @@ Quando um workflow ativo chegar no seu contexto ("Este pedido bate com um workfl
 - Passo que não se aplica ao pedido: `faundr workflow step <W-n> <número> --skip --note "<por quê>"`. Nunca pule calado.
 - No fim: `faundr workflow done <W-n> --note "<o resultado em uma linha>"`. Se o dono mandar parar: `faundr workflow stop <W-n>`.
 
-Um comando por passo basta; não marque passos que não fez.
+Passos de skill, de comando e de agentes se marcam sozinhos quando você chama a skill, o comando termina bem ou abre os agentes; mesmo assim, marque os outros (tarefa, perguntar, esperar, decisão). Um comando por passo basta; não marque passos que não fez.

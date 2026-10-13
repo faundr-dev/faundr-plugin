@@ -62,6 +62,8 @@ export function livePayload(p) {
       notebook_path: input.notebook_path,
       description: typeof input.description === 'string' ? input.description.slice(0, 200) : undefined,
       command: program,
+      // Nome da skill chamada (não é conteúdo): a aba Agora mostra a área e o workflow marca o passo da skill.
+      skill: typeof input.skill === 'string' ? input.skill.slice(0, 120) : undefined,
     },
     notification_type: p.notification_type,
     message: typeof p.message === 'string' ? p.message.slice(0, 200) : undefined,
