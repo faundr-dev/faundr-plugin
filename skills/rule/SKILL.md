@@ -1,6 +1,6 @@
 ---
-description: Registra uma regra do time no Faundr. Com arquivos ou padrões (ex.: src/server/**), a regra chega ao agente na hora de editar esses arquivos, em vez de no início de toda sessão.
-argument-hint: <regra> [porque ...] [em <arquivos ou pastas>]
+description: 'Registra uma regra do time no Faundr. Com arquivos ou padrões (ex.: src/server/**), a regra chega ao agente na hora de editar esses arquivos, em vez de no início de toda sessão.'
+argument-hint: '<regra> [porque ...] [em <arquivos ou pastas>]'
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *)
 ---

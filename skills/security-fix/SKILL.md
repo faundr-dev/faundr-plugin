@@ -1,6 +1,6 @@
 ---
 description: Corrige um problema de segurança registrado no Faundr (S-n, ou todos os de um pacote) e só dá como resolvido quando a checagem não encontra mais o problema. Sem argumento, corrige os críticos e altos abertos, um de cada vez; com --all, corrige todos os abertos, sem parar.
-argument-hint: "[S-<n> | nome-do-pacote | --all]"
+argument-hint: '"[S-<n> | nome-do-pacote | --all]"'
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *) Bash(npm install *) Bash(npm update *) Bash(npm ls *) Bash(npx tsc *) Bash(npm run *) Bash(git diff *) Read Grep Glob Edit Write
 ---

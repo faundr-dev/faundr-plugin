@@ -1,6 +1,6 @@
 ---
-description: Registra no Faundr um problema de design que o usuário viu (ex.: "o menu da lista abre escondido"). Vira um achado D-n na seção Design do painel.
-argument-hint: <o que você viu e onde>
+description: 'Registra no Faundr um problema de design que o usuário viu (ex.: "o menu da lista abre escondido"). Vira um achado D-n na seção Design do painel.'
+argument-hint: '<o que você viu e onde>'
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *)
 ---

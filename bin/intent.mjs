@@ -83,7 +83,7 @@ export function featureNudge(current) {
     '[Faundr] Este pedido parece trabalho novo de vários passos. Antes de começar:',
     '- Se não for (pergunta, ajuste pequeno, correção pontual), ignore este aviso.',
     current ? `- Se for continuação da funcionalidade atual ("${current}"), só adicione os passos novos: faundr task "<passo>".` : null,
-    '- Se for nova: com o pedido vago (não diz para quem é, o que fica de fora ou como saber que ficou pronto), faça 2 a 3 perguntas curtas numa rodada só, com a ferramenta de perguntas (opções concretas, a recomendada primeiro); com o pedido claro, não pergunte.',
+    '- Se for nova: planeje com a skill faundr:planning antes de construir (ela mede o tamanho, olha o projeto antes de perguntar, faz poucas perguntas com recomendação e mostra um resumo para o dono aprovar; pedido claro e pequeno não precisa de pergunta).',
     '- Registre antes de construir: faundr feature "<título curto>" --desc "<objetivo>" --done-when "<critério>; <critério>" e um faundr task "<passo>" por passo. Com fases (MVP e depois, agora X e depois Y), registre já cada etapa seguinte: faundr feature "<etapa>" --after atual --desc "<o que entra>".',
   ]
     .filter(Boolean)

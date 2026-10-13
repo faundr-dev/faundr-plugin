@@ -1,7 +1,7 @@
 ---
 name: design-showcase
 description: Gera ou atualiza a Vitrine do design no Faundr — réplicas visuais dos componentes do projeto (botões, campos, cards, menus, etiquetas…) com as variantes lado a lado, lidas do design.md e do código de cada componente. Aparecem em Design → Vitrine no painel. Use quando o usuário pedir, ou quando o painel mostrar réplicas desatualizadas.
-argument-hint: "[nome do componente]  (sem argumento: todos os desatualizados e os que faltam)"
+argument-hint: '"[nome do componente]  (sem argumento: todos os desatualizados e os que faltam)"'
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *)
 ---
 

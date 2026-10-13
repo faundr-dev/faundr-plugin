@@ -1,6 +1,6 @@
 ---
 description: Corrige problemas de design registrados no Faundr (D-n) seguindo o design.md e o piso de qualidade e, depois de verificar, marca como resolvidos. Com um número, corrige aquele; sem número, corrige os abertos em ordem (o que quebra o uso primeiro, polimento por último), parando ao fim de cada etapa; com --all, corrige todos de uma vez, sem parar.
-argument-hint: "[D-<n> … | --all]  (sem argumento: todos os abertos, etapa por etapa; --all: todos, sem parar)"
+argument-hint: '"[D-<n> … | --all]  (sem argumento: todos os abertos, etapa por etapa; --all: todos, sem parar)"'
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *) Bash(npx tsc *) Bash(npm run *) Bash(git diff *) Read Grep Glob Edit Write
 ---

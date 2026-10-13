@@ -1,6 +1,6 @@
 ---
 description: Registra uma decisão técnica do time no Faundr (chega aos agentes quando o trabalho passa pelo assunto dela).
-argument-hint: <decisão> [porque ...]
+argument-hint: '<decisão> [porque ...]'
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *)
 ---

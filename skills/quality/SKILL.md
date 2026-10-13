@@ -1,6 +1,6 @@
 ---
 description: Revisão de qualidade do código com IA no projeto ligado ao Faundr — lê o que mudou (ou o projeto inteiro, com --full) atrás do que a checagem automática não enxerga (código demais com o substituto concreto, erro escondido, tipos que não protegem, nomes e funções confusos, comentários que mentem, testes que não protegem, regras do CLAUDE.md desobedecidas) e registra cada problema real como Q-n no painel, só com confiança 80 ou mais. Use quando o usuário pedir uma revisão de qualidade, "o código está bom?", "tem código demais?", ou quando o Faundr sugerir.
-argument-hint: [--full | --files a.ts,b.ts]  (sem argumento: o que mudou)
+argument-hint: '[--full | --files a.ts,b.ts]  (sem argumento: o que mudou)'
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *) Bash(git diff *) Bash(git log *) Read Grep Glob
 ---
 

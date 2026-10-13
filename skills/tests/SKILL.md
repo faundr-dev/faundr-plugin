@@ -1,6 +1,6 @@
 ---
 description: Testes com IA no projeto ligado ao Faundr — pergunta ao dono o que não pode quebrar, liga cada funcionalidade aos testes que a protegem (mapa testes × funcionalidades no painel) e escreve os testes que faltam pelo guia do Faundr (porta da frente, valor esperado escrito à mão, casos vazio/erro/limite, ver o teste falhar antes), rodando com faundr tests-run. Use quando o usuário pedir testes, perguntar se o app está protegido, ou quando a cobertura do que mudou ficar abaixo do resto do projeto.
-argument-hint: [funcionalidade ou arquivo]  (sem argumento: começa pelo que não pode quebrar)
+argument-hint: '[funcionalidade ou arquivo]  (sem argumento: começa pelo que não pode quebrar)'
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *) Bash(npm test*) Bash(npm run *) Bash(npx vitest *) Bash(npx jest *) Bash(npx playwright *) Read Grep Glob Edit Write
 ---
 

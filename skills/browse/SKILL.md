@@ -1,6 +1,6 @@
 ---
 description: Navegador rápido do Faundr — faz uma tarefa num site em segundos (clicar, preencher, buscar, abrir telas) com o Jev escolhendo cada passo, sem print e sem gastar tokens do Claude a cada clique. Use para testar fluxos do app do usuário (login, cadastro, navegação depois do deploy), conferir se uma página abre ou chegar rápido numa tela. Para tarefas que pedem raciocínio sobre o que aparece na tela, ou quando ele travar, use o Claude in Chrome.
-argument-hint: <endereço> <objetivo>
+argument-hint: '<endereço> <objetivo>'
 allowed-tools: Bash(faundr *) Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *)
 ---
 

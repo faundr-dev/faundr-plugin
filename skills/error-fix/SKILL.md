@@ -1,6 +1,6 @@
 ---
 description: Corrige um erro registrado no Faundr (E-n) — erro de build, de tipos, de teste, de lint ou de script que apareceu nos comandos do Claude — e só dá como resolvido quando o mesmo comando volta a passar. Sem argumento, corrige os erros abertos, um de cada vez, começando pelos que voltaram; com --all, corrige todos, sem parar.
-argument-hint: "[E-<n> | --all]"
+argument-hint: '"[E-<n> | --all]"'
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *) Bash(npx tsc *) Bash(npm run *) Bash(npm test*) Bash(git diff *) Bash(git show *) Read Grep Glob Edit Write
 ---

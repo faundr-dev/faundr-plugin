@@ -1,5 +1,5 @@
 ---
-description: "Pronto para lançar?" — testa o banco como visitante (lê, grava, altera e apaga com a chave pública e como outra pessoa logada, desfazendo tudo) e confere o que falta antes de abrir o app ao público (cabeçalhos do site, limite de pedidos, webhook de pagamento, política de privacidade, backup). Use quando o usuário perguntar se pode lançar, publicar, divulgar ou abrir para usuários, ou se o banco/app está seguro.
+description: '"Pronto para lançar?" — testa o banco como visitante (lê, grava, altera e apaga com a chave pública e como outra pessoa logada, desfazendo tudo) e confere o que falta antes de abrir o app ao público (cabeçalhos do site, limite de pedidos, webhook de pagamento, política de privacidade, backup). Use quando o usuário perguntar se pode lançar, publicar, divulgar ou abrir para usuários, ou se o banco/app está seguro.'
 argument-hint: [--url https://site-no-ar]
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *)
 ---

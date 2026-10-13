@@ -1,7 +1,7 @@
 ---
 name: design
 description: Cuida do design do projeto no Faundr — cria o design.md (o guia que padroniza cores, fontes e componentes) quando ele não existe e audita as telas contra ele (tela fora do padrão, componente recriado em vez de reutilizado, bug visual como menu cortado ou sobreposto). Use quando o usuário pedir, quando o Faundr disser que o projeto não tem design.md, ou quando o Faundr pedir a auditoria rápida no fim da resposta.
-argument-hint: "[--files a.tsx,b.tsx]  (sem argumento: auditoria completa)"
+argument-hint: '"[--files a.tsx,b.tsx]  (sem argumento: auditoria completa)"'
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *)
 ---
 

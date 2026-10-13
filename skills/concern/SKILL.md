@@ -1,6 +1,6 @@
 ---
 description: Registra no Faundr uma preocupação — algo que precisa ser revisto depois (não é decisão nem tarefa). Fica em destaque no painel até alguém marcar como resolvida.
-argument-hint: <o que preocupa> [— detalhes, o que revisar]
+argument-hint: '<o que preocupa> [— detalhes, o que revisar]'
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *)
 ---

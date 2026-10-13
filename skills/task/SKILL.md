@@ -1,6 +1,6 @@
 ---
 description: Adiciona uma tarefa ao checklist da funcionalidade atual no Faundr.
-argument-hint: <descrição da tarefa>
+argument-hint: '<descrição da tarefa>'
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *)
 ---

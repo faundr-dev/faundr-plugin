@@ -1,6 +1,6 @@
 ---
 description: Revisão de segurança com IA do projeto ligado ao Faundr — lê o código (rotas, login, acesso a dados, regras do banco, entrada do usuário, limites) atrás do que a checagem automática não enxerga (acesso a dados de outro usuário, rota sem login, RLS mal escrita, lógica de pagamento, rate limit, IA) e registra cada problema real como S-n no painel. Use quando o usuário pedir uma revisão de segurança, antes de publicar o app, ou quando o Faundr sugerir.
-argument-hint: [--files a.ts,b.ts]  (sem argumento: revisão completa)
+argument-hint: '[--files a.ts,b.ts]  (sem argumento: revisão completa)'
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *) Read Grep Glob
 ---
 

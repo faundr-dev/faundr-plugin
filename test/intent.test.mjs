@@ -40,5 +40,5 @@ test('aviso: cita a funcionalidade atual só quando há uma, e pede critério de
   assert.doesNotMatch(featureNudge(null), /funcionalidade atual/)
   assert.match(featureNudge(null), /--done-when/)
   assert.match(featureNudge(null), /--after atual/)
-  assert.match(featureNudge(null), /2 a 3 perguntas/)
+  assert.match(featureNudge(null), /faundr:planning/)
 })

@@ -1,6 +1,6 @@
 ---
 description: Corrige um problema de qualidade registrado no Faundr (Q-n) sem mudar o comportamento do app, e só dá como resolvido quando a checagem não encontra mais o problema (ou, nos da revisão com IA, depois de reler e conferir). Sem argumento, corrige os altos abertos, um de cada vez; com --all, corrige todos os abertos, sem parar.
-argument-hint: "[Q-<n> | --all]"
+argument-hint: '"[Q-<n> | --all]"'
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *) Bash(npm run *) Bash(npx tsc *) Bash(npm uninstall *) Bash(git diff *) Read Grep Glob Edit Write
 ---

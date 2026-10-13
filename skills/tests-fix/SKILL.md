@@ -1,6 +1,6 @@
 ---
 description: Conserta testes falhando ou instáveis registrados no Faundr — explica a falha em português simples, descobre se o erro está no código ou no teste, conserta a causa (nunca apaga, pula ou afrouxa o teste só para passar) e confirma rodando de novo com faundr tests-run. Sem argumento, trabalha nos que estão falhando e instáveis, um de cada vez; com --all, conserta todos, sem parar.
-argument-hint: "[nome do teste ou arquivo | --all]"
+argument-hint: '"[nome do teste ou arquivo | --all]"'
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *) Bash(npm test*) Bash(npm run *) Bash(npx vitest *) Bash(npx jest *) Bash(npx playwright *) Bash(git diff *) Bash(git log *) Read Grep Glob Edit
 ---

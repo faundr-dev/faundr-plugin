@@ -1,6 +1,6 @@
 ---
 description: Escreve as regras e decisões do time num bloco do AGENTS.md (ou CLAUDE.md), para Codex, Cursor e outros agentes que não rodam o Faundr. Desligado por padrão.
-argument-hint: [--file AGENTS.md | --file CLAUDE.md] [--off]
+argument-hint: '[--file AGENTS.md | --file CLAUDE.md] [--off]'
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *)
 ---
