@@ -18,6 +18,7 @@ export const FILES = {
   workflows: 'painel/workflows.json',
   skills: 'painel/skills.json',
   bar: 'painel/bar.json',
+  flows: 'painel/flows.json',
   handover: 'relatorios/PASSAGEM.md',
   securityReport: 'relatorios/relatorio-seguranca.md',
   graph: 'mapa/graph.json',

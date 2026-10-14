@@ -129,6 +129,7 @@ import { graphFooter, rememberTranscript, transcriptUsage, transcriptsToSync } f
 import { dependentsNote, readGraph } from './dependents.mjs'
 import { readSkillIndex, scanSkills, writeSkillIndex } from './skills.mjs'
 import { parseItem, workflowsForFile, workflowsOnce, writeWorkflows } from './workflows.mjs'
+import { stepOff, writeFlows } from './flows.mjs'
 import { forbiddenIn, forbiddenNote, globalRules, readMemoryIndex, readRules, rulesFor, rulesNote, writeMemoryIndex, writeRules } from './rules.mjs'
 import { installStatusline, metersSnapshot, statusFromBoard, statusLine } from './statusline.mjs'
 import { agentsBlock, removeBlock, upsertBlock } from './agents-md.mjs'
@@ -399,23 +400,25 @@ async function gate() {
   const { token, apiUrl } = loadConfig()
   if (!projectId || !token) return
   cleanEditedMarkers()
+  // Passos do workflow padrão "Fim da resposta" que o projeto desligou no painel.
+  const on = (key) => !stepOff(root, key)
 
-  const handoff = needsHandoff(root, sid)
+  const handoff = on('stop.handoff') && needsHandoff(root, sid)
   // Checklist da funcionalidade atual acabou de terminar: anunciar a próxima etapa (uma vez por funcionalidade).
   const featureId = currentFeature(root, sid)
   const step = featureId && readState(root).stepAnnounced !== featureId ? await currentStep(projectId, featureId, token, apiUrl).catch(() => null) : null
-  const finished = step?.feature.finished ? step : null
+  const finished = step?.feature.finished && (on('stop.criteria') || on('stop.next_step')) ? step : null
   if (finished) writeState(root, { stepAnnounced: featureId })
-  const designFiles = designAuditFiles(root, sid)
+  const designFiles = on('stop.design') ? designAuditFiles(root, sid) : []
   if (designFiles.length || readState(root).designAudited?.session !== sid)
     writeState(root, { designAudited: { session: sid, lines: editedLineCount(sid) - 1 } })
   // Visão: uma vez por sessão.
-  const stale = readState(root).overviewNudgedSession === sid ? null : await overviewStale(projectId, token, apiUrl)
+  const stale = !on('stop.overview') || readState(root).overviewNudgedSession === sid ? null : await overviewStale(projectId, token, apiUrl)
   // Stack: só quando já foi revisada e a detecção mudou (pacote, deploy, serviço novo). Uma vez por sessão.
-  const stackStale = readState(root).stackNudgedSession === sid ? null : await overviewStale(projectId, token, apiUrl, 'stack').catch(() => null)
+  const stackStale = !on('stop.stack') || readState(root).stackNudgedSession === sid ? null : await overviewStale(projectId, token, apiUrl, 'stack').catch(() => null)
   // Prova: código mudou e nenhuma checagem passou depois (uma vez por leva de mudanças, só se há o que rodar).
-  const proof = hasChecks(root) ? proofNeeded(CONFIG_DIR, sid) : null
-  const untracked = untrackedWork(root, sid)
+  const proof = on('stop.proof') && hasChecks(root) ? proofNeeded(CONFIG_DIR, sid) : null
+  const untracked = on('stop.untracked') ? untrackedWork(root, sid) : null
   if (!inboxStep && !handoff && !stale && !stackStale && !designFiles.length && !finished && !proof && !untracked) return
   if (untracked) writeState(root, { untrackedNudged: sid })
   if (stale) writeState(root, { overviewNudgedSession: sid })
@@ -450,11 +453,11 @@ async function gate() {
   }
   // Critério de pronto ainda não conferido: confere antes de dar a etapa como terminada.
   const unchecked = (finished?.feature.criteria ?? []).map((c, i) => ({ ...c, n: i + 1 })).filter((c) => c.met !== true)
-  if (finished && unchecked.length)
+  if (finished && on('stop.criteria') && unchecked.length)
     steps.push(
       `antes de dar "${finished.feature.title}" como pronta, confira o critério de pronto combinado com o usuário: ${unchecked.map((c) => `${c.n}. ${c.text}`).join(' ')}. Para cada um, veja de verdade (rode, abra, teste) e registre com faundr criteria-check <nº> --met ou --not-met --note "<como conferiu>"; conte ao usuário o que foi atendido e o que não foi`,
     )
-  if (finished)
+  if (finished && on('stop.next_step'))
     steps.push(
       finished.next.length
         ? `o checklist de "${finished.feature.title}" terminou: diga ao usuário, em 1 a 2 linhas, que a próxima etapa registrada é "${finished.next[0].title}"${finished.next[0].body ? ` (${finished.next[0].body})` : ''} e pergunte se seguimos com ela (para começar: faundr focus "${finished.next[0].title}")`
@@ -560,7 +563,7 @@ async function hook(agent) {
 
 
   // Erros no desenvolvimento: comando de build, tipos, testes, lint ou script que falhou (ou voltou a passar).
-  if ((event === 'PostToolUse' || event === 'PostToolUseFailure') && payload.tool_name === 'Bash')
+  if ((event === 'PostToolUse' || event === 'PostToolUseFailure') && payload.tool_name === 'Bash' && !stepOff(path.dirname(linkFile), 'run.errors'))
     await captureErrors(payload, path.dirname(linkFile), projectId, { token, apiUrl }).catch((err) => log(`errors: ${err.message}`))
 
   // SessionEnd: o hooks.json dá 5 s de orçamento ao hook (o padrão do Claude Code é 1,5 s).
@@ -608,6 +611,8 @@ async function hook(agent) {
   // Escolhas da barra do terminal (o painel liga e desliga cada item): chegam no início, a cada pedido e no fim da
   // resposta, para uma mudança no painel valer sem reiniciar; a barra lê sem rede a cada atualização.
   if (answer.bar !== undefined) fs.writeFileSync(ensureFaundrPath(path.dirname(linkFile), 'bar'), JSON.stringify(answer.bar ?? {}))
+  // Passos dos workflows padrão desligados no painel: o pedido seguinte e o fim da resposta leem sem rede.
+  if (Array.isArray(answer.flows)) writeFlows(path.dirname(linkFile), answer.flows)
   // Plano aprovado virou funcionalidade: passa a ser a atual desta pasta.
   if (answer.currentFeatureId) setCurrentFeature(path.dirname(linkFile), answer.currentFeatureId, payload.session_id)
   if (event === 'SessionStart') {

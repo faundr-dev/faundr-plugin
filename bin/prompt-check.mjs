@@ -20,6 +20,7 @@ import { readTeam, teamPromptNote } from './team.mjs'
 import { takeInbox } from './inbox.mjs'
 import { workflowsForPrompt, workflowsOnce } from './workflows.mjs'
 import { skillsOnce } from './skills.mjs'
+import { stepOff } from './flows.mjs'
 
 function findUp(dir, name) {
   for (let current = path.resolve(dir); ; current = path.dirname(current)) {
@@ -71,19 +72,21 @@ try {
   const root = findUp(payload.cwd ?? process.cwd(), '.faundr.json')
   if (root) {
     const notes = []
-    if (featureIntent(payload.prompt)) notes.push(featureNudge(readState(root).status?.feature?.title ?? null))
-    if (ruleIntent(payload.prompt)) notes.push(ruleNudge())
+    // Passos do workflow padrão "Cada pedido" que o projeto desligou no painel.
+    const on = (key) => !stepOff(root, key)
+    if (on('prompt.feature') && featureIntent(payload.prompt)) notes.push(featureNudge(readState(root).status?.feature?.title ?? null))
+    if (on('prompt.rule') && ruleIntent(payload.prompt)) notes.push(ruleNudge())
     try {
       notes.push(workflowsOnce(root, payload.session_id, (list, ids) => workflowsForPrompt(list, payload.prompt, ids), 'Este pedido'))
     } catch {}
     try {
-      notes.push(skillsOnce(root, payload.session_id, payload.prompt))
+      if (on('prompt.skills')) notes.push(skillsOnce(root, payload.session_id, payload.prompt))
     } catch {}
     try {
       notes.push(relevantOnce(root, payload.session_id, payload.prompt))
     } catch {}
     try {
-      notes.push(teamOnce(root, payload.session_id))
+      if (on('prompt.team')) notes.push(teamOnce(root, payload.session_id))
     } catch {}
     try {
       notes.push(...takeInbox(root, payload.session_id))
