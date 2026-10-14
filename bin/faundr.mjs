@@ -1578,7 +1578,7 @@ async function architectureCheck(args) {
     return data
   }
   const quiet = args.includes('--quiet')
-  const { spec, marked = [] } = await api({ action: 'architecture' })
+  const { spec, marked = [], autoFit = false } = await api({ action: 'architecture' })
   // --pull: grava a arquitetura atual para o agente editar (ex.: pôr uma pasta fora do plano nos paths de uma peça).
   if (args.includes('--pull')) {
     if (!spec) return console.log('O projeto ainda não tem arquitetura (Arquitetura (menu do projeto)).')
@@ -1599,13 +1599,14 @@ async function architectureCheck(args) {
   } catch {}
   // O painel recebe a lista completa e esconde as pastas marcadas como fora de propósito (assim "voltar" devolve a pasta
   // na hora); o aviso no terminal e o resumo daqui já pulam as marcadas.
-  const { names: _, ...outside } = offPlan(spec, files, ignore)
+  const { names: all, ...outside } = offPlan(spec, files, ignore)
   const { names, ...shown } = offPlan(spec, files, ignore, marked)
   // Pasta nova fora do plano: o próximo pedido desta sessão leva o aviso (uma vez; a seguinte já conhece a pasta).
+  // As já vistas incluem as marcadas: desmarcar uma pasta no painel não a torna "nova".
   const fresh = newOffPlan(names, readState(root).offPlanSeen)
   const sid = flag(args, '--session')
-  if (fresh.length && sid) addSessionNotes(root, sid, [offPlanNote(fresh, shown)])
-  writeState(root, { offPlanSeen: names })
+  if (fresh.length && sid) addSessionNotes(root, sid, [offPlanNote(fresh, shown, autoFit)])
+  writeState(root, { offPlanSeen: all })
   const key = JSON.stringify({ built, outside })
   if (readState(root).architectureChecked === key && quiet) return
   await api({ action: 'built', built, offPlan: outside })
@@ -1617,12 +1618,20 @@ async function architectureCheck(args) {
     console.log(`Fora do plano (${shown.total} arquivos de código em nenhuma parte): ${shown.folders.map((f) => `${f.folder} (${f.files})`).join(', ')}${shown.more ? ` e mais ${shown.more} pasta(s)` : ''}.`)
 }
 
-function offPlanNote(fresh, outside) {
+function offPlanNote(fresh, outside, autoFit = false) {
   const count = new Map(outside.folders.map((f) => [f.folder, f.files]))
   const list = fresh
     .slice(0, 5)
     .map((f) => (count.has(f) ? `${f} (${count.get(f)} arquivo${count.get(f) === 1 ? '' : 's'})` : f))
     .join(', ')
+  // Encaixe sozinho (ligado pelo dono no painel): o Claude encaixa sem perguntar e só avisa onde pôs.
+  if (autoFit)
+    return (
+      `apareceu código fora da arquitetura do projeto: ${list}${fresh.length > 5 ? ' e outras' : ''}. O dono ligou o encaixe sozinho: ` +
+      'olhe o código da pasta e ponha cada uma na parte mais provável da arquitetura, sem perguntar (faundr architecture-check --pull, ' +
+      'acrescente a pasta nos paths da parte e faundr diagram-save .faundr/painel/architecture.json --architecture). Se nenhuma parte servir, ' +
+      'não crie parte nova sozinho: sugira ao usuário. Depois diga em uma linha onde pôs cada pasta (ele pode pedir para mudar).'
+    )
   return (
     `apareceu código fora da arquitetura do projeto: ${list}${fresh.length > 5 ? ' e outras' : ''}. Diga isso ao usuário em uma linha e sugira, ` +
     'olhando o código, se cabe numa parte que já existe (diga qual) ou se vira uma parte nova. Só mude a arquitetura com o OK dele: ' +
