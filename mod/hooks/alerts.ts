@@ -35,25 +35,36 @@ export function alertsFor(m: Measure, prefs: Prefs, seen: string[], now = Date.n
   const toasts: string[] = []
   const ctx = m.context?.percent
   if (typeof ctx === 'number') {
-    if (ctx < 50) for (const k of [...next]) if (k.startsWith('ctx:')) next.delete(k)
-    const hit = [...THRESHOLDS].reverse().find((t) => ctx >= t)
-    if (hit && on(prefs, 'contexto') && !next.has(`ctx:${hit}`)) {
-      toasts.push(hit >= 95 ? `Contexto em ${Math.round(ctx)}%: use /compact já, ou o Claude vai resumir a conversa sozinho` : `Contexto em ${Math.round(ctx)}%: hora de /compact`)
-      for (const t of THRESHOLDS) if (t <= hit) next.add(`ctx:${t}`)
-    }
+    const toast = contextAlert(ctx, prefs, next)
+    if (toast) toasts.push(toast)
   }
   for (const l of m.rateLimits ?? []) {
-    const label = LABEL[l.kind]
-    const item = ITEM[l.kind]
-    if (!label || !item || !on(prefs, item)) continue
-    const hit = [...THRESHOLDS].reverse().find((t) => l.percentUsed >= t)
-    const key = (t: number) => `${l.kind}:${t}:${l.resetsAt ?? ''}`
-    if (!hit || next.has(key(hit))) continue
-    const at = resetText(l.resetsAt, now)
-    toasts.push(`${label} em ${Math.round(l.percentUsed)}%${at ? `: zera ${at.includes(' ') ? at : `às ${at}`}` : ''}`)
-    for (const t of THRESHOLDS) if (t <= hit) next.add(key(t))
+    const toast = limitAlert(l, prefs, next, now)
+    if (toast) toasts.push(toast)
   }
   return { toasts, seen: [...next] }
+}
+
+// Aviso do contexto (ou null), marcando em `next` os níveis já avisados; abaixo de 50% (depois de /compact) volta a valer.
+function contextAlert(ctx: number, prefs: Prefs, next: Set<string>) {
+  if (ctx < 50) for (const k of [...next]) if (k.startsWith('ctx:')) next.delete(k)
+  const hit = [...THRESHOLDS].reverse().find((t) => ctx >= t)
+  if (!hit || !on(prefs, 'contexto') || next.has(`ctx:${hit}`)) return null
+  for (const t of THRESHOLDS) if (t <= hit) next.add(`ctx:${t}`)
+  return hit >= 95 ? `Contexto em ${Math.round(ctx)}%: use /compact já, ou o Claude vai resumir a conversa sozinho` : `Contexto em ${Math.round(ctx)}%: hora de /compact`
+}
+
+// Aviso de uma janela de uso (ou null), marcando em `next` os níveis já avisados até ela zerar.
+function limitAlert(l: Limit, prefs: Prefs, next: Set<string>, now: number) {
+  const label = LABEL[l.kind]
+  const item = ITEM[l.kind]
+  if (!label || !item || !on(prefs, item)) return null
+  const hit = [...THRESHOLDS].reverse().find((t) => l.percentUsed >= t)
+  const key = (t: number) => `${l.kind}:${t}:${l.resetsAt ?? ''}`
+  if (!hit || next.has(key(hit))) return null
+  const at = resetText(l.resetsAt, now)
+  for (const t of THRESHOLDS) if (t <= hit) next.add(key(t))
+  return `${label} em ${Math.round(l.percentUsed)}%${at ? `: zera ${at.includes(' ') ? at : `às ${at}`}` : ''}`
 }
 
 /** Barra de 5 blocos (a mesma da linha de status). */

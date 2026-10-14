@@ -44,6 +44,7 @@ function ignoreList(root) {
       .map((l) => l.trim().replace(/\\/g, '/'))
       .filter((l) => l && !l.startsWith('#'))
   } catch {
+    // Sem .faundrignore (o normal): nada a ignorar.
     return []
   }
 }
@@ -293,7 +294,9 @@ export function lintProject(root) {
   let tokens = null
   try {
     tokens = extractTokens(root, designMdPath)
-  } catch {}
+  } catch {
+    // De propósito: sem tokens a Vitrine fica vazia, mas a checagem segue (contraste do design.md fica de fora).
+  }
   // Regras da fase 2 (identidade, responsivo, acessibilidade, contraste, movimento, conteúdo, consistência).
   let rules = { findings: [], ignored: 0 }
   try {
@@ -317,7 +320,9 @@ export function projectThemes(root) {
   let tokens = null
   try {
     tokens = extractTokens(root, findDesignMd(root))
-  } catch {}
+  } catch {
+    // De propósito: sem tokens o tema principal sai só dos sinais do código.
+  }
   return detectThemes(root, { uiExt: UI_EXT, tokens })
 }
 

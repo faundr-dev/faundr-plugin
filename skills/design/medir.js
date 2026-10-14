@@ -1,60 +1,10 @@
 // Medição de design do Faundr: roda na página aberta (Claude in Chrome → javascript_tool), na largura atual da
 // janela, e devolve um JSON com números objetivos. Não muda nada na página. Limiares: piso de qualidade (piso.md).
-;(() => {
+// As medidas ficam nesta função; as ferramentas (visível, cor, contraste, fundo) vêm prontas da função de baixo.
+;(({ visible, describe, label, rgba, ratio, hex, backgroundOf }) => {
   const W = window.innerWidth
   const mobile = W < 768
   const all = [...document.querySelectorAll('body *')].slice(0, 6000)
-
-  const visible = (el) => {
-    const s = getComputedStyle(el)
-    if (s.display === 'none' || s.visibility === 'hidden' || Number(s.opacity) < 0.05) return false
-    const r = el.getBoundingClientRect()
-    return r.width > 0 && r.height > 0
-  }
-  const describe = (el) => {
-    let s = el.tagName.toLowerCase()
-    if (el.id) return `${s}#${el.id}`
-    const cls = [...el.classList].filter((c) => !/[[\]:/]/.test(c)).slice(0, 3)
-    if (cls.length) s += '.' + cls.join('.')
-    return s
-  }
-  const label = (el) =>
-    (el.getAttribute('aria-label') || el.innerText || el.getAttribute('title') || el.getAttribute('placeholder') || '')
-      .trim()
-      .replace(/\s+/g, ' ')
-      .slice(0, 30)
-
-  // Qualquer cor CSS (rgb, oklch, color()) → [r, g, b, a] desenhando 1 pixel.
-  const ctx = Object.assign(document.createElement('canvas'), { width: 1, height: 1 }).getContext('2d', { willReadFrequently: true })
-  const rgba = (c) => {
-    ctx.clearRect(0, 0, 1, 1)
-    ctx.fillStyle = 'rgba(0,0,0,0)'
-    ctx.fillStyle = c
-    ctx.fillRect(0, 0, 1, 1)
-    const d = ctx.getImageData(0, 0, 1, 1).data
-    return [d[0] / 255, d[1] / 255, d[2] / 255, d[3] / 255]
-  }
-  const lum = ([r, g, b]) =>
-    [r, g, b].map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)).reduce((s, c, i) => s + c * [0.2126, 0.7152, 0.0722][i], 0)
-  const ratio = (a, b) => {
-    const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p)
-    return (x + 0.05) / (y + 0.05)
-  }
-  const hex = ([r, g, b]) => '#' + [r, g, b].map((n) => Math.round(n * 255).toString(16).padStart(2, '0')).join('')
-  // Fundo de verdade: sobe pelos pais somando camadas até ficar opaco (imagem/degradê = não dá para calcular).
-  const backgroundOf = (el) => {
-    const layers = []
-    for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
-      const s = getComputedStyle(n)
-      if (s.backgroundImage && s.backgroundImage !== 'none') return null
-      const c = rgba(s.backgroundColor)
-      if (c[3] > 0) layers.push(c)
-      if (c[3] >= 0.99) break
-    }
-    let out = [1, 1, 1]
-    for (const c of layers.reverse()) out = out.map((v, i) => v * (1 - c[3]) + c[i] * c[3])
-    return out
-  }
 
   // 1. Rolagem para o lado: quem passa da borda (sem estar dentro de uma caixa que rola ou corta).
   const docW = document.documentElement.scrollWidth
@@ -151,4 +101,58 @@
     lento: slow,
     borda: edge,
   })
-})()
+})(
+  (() => {
+    const visible = (el) => {
+      const s = getComputedStyle(el)
+      if (s.display === 'none' || s.visibility === 'hidden' || Number(s.opacity) < 0.05) return false
+      const r = el.getBoundingClientRect()
+      return r.width > 0 && r.height > 0
+    }
+    const describe = (el) => {
+      let s = el.tagName.toLowerCase()
+      if (el.id) return `${s}#${el.id}`
+      const cls = [...el.classList].filter((c) => !/[[\]:/]/.test(c)).slice(0, 3)
+      if (cls.length) s += '.' + cls.join('.')
+      return s
+    }
+    const label = (el) =>
+      (el.getAttribute('aria-label') || el.innerText || el.getAttribute('title') || el.getAttribute('placeholder') || '')
+        .trim()
+        .replace(/\s+/g, ' ')
+        .slice(0, 30)
+
+    // Qualquer cor CSS (rgb, oklch, color()) → [r, g, b, a] desenhando 1 pixel.
+    const ctx = Object.assign(document.createElement('canvas'), { width: 1, height: 1 }).getContext('2d', { willReadFrequently: true })
+    const rgba = (c) => {
+      ctx.clearRect(0, 0, 1, 1)
+      ctx.fillStyle = 'rgba(0,0,0,0)'
+      ctx.fillStyle = c
+      ctx.fillRect(0, 0, 1, 1)
+      const d = ctx.getImageData(0, 0, 1, 1).data
+      return [d[0] / 255, d[1] / 255, d[2] / 255, d[3] / 255]
+    }
+    const lum = ([r, g, b]) =>
+      [r, g, b].map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)).reduce((s, c, i) => s + c * [0.2126, 0.7152, 0.0722][i], 0)
+    const ratio = (a, b) => {
+      const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p)
+      return (x + 0.05) / (y + 0.05)
+    }
+    const hex = ([r, g, b]) => '#' + [r, g, b].map((n) => Math.round(n * 255).toString(16).padStart(2, '0')).join('')
+    // Fundo de verdade: sobe pelos pais somando camadas até ficar opaco (imagem/degradê = não dá para calcular).
+    const backgroundOf = (el) => {
+      const layers = []
+      for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
+        const s = getComputedStyle(n)
+        if (s.backgroundImage && s.backgroundImage !== 'none') return null
+        const c = rgba(s.backgroundColor)
+        if (c[3] > 0) layers.push(c)
+        if (c[3] >= 0.99) break
+      }
+      let out = [1, 1, 1]
+      for (const c of layers.reverse()) out = out.map((v, i) => v * (1 - c[3]) + c[i] * c[3])
+      return out
+    }
+    return { visible, describe, label, rgba, ratio, hex, backgroundOf }
+  })(),
+)

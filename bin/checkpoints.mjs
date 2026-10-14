@@ -52,6 +52,7 @@ export function currentTree(root) {
     try {
       return fs.lstatSync(path.join(root, f)).isFile()
     } catch {
+      // Sumiu entre a listagem e agora (ou não dá para ler): fica fora do ponto.
       return false
     }
   })
@@ -67,7 +68,9 @@ export function currentTree(root) {
   } finally {
     try {
       fs.unlinkSync(tmp)
-    } catch {}
+    } catch {
+      // Índice temporário já apagado ou preso: é só um arquivo em tmp, não afeta o ponto.
+    }
   }
 }
 
@@ -119,7 +122,9 @@ export function createCheckpoint(root, { reason = 'ponto de volta', session = nu
   let head = null
   try {
     head = git(root, ['rev-parse', '--verify', '-q', 'HEAD']).trim() || null
-  } catch {}
+  } catch {
+    // Repositório sem commit ainda: o ponto nasce sem pai.
+  }
   const message = [`faundr: ${reason.replace(/\s+/g, ' ').slice(0, 200)}`, '', session && `session: ${session}`].filter((l) => l !== null && l !== undefined && l !== false).join('\n')
   const commit = git(root, ['commit-tree', tree, ...(head ? ['-p', head] : []), '-F', '-'], { env: { ...process.env, ...IDENTITY }, input: message }).trim()
   let stamp = now
@@ -171,7 +176,9 @@ export function restoreCheckpoint(root, checkpoint, { session = null } = {}) {
     const file = path.join(root, rel)
     try {
       fs.unlinkSync(file)
-    } catch {}
+    } catch {
+      // Já não existia ou está preso: o resto da volta segue.
+    }
     // Pastas que ficaram vazias saem também.
     let dir = path.dirname(file)
     while (dir.startsWith(root) && dir !== root) {
@@ -196,7 +203,9 @@ export function ensureSessionCheckpoint(cwd, sessionId, { configDir, reason = 'a
   let last = 0
   try {
     last = Number(fs.readFileSync(marker, 'utf8')) || 0
-  } catch {}
+  } catch {
+    // Primeira vez nesta sessão (sem marcador).
+  }
   if (last && now - last < every) return null
   fs.mkdirSync(configDir, { recursive: true })
   fs.writeFileSync(marker, String(now))
@@ -212,7 +221,9 @@ function cleanMarkers(configDir, now) {
       const file = path.join(configDir, f)
       if (now - fs.statSync(file).mtimeMs > 2 * 24 * 3600_000) fs.unlinkSync(file)
     }
-  } catch {}
+  } catch {
+    // Limpeza dos marcadores antigos é só faxina: falhar não muda o ponto criado.
+  }
 }
 
 // O que voltar para o ponto faz com os arquivos, em português simples, para o usuário decidir.

@@ -109,12 +109,32 @@ export function organizeFaundrDir(root) {
       fs.mkdirSync(path.dirname(to), { recursive: true })
       fs.renameSync(from, to)
       moved++
-    } catch {}
+    } catch {
+      // Arquivo preso (outro programa aberto) ou sem permissão: fica no nome antigo e tenta de novo na próxima vez.
+    }
   }
   const readme = path.join(dir, 'LEIA-ME.md')
   try {
     const cur = fs.existsSync(readme) ? fs.readFileSync(readme, 'utf8') : ''
     if (!cur.startsWith(`<!-- faundr-leia-me v${README_VERSION} -->`)) fs.writeFileSync(readme, README)
-  } catch {}
+  } catch {
+    // O LEIA-ME é só explicação: sem gravar, a pasta funciona igual.
+  }
   return moved
+}
+// ---------- entrada dos hooks ----------
+
+/** Sobe a partir de `dir` até a pasta que tem `name` (devolve a pasta, ou null). */
+export function findDirWith(dir, name) {
+  for (let current = path.resolve(dir); ; current = path.dirname(current)) {
+    if (fs.existsSync(path.join(current, name))) return current
+    if (path.dirname(current) === current) return null
+  }
+}
+
+/** Tudo o que o Claude Code mandou para o hook pela entrada padrão. */
+export async function readStdin() {
+  let data = ''
+  for await (const chunk of process.stdin) data += chunk
+  return data
 }

@@ -12,8 +12,7 @@
 //
 // Regra de ouro dos hooks: nunca quebrar o agente. Qualquer erro → sai em silêncio.
 import fs from 'node:fs'
-import path from 'node:path'
-import { faundrPath } from './paths.mjs'
+import { faundrPath, findDirWith, readStdin } from './paths.mjs'
 import { featureIntent, featureNudge, ruleIntent, ruleNudge } from './intent.mjs'
 import { memoryNote, readMemoryIndex, relevantMemory } from './rules.mjs'
 import { readTeam, teamPromptNote } from './team.mjs'
@@ -22,23 +21,11 @@ import { workflowsForPrompt, workflowsOnce } from './workflows.mjs'
 import { skillsOnce } from './skills.mjs'
 import { skillStepsNote, stepOff } from './flows.mjs'
 
-function findUp(dir, name) {
-  for (let current = path.resolve(dir); ; current = path.dirname(current)) {
-    if (fs.existsSync(path.join(current, name))) return current
-    if (path.dirname(current) === current) return null
-  }
-}
-
-async function readStdin() {
-  let data = ''
-  for await (const chunk of process.stdin) data += chunk
-  return data
-}
-
 const readState = (root) => {
   try {
     return JSON.parse(fs.readFileSync(faundrPath(root, 'state'), 'utf8'))
   } catch {
+    // Sem estado salvo (ou ilegível): começa do zero.
     return {}
   }
 }
@@ -69,7 +56,7 @@ function teamOnce(root, sid) {
 
 try {
   const payload = JSON.parse(await readStdin())
-  const root = findUp(payload.cwd ?? process.cwd(), '.faundr.json')
+  const root = findDirWith(payload.cwd ?? process.cwd(), '.faundr.json')
   if (root) {
     const notes = []
     // Passos do workflow padrão "Cada pedido" que o projeto desligou no painel.
@@ -81,20 +68,32 @@ try {
     if (typed) notes.push(skillStepsNote(root, typed[1]))
     try {
       notes.push(workflowsOnce(root, payload.session_id, (list, ids) => workflowsForPrompt(list, payload.prompt, ids), 'Este pedido'))
-    } catch {}
+    } catch {
+      // Um aviso que falha não impede os outros (o hook nunca quebra o agente).
+    }
     try {
       if (on('prompt.skills')) notes.push(skillsOnce(root, payload.session_id, payload.prompt))
-    } catch {}
+    } catch {
+      // Um aviso que falha não impede os outros (o hook nunca quebra o agente).
+    }
     try {
       notes.push(relevantOnce(root, payload.session_id, payload.prompt))
-    } catch {}
+    } catch {
+      // Um aviso que falha não impede os outros (o hook nunca quebra o agente).
+    }
     try {
       if (on('prompt.team')) notes.push(teamOnce(root, payload.session_id))
-    } catch {}
+    } catch {
+      // Um aviso que falha não impede os outros (o hook nunca quebra o agente).
+    }
     try {
       notes.push(...takeInbox(root, payload.session_id))
-    } catch {}
+    } catch {
+      // Um aviso que falha não impede os outros (o hook nunca quebra o agente).
+    }
     const additionalContext = notes.filter(Boolean).join('\n\n')
     if (additionalContext) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext } }))
   }
-} catch {}
+} catch {
+  // Regra de ouro dos hooks: qualquer erro sai em silêncio para não quebrar o agente.
+}

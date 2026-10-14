@@ -13,6 +13,7 @@ export function readWorkflows(root) {
     const list = JSON.parse(fs.readFileSync(file(root), 'utf8'))
     return Array.isArray(list) ? list : []
   } catch {
+    // Sem cópia local dos workflows (ou ilegível): nenhum workflow.
     return []
   }
 }
@@ -71,6 +72,7 @@ const readState = (root) => {
   try {
     return JSON.parse(fs.readFileSync(faundrPath(root, 'state'), 'utf8'))
   } catch {
+    // Sem estado salvo (ou ilegível): começa do zero.
     return {}
   }
 }

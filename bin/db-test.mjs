@@ -52,6 +52,7 @@ export async function exposedTables(target, { fetchImpl = fetch } = {}) {
       .map((p) => p.replace(/^\//, ''))
       .filter((p) => p && !p.startsWith('rpc/'))
   } catch {
+    // Sem rede ou API que não lista: quem chama cai nas tabelas das migrações.
     return []
   }
 }
@@ -77,6 +78,12 @@ export function migrationTables(root) {
 
 const SENSITIVE = /(e_?mail|phone|telefone|celular|cpf|cnpj|rg\b|password|senha|token|secret|segredo|address|endereco|endereço|birth|nascimento|salary|salario|card|cartao|cartão|iban|ssn|api_?key)/i
 
+// Total pelo content-range; sem ele, as linhas que vieram.
+function visibleCount(total, rows) {
+  if (Number.isFinite(total)) return total
+  return Array.isArray(rows) ? rows.length : 0
+}
+
 /** Lê cada tabela como visitante: [{ table, status, visible, columns, sensitive }]. Só leitura (GET). */
 export async function anonReads(target, tables, { fetchImpl = fetch } = {}) {
   const out = []
@@ -90,13 +97,16 @@ export async function anonReads(target, tables, { fetchImpl = fetch } = {}) {
         out.push({ table, status: res.status, visible: 0, columns: [], sensitive: [] })
         continue
       }
-      const rows = await res.json().catch(() => [])
+      const rows = await res.json().catch(() => {
+        // Resposta sem JSON: conta como nenhuma linha visível (o total vem do content-range).
+        return []
+      })
       const total = Number(res.headers.get('content-range')?.split('/')[1])
       const columns = Array.isArray(rows) && rows[0] ? Object.keys(rows[0]) : []
       out.push({
         table,
         status: res.status,
-        visible: Number.isFinite(total) ? total : Array.isArray(rows) ? rows.length : 0,
+        visible: visibleCount(total, rows),
         columns,
         sensitive: columns.filter((c) => SENSITIVE.test(c)),
       })
@@ -216,7 +226,9 @@ export function parseProbe(data) {
   if (typeof data === 'string') {
     try {
       return parseProbe(JSON.parse(data))
-    } catch {}
+    } catch {
+      // Não é JSON puro: procura o JSON no meio do texto logo abaixo.
+    }
     // Texto do MCP: o JSON vem no meio de um aviso.
     const m = data.match(/\[\s*\{[\s\S]*\}\s*\]/)
     if (!m) throw new Error('Não achei o resultado do teste (JSON com "result").')
@@ -255,6 +267,109 @@ function finding({ table, kind, severity, title, detail, impact, fix }) {
 const POLICY_FIX = (table) =>
   `Ative a proteção por linha e crie regras que liberem só o dono: alter table public.${table} enable row level security; e, por exemplo, create policy "dono lê" on public.${table} for select to authenticated using (auth.uid() = user_id). Se a tabela é pública de propósito (produtos, posts), libere só a leitura e marque este aviso como "não é problema".`
 
+// Linhas que o visitante vê: pela API do site (leitura com a chave pública) ou pelo teste no SQL.
+function anonVisibleCount(r, t) {
+  if (r && r.status === 200 && r.visible > 0) return r.visible
+  return allowed(t?.anon?.select) ? t.anon.select : 0
+}
+
+function anonReadFinding(name, r, view, anonVisible) {
+  const sensitive = r?.sensitive ?? []
+  return finding({
+    table: name,
+    kind: 'anon-le',
+    severity: sensitive.length ? 'critical' : 'high',
+    title: `Qualquer visitante lê a ${view ? 'visão' : 'tabela'} ${name} (${anonVisible >= 1000 ? '1000+' : anonVisible} linha${anonVisible > 1 ? 's' : ''})`,
+    detail: `O Faundr leu ${name} com a chave pública (a que vai para o navegador), sem login${r?.status === 200 ? ', pela API do site' : ''}.${sensitive.length ? ` Tem colunas que parecem dados pessoais ou segredos: ${sensitive.join(', ')}.` : ''}${view ? ' Visões ignoram a proteção por linha das tabelas, a não ser que sejam criadas com security_invoker.' : ''}`,
+    impact: 'Qualquer pessoa que abrir o site pode copiar esses dados com a chave que está no código do navegador.',
+    fix: view ? `Recrie a visão com (security_invoker = true) ou tire o acesso: revoke select on public.${name} from anon;` : POLICY_FIX(name),
+  })
+}
+
+function anonInsertFinding(name, a) {
+  return finding({
+    table: name,
+    kind: 'anon-grava',
+    severity: 'critical',
+    title: `Qualquer visitante grava na tabela ${name}`,
+    detail: `Sem login, o Faundr conseguiu ${a.insert === 'ok' ? 'gravar uma linha' : 'passar pela proteção ao gravar (só parou por faltar dado)'} em ${name}. A gravação foi desfeita na hora.`,
+    impact: 'Qualquer pessoa pode encher a tabela de lixo ou dados falsos usando a chave pública.',
+    fix: POLICY_FIX(name),
+  })
+}
+
+// Alterar e apagar o que não é seu: como visitante (anon) e como outra pessoa logada (user).
+function changeFindings(name, a, u) {
+  const out = []
+  for (const [who, res, sev] of [
+    ['anon', a, 'critical'],
+    ['user', u, 'critical'],
+  ]) {
+    const label = who === 'anon' ? 'Qualquer visitante' : 'Qualquer pessoa logada'
+    const as = who === 'anon' ? 'Sem login' : 'Logado como uma pessoa nova, sem nenhum dado'
+    if (allowed(res.update))
+      out.push(
+        finding({
+          table: name,
+          kind: `${who}-altera`,
+          severity: sev,
+          title: `${label} altera dados dos outros na tabela ${name}`,
+          detail: `${as}, o Faundr conseguiu alterar uma linha que não era dele em ${name}. A mudança foi desfeita na hora.`,
+          impact: 'Alguém mal-intencionado pode mudar preços, permissões ou dados de outras pessoas.',
+          fix: `Na regra de update, use using (auth.uid() = user_id) with check (auth.uid() = user_id) em vez de true. ${POLICY_FIX(name)}`,
+        }),
+      )
+    if (allowed(res.delete))
+      out.push(
+        finding({
+          table: name,
+          kind: `${who}-apaga`,
+          severity: sev,
+          title: `${label} apaga dados dos outros na tabela ${name}`,
+          detail: `${as}, o Faundr conseguiu apagar uma linha que não era dele em ${name}. O apagamento foi desfeito na hora.`,
+          impact: 'Alguém mal-intencionado pode apagar os dados de todo mundo.',
+          fix: `Na regra de delete, use using (auth.uid() = user_id) em vez de true. ${POLICY_FIX(name)}`,
+        }),
+      )
+  }
+  return out
+}
+
+function userReadFinding(name, u) {
+  return finding({
+    table: name,
+    kind: 'user-le',
+    severity: 'medium',
+    title: `Qualquer pessoa logada lê a tabela ${name} inteira`,
+    detail: `Logado como uma pessoa nova, sem nenhum dado, o Faundr viu ${u.select >= 1000 ? '1000+' : u.select} linha(s) de ${name}. Se são dados de cada usuário, todo mundo vê os de todo mundo.`,
+    impact: 'Basta criar uma conta para ver os dados das outras pessoas.',
+    fix: `Se cada linha é de um usuário, troque a regra de select por using (auth.uid() = user_id). Se é para todos verem (perfis públicos, catálogo), marque este aviso como "não é problema".`,
+  })
+}
+
+// Por que uma tabela vazia está aberta (ou null se não está).
+function emptyOpenReason(t) {
+  if (!t.rls) return 'está sem proteção por linha (RLS desligado)'
+  const liberal = (t.policies ?? []).some((p) => (p.roles ?? []).some((x) => x === 'public' || x === 'anon') && (ALWAYS_TRUE.test(p.using ?? '') || ALWAYS_TRUE.test(p.check ?? '')))
+  return liberal ? 'tem regra liberando tudo (true) para visitantes' : null
+}
+
+// Tabela vazia: o teste não prova nada; a regra escrita "true" ou sem proteção fica como aviso.
+function emptyOpenFinding(name, t) {
+  if (!(t.rows === 0 && (t.kind === 'r' || t.kind === 'p'))) return null
+  const open = emptyOpenReason(t)
+  if (!open) return null
+  return finding({
+    table: name,
+    kind: 'vazia-aberta',
+    severity: 'high',
+    title: `Tabela ${name} vazia e aberta: ${open}`,
+    detail: `A tabela ainda não tem dados, então o teste não conseguiu ler nada, mas ela ${open}. Quando os dados chegarem, visitantes vão ver.`,
+    impact: 'Os primeiros dados reais ficam expostos assim que o app for usado.',
+    fix: POLICY_FIX(name),
+  })
+}
+
 /**
  * Junta a leitura pela API (reads) e o teste pelo SQL (tables) em achados.
  * reads: [{ table, status, visible, columns, sensitive }] · tables: saída do PROBE_SQL (ou null se não rodou).
@@ -268,98 +383,16 @@ export function dbFindings({ reads = [], tables = null }) {
     const r = readOf.get(name)
     const t = sqlOf.get(name)
     const view = t && (t.kind === 'v' || t.kind === 'm')
-    const anonVisible = r && r.status === 200 && r.visible > 0 ? r.visible : allowed(t?.anon?.select) ? t.anon.select : 0
-    if (anonVisible) {
-      const sensitive = r?.sensitive ?? []
-      out.push(
-        finding({
-          table: name,
-          kind: 'anon-le',
-          severity: sensitive.length ? 'critical' : 'high',
-          title: `Qualquer visitante lê a ${view ? 'visão' : 'tabela'} ${name} (${anonVisible >= 1000 ? '1000+' : anonVisible} linha${anonVisible > 1 ? 's' : ''})`,
-          detail: `O Faundr leu ${name} com a chave pública (a que vai para o navegador), sem login${r?.status === 200 ? ', pela API do site' : ''}.${sensitive.length ? ` Tem colunas que parecem dados pessoais ou segredos: ${sensitive.join(', ')}.` : ''}${view ? ' Visões ignoram a proteção por linha das tabelas, a não ser que sejam criadas com security_invoker.' : ''}`,
-          impact: 'Qualquer pessoa que abrir o site pode copiar esses dados com a chave que está no código do navegador.',
-          fix: view ? `Recrie a visão com (security_invoker = true) ou tire o acesso: revoke select on public.${name} from anon;` : POLICY_FIX(name),
-        }),
-      )
-    }
+    const anonVisible = anonVisibleCount(r, t)
+    if (anonVisible) out.push(anonReadFinding(name, r, view, anonVisible))
     if (!t) continue
     const a = t.anon ?? {}
     const u = t.user ?? {}
-    if (passedRls(a.insert))
-      out.push(
-        finding({
-          table: name,
-          kind: 'anon-grava',
-          severity: 'critical',
-          title: `Qualquer visitante grava na tabela ${name}`,
-          detail: `Sem login, o Faundr conseguiu ${a.insert === 'ok' ? 'gravar uma linha' : 'passar pela proteção ao gravar (só parou por faltar dado)'} em ${name}. A gravação foi desfeita na hora.`,
-          impact: 'Qualquer pessoa pode encher a tabela de lixo ou dados falsos usando a chave pública.',
-          fix: POLICY_FIX(name),
-        }),
-      )
-    for (const [who, res, sev] of [
-      ['anon', a, 'critical'],
-      ['user', u, 'critical'],
-    ]) {
-      const label = who === 'anon' ? 'Qualquer visitante' : 'Qualquer pessoa logada'
-      if (allowed(res.update))
-        out.push(
-          finding({
-            table: name,
-            kind: `${who}-altera`,
-            severity: sev,
-            title: `${label} altera dados dos outros na tabela ${name}`,
-            detail: `${who === 'anon' ? 'Sem login' : 'Logado como uma pessoa nova, sem nenhum dado'}, o Faundr conseguiu alterar uma linha que não era dele em ${name}. A mudança foi desfeita na hora.`,
-            impact: 'Alguém mal-intencionado pode mudar preços, permissões ou dados de outras pessoas.',
-            fix: `Na regra de update, use using (auth.uid() = user_id) with check (auth.uid() = user_id) em vez de true. ${POLICY_FIX(name)}`,
-          }),
-        )
-      if (allowed(res.delete))
-        out.push(
-          finding({
-            table: name,
-            kind: `${who}-apaga`,
-            severity: sev,
-            title: `${label} apaga dados dos outros na tabela ${name}`,
-            detail: `${who === 'anon' ? 'Sem login' : 'Logado como uma pessoa nova, sem nenhum dado'}, o Faundr conseguiu apagar uma linha que não era dele em ${name}. O apagamento foi desfeito na hora.`,
-            impact: 'Alguém mal-intencionado pode apagar os dados de todo mundo.',
-            fix: `Na regra de delete, use using (auth.uid() = user_id) em vez de true. ${POLICY_FIX(name)}`,
-          }),
-        )
-    }
-    if (allowed(u.select) && !anonVisible && t.rows > 0)
-      out.push(
-        finding({
-          table: name,
-          kind: 'user-le',
-          severity: 'medium',
-          title: `Qualquer pessoa logada lê a tabela ${name} inteira`,
-          detail: `Logado como uma pessoa nova, sem nenhum dado, o Faundr viu ${u.select >= 1000 ? '1000+' : u.select} linha(s) de ${name}. Se são dados de cada usuário, todo mundo vê os de todo mundo.`,
-          impact: 'Basta criar uma conta para ver os dados das outras pessoas.',
-          fix: `Se cada linha é de um usuário, troque a regra de select por using (auth.uid() = user_id). Se é para todos verem (perfis públicos, catálogo), marque este aviso como "não é problema".`,
-        }),
-      )
-    // Tabela vazia: o teste não prova nada; a regra escrita "true" ou sem proteção fica como aviso.
-    if (t.rows === 0 && (t.kind === 'r' || t.kind === 'p')) {
-      const open = !t.rls
-        ? 'está sem proteção por linha (RLS desligado)'
-        : (t.policies ?? []).some((p) => (p.roles ?? []).some((x) => x === 'public' || x === 'anon') && (ALWAYS_TRUE.test(p.using ?? '') || ALWAYS_TRUE.test(p.check ?? '')))
-          ? 'tem regra liberando tudo (true) para visitantes'
-          : null
-      if (open)
-        out.push(
-          finding({
-            table: name,
-            kind: 'vazia-aberta',
-            severity: 'high',
-            title: `Tabela ${name} vazia e aberta: ${open}`,
-            detail: `A tabela ainda não tem dados, então o teste não conseguiu ler nada, mas ela ${open}. Quando os dados chegarem, visitantes vão ver.`,
-            impact: 'Os primeiros dados reais ficam expostos assim que o app for usado.',
-            fix: POLICY_FIX(name),
-          }),
-        )
-    }
+    if (passedRls(a.insert)) out.push(anonInsertFinding(name, a))
+    out.push(...changeFindings(name, a, u))
+    if (allowed(u.select) && !anonVisible && t.rows > 0) out.push(userReadFinding(name, u))
+    const empty = emptyOpenFinding(name, t)
+    if (empty) out.push(empty)
   }
   return out
 }

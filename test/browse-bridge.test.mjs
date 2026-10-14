@@ -36,8 +36,17 @@ test('quadro do servidor: tamanhos de 1, 2 e 8 bytes', () => {
 
 test('ponte recusa quem não é a extensão ou não tem a senha', async () => {
   let address
-  const opening = openBridge({ open: (url) => (address = new URL(url)), timeoutMs: 1500 })
-  await new Promise((r) => setTimeout(r, 50))
+  let opened
+  const ready = new Promise((r) => (opened = r))
+  const opening = openBridge({
+    open: (url) => {
+      address = new URL(url)
+      opened()
+    },
+    timeoutMs: 1500,
+  })
+  // Espera a ponte abrir (ou desistir), sem tempo fixo.
+  await Promise.race([ready, opening])
   const token = new URLSearchParams(address.hash.slice(1)).get('t')
   const tries = [
     `ws://127.0.0.1:${address.port}/bridge?t=errada`,

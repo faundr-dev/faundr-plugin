@@ -68,7 +68,9 @@ export async function escutar({ root, machine, api, consented, saveConsent, log 
   const stop = async () => {
     if (stopping) return
     stopping = true
-    await api({ action: 'listen-stop', machine }).catch(() => {})
+    await api({ action: 'listen-stop', machine }).catch(() => {
+      // Sem rede ao desligar: o painel tira o "Rodar agora" sozinho quando o ajudante para de responder.
+    })
     log('Ajudante desligado. O "Rodar agora" sumiu do painel.')
     process.exit(0)
   }
@@ -83,7 +85,9 @@ export async function escutar({ root, machine, api, consented, saveConsent, log 
       for (const run of runs ?? []) {
         log(`Pedido novo: «${run.body.slice(0, 120)}»`)
         const result = openSession(root, run, log)
-        await api({ action: 'run-status', id: run.id, status: result.status, name: result.name ?? null, error: result.error ?? null }).catch(() => {})
+        await api({ action: 'run-status', id: run.id, status: result.status, name: result.name ?? null, error: result.error ?? null }).catch(() => {
+          // Sem rede agora: a sessão já abriu; só a situação no painel fica para trás.
+        })
       }
     } catch (err) {
       // Sem rede ou painel fora do ar: avisa uma vez e continua tentando.

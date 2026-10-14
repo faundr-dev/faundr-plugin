@@ -6,14 +6,14 @@
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { inNodeModules, isClaudePlugin } from './parts.mjs'
+import { styleFiles } from './design-tokens.mjs'
+import { inNodeModules } from './parts.mjs'
 import { relPath } from './paths.mjs'
 
 export const SHOWCASE_FILE = relPath('showcase')
 // Marca que o painel troca pelo endereço das fontes (/api/showcase-font/<projeto>).
 export const FONT_BASE = '__FAUNDR_FONT__'
 
-const SKIP = /(^|\/)(node_modules|\.git|\.faundr|dist|build|out|coverage|\.claude|\.remember|\.wrangler|\.next|\.nuxt|\.svelte-kit|\.tanstack|\.vercel|\.output)(\/|$)/
 const FONT_EXT = { woff2: 'font/woff2', woff: 'font/woff', ttf: 'font/ttf', otf: 'font/otf' }
 const MAX_CSS = 500_000
 const MAX_FONTS = 3_000_000
@@ -28,31 +28,14 @@ export function detectRuntime(root) {
     const major = Number(String(version).split('.')[0])
     if (major >= 4) return 'tailwind4'
     if (major === 3) return 'tailwind3'
-  } catch {}
+  } catch {
+    // Sem Tailwind instalado (ou package.json ilegível): o projeto é tratado como CSS puro.
+  }
   return 'css'
 }
 
-function cssFiles(root) {
-  const out = []
-  const walk = (dir, depth) => {
-    if (depth > 8) return
-    let entries = []
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true })
-    } catch {
-      return
-    }
-    for (const e of entries) {
-      const abs = path.join(dir, e.name)
-      const rel = path.relative(root, abs).split(path.sep).join('/')
-      if (SKIP.test(rel) || (e.isDirectory() && isClaudePlugin(abs))) continue
-      if (e.isDirectory()) walk(abs, depth + 1)
-      else if (/\.css$/.test(e.name) && !/\.module\.css$/.test(e.name)) out.push(rel)
-    }
-  }
-  walk(root, 0)
-  return out
-}
+// CSS puro do projeto (os .module.css ficam de fora: só valem dentro do componente que os importa).
+const cssFiles = (root) => styleFiles(root, (name) => /\.css$/.test(name) && !/\.module\.css$/.test(name))
 
 /** Arquivo CSS de um pacote importado pelo nome (@import "@fontsource-variable/inter"). */
 function packageCss(root, spec) {
@@ -69,6 +52,7 @@ function packageCss(root, spec) {
     const file = path.join(direct, entry)
     return fs.existsSync(file) ? file : null
   } catch {
+    // package.json do pacote ilegível: o @import some da réplica, como um pacote sem CSS.
     return null
   }
 }
@@ -97,6 +81,7 @@ export function collectCss(root, runtime) {
     try {
       buf = fs.readFileSync(absFile)
     } catch {
+      // Arquivo de fonte que não existe ou não abre: a réplica cai na fonte de reserva do CSS.
       return null
     }
     const hash = sha(buf).slice(0, 32)
@@ -183,13 +168,19 @@ export function showcaseHashes(root, showcase) {
   return out
 }
 
+function replicaState(files, now, saved) {
+  if (!files.length) return 'sem arquivo'
+  if (!now) return 'arquivo sumiu'
+  if (saved && saved !== now) return 'desatualizada'
+  return 'atual'
+}
+
 /** Situação de cada réplica: atual, desatualizada (arquivo mudou) ou arquivo sumiu. */
 export function showcaseStatus(root, showcase) {
   return (showcase?.components ?? []).map((c) => {
     const files = componentFiles(c)
     const now = files.length ? fingerprint(root, files) : null
-    const state = !files.length ? 'sem arquivo' : !now ? 'arquivo sumiu' : c.fingerprint && c.fingerprint !== now ? 'desatualizada' : 'atual'
-    return { name: c.name, files, state }
+    return { name: c.name, files, state: replicaState(files, now, c.fingerprint) }
   })
 }
 

@@ -108,7 +108,9 @@ function dependencies(root, files) {
     try {
       const pkg = JSON.parse(read(root, f))
       for (const d of Object.keys({ ...pkg.dependencies, ...pkg.devDependencies })) deps.add(d)
-    } catch {}
+    } catch {
+      // package.json com JSON quebrado: fica de fora da lista de pacotes.
+    }
   }
   for (const f of files.filter((x) => /(^|\/)(requirements[^/]*\.txt|pyproject\.toml)$/.test(x))) {
     for (const m of read(root, f).matchAll(/^\s*"?([A-Za-z0-9_.-]+)/gm)) deps.add(m[1].toLowerCase())
@@ -168,6 +170,12 @@ export function checkPrivacy(root, files) {
 
 // ---- Teste do banco como visitante (resultado guardado pelo faundr db-test) ------------------------------------
 
+// "hoje", "ontem" ou "há N dias".
+function daysAgo(days) {
+  if (days <= 0) return 'hoje'
+  return days === 1 ? 'ontem' : `há ${days} dias`
+}
+
 export function checkDbTest(root, now = Date.now()) {
   const key = 'banco-testado'
   let r
@@ -177,7 +185,7 @@ export function checkDbTest(root, now = Date.now()) {
     return { key, status: 'nao-verificado', detail: 'O banco ainda não foi testado como visitante. Rode faundr db-test (ou /faundr:launch).', evidence: [] }
   }
   const days = Math.floor((now - Date.parse(r.at)) / 86_400_000)
-  const when = days <= 0 ? 'hoje' : days === 1 ? 'ontem' : `há ${days} dias`
+  const when = daysAgo(days)
   if (r.open > 0) return { key, status: 'falta', detail: `O teste de ${when} achou ${r.open} porta(s) aberta(s) no banco (lista em Segurança).`, evidence: [] }
   if (!r.full) return { key, status: 'aviso', detail: `Testado ${when} só na leitura com a chave pública; gravar, alterar e apagar ainda não foram testados.`, evidence: [] }
   if (days > 30) return { key, status: 'aviso', detail: `Último teste completo ${when}: rode de novo (as regras do banco mudam com as migrações).`, evidence: [] }
@@ -192,6 +200,7 @@ export function productionUrl(root) {
     if (env) return env.url
     return (s.hosting ?? []).find((h) => h.layer === 'front' && /^https?:\/\//.test(h.url ?? ''))?.url ?? null
   } catch {
+    // Sem Stack salva (ou ilegível): sem URL de produção.
     return null
   }
 }

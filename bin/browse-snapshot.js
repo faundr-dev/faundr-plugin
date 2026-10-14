@@ -19,9 +19,13 @@
     return referenced || e.getAttribute('aria-label') ||
       [...(e.labels||[])].map(l=>name(l,seen)).filter(Boolean).join(' ') ||
       (['button','submit','reset'].includes(e.type) ? e.value : '') || e.getAttribute('alt') ||
-      (e.tagName==='INPUT' ? '' : [...e.childNodes].map(n=>n.nodeType===3 ? n.textContent :
-        n.nodeType===1 && n.getAttribute('aria-hidden')!=='true' ? name(n,seen) : '').join(' ').trim()) ||
+      (e.tagName==='INPUT' ? '' : [...e.childNodes].map(n=>childName(n,seen)).join(' ').trim()) ||
       e.getAttribute('title') || e.getAttribute('placeholder') || '';
+  };
+  // Nome de um filho: texto direto, ou o nome do elemento (se não estiver escondido do leitor de tela).
+  const childName = (n,seen) => {
+    if (n.nodeType===3) return n.textContent;
+    return n.nodeType===1 && n.getAttribute('aria-hidden')!=='true' ? name(n,seen) : '';
   };
   const roles=['button','link','checkbox','radio','switch','tab','menuitem','menuitemradio',
     'option','gridcell','combobox','textbox','searchbox','spinbutton'];
@@ -55,11 +59,34 @@
       e.getAttribute('href'),scope?.innerText?.slice(0,6000)||''];
   };
   const actions=[];
-  for (const e of document.querySelectorAll(selector)) {
-    if (!offered(e) || !visible(e) || e.matches(':disabled') || e.closest('[aria-disabled="true"]')) continue;
+  const blocked = e => !offered(e) || !visible(e) || e.matches(':disabled') || e.closest('[aria-disabled="true"]');
+  const offScreen = (r,x,y) => r.width<=0 || r.height<=0 || x<0 || y<0 || x>=innerWidth || y>=innerHeight;
+  // Valor atual do campo (senha só diz se está preenchida).
+  const currentValue = (e,rname) => {
+    if (e.type==='password') return e.value ? '(filled, hidden)' : '';
+    if ('value' in e) return String(e.value);
+    return e.isContentEditable || rname==='combobox' ? e.innerText.trim() : '';
+  };
+  // <select>: uma ação por opção que dá para escolher.
+  const addSelectActions = (e,base) => {
+    for (const o of e.options) if (!o.selected && !o.disabled && !o.closest('optgroup[disabled]'))
+      actions.push({...base,kind:'select',value:o.value,
+        current_value:[...e.selectedOptions].map(o=>o.label).join(', '),label:base.label+' → '+o.label});
+  };
+  // Campo editável vira 'fill' (e um 'click' para abrir); o resto vira 'click'.
+  const addFieldActions = (e,base,rname) => {
+    const editable=!e.readOnly && e.getAttribute('aria-readonly')!=='true' &&
+      (['textbox','searchbox','spinbutton'].includes(rname) ||
+        (rname==='combobox' && ['INPUT','TEXTAREA'].includes(e.tagName)));
+    const value=currentValue(e,rname);
+    actions.push({...base,kind:editable?'fill':'click',value});
+    if (editable) actions.push({...base,kind:'click',value,label:'Open '+base.label});
+  };
+  const addActions = e => {
+    if (blocked(e)) return;
     const r=e.getBoundingClientRect(), x=r.x+r.width/2, y=r.y+r.height/2, rname=role(e);
-    if (!rname || r.width<=0 || r.height<=0 || x<0 || y<0 || x>=innerWidth || y>=innerHeight) continue;
-    if (rname==='gridcell' && e.querySelector('button,[role="button"]')) continue;
+    if (!rname || offScreen(r,x,y)) return;
+    if (rname==='gridcell' && e.querySelector('button,[role="button"]')) return;
     const base={node:identity(e),role:rname,label:name(e)||rname,
       rect:{x:r.x,y:r.y,w:r.width,h:r.height}};
     for (const key of ['checked','selected','expanded']) {
@@ -67,31 +94,25 @@
       if (value!==null) base[key]=value;
     }
     if (['checkbox','radio'].includes(e.type)) base.checked=String(e.checked);
-    if (e.tagName==='SELECT') {
-      for (const o of e.options) if (!o.selected && !o.disabled && !o.closest('optgroup[disabled]'))
-        actions.push({...base,kind:'select',value:o.value,
-          current_value:[...e.selectedOptions].map(o=>o.label).join(', '),label:base.label+' → '+o.label});
-    } else {
-      const editable=!e.readOnly && e.getAttribute('aria-readonly')!=='true' &&
-        (['textbox','searchbox','spinbutton'].includes(rname) ||
-          (rname==='combobox' && ['INPUT','TEXTAREA'].includes(e.tagName)));
-      const value=e.type==='password' ? (e.value ? '(filled, hidden)' : '') : 'value' in e ? String(e.value) :
-        e.isContentEditable || rname==='combobox' ? e.innerText.trim() : '';
-      actions.push({...base,kind:editable?'fill':'click',value});
-      if (editable) actions.push({...base,kind:'click',value,label:'Open '+base.label});
+    if (e.tagName==='SELECT') addSelectActions(e,base);
+    else addFieldActions(e,base,rname);
+  };
+  for (const e of document.querySelectorAll(selector)) addActions(e);
+  // Texto visível na tela (até 6000 caracteres).
+  const visibleWords = () => {
+    const words=[], walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
+    const range=document.createRange(); let node,length=0;
+    while ((node=walker.nextNode()) && length<6000) {
+      const value=node.textContent.trim(), parent=node.parentElement;
+      if (!value || !parent || parent.closest('script,style,noscript,template') || !visible(parent)) continue;
+      range.selectNodeContents(node); const r=range.getBoundingClientRect();
+      if (r.width>0 && r.height>0 && r.bottom>0 && r.top<innerHeight && r.right>0 && r.left<innerWidth) {
+        words.push(value); length+=value.length;
+      }
     }
-  }
-  const words=[], walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
-  const range=document.createRange(); let node,length=0;
-  while ((node=walker.nextNode()) && length<6000) {
-    const value=node.textContent.trim(), parent=node.parentElement;
-    if (!value || !parent || parent.closest('script,style,noscript,template') || !visible(parent)) continue;
-    range.selectNodeContents(node); const r=range.getBoundingClientRect();
-    if (r.width>0 && r.height>0 && r.bottom>0 && r.top<innerHeight && r.right>0 && r.left<innerWidth) {
-      words.push(value); length+=value.length;
-    }
-  }
-  const text=words.join('\n').slice(0,6000), height=document.documentElement.scrollHeight;
+    return words;
+  };
+  const text=visibleWords().join('\n').slice(0,6000), height=document.documentElement.scrollHeight;
   const page_key=cache.pageKey(), guards={};
   for (const a of actions) if (!(a.node in guards)) guards[a.node]=cache.guard(cache.nodes.get(a.node));
   // Compare meaning and identity. Geometry is always resolved and hit-tested just before input.

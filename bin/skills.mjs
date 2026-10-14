@@ -53,6 +53,7 @@ function readSkill(dir, source, plugin = null) {
       manual: isTrue(fm['disable-model-invocation']),
     }
   } catch {
+    // SKILL.md ilegível: a skill fica fora da lista.
     return null
   }
 }
@@ -66,6 +67,7 @@ const skillsIn = (root, source, plugin) => {
       .map((d) => readSkill(path.join(root, d.name), source, plugin))
       .filter(Boolean)
   } catch {
+    // Pasta de skills que não existe: nenhuma skill dela.
     return []
   }
 }
@@ -74,6 +76,7 @@ const readJson = (file) => {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8'))
   } catch {
+    // Arquivo ausente ou ilegível: quem chama trata como vazio.
     return null
   }
 }
@@ -147,9 +150,15 @@ export function skillsForPrompt(list, prompt, shownIds = [], max = 2) {
     .slice(0, max)
 }
 
+// Quando usar a skill: o "quando" que o time escreveu ou, sem ele, a descrição.
+function skillWhen(s) {
+  if (s.when) return ` — quando: ${s.when}`
+  return s.description ? ` — ${clip(s.description, 160)}` : ''
+}
+
 /** Linha de uma skill no aviso: a que só a pessoa chama vira um lembrete em uma linha para ela, nunca uma chamada. */
 const skillLine = (s) =>
-  `- ${onlyUser(s) ? `/${s.name} (só a pessoa chama: não rode; diga em uma linha "isso parece trabalho para /${s.name}, quer rodar?")` : `skill ${s.name}`}${s.when ? ` — quando: ${s.when}` : s.description ? ` — ${clip(s.description, 160)}` : ''}`
+  `- ${onlyUser(s) ? `/${s.name} (só a pessoa chama: não rode; diga em uma linha "isso parece trabalho para /${s.name}, quer rodar?")` : `skill ${s.name}`}${skillWhen(s)}`
 
 export function skillNote(items, where = 'este tipo de pedido') {
   if (!items.length) return null

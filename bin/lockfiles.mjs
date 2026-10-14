@@ -127,68 +127,79 @@ function pnpmKey(raw) {
 }
 const cleanVersion = (v) => unquote(v).replace(/\(.*$/, '').replace(/_.*$/, '')
 
+// Linha dentro de "importers" (ou das raízes do v6): guarda as dependências diretas, de produção ou dev.
+function pnpmRootLine(st, indent, t) {
+  // importers: "  .:" → "    dependencies:" → "      name:" → "        version: x"
+  // v6 sem importers: "dependencies:" → "  name:" → "    version: x"
+  const depIndent = st.section === 'importers' ? 6 : 2
+  const roots = () => (st.rootGroup === 'devDependencies' ? st.devRoots : st.prodRoots)
+  if (st.section === 'importers' && indent === 4) st.rootGroup = t.replace(/:$/, '')
+  else if (indent === depIndent && t.endsWith(':')) st.importerDep = unquote(t)
+  else if (indent === depIndent && t.includes(': ')) {
+    // formato curto (v5): "  name: 1.2.3"
+    const [n, v] = [unquote(t.split(': ')[0]), cleanVersion(t.split(': ').slice(1).join(': '))]
+    if (!v.startsWith('link:')) roots().push(`${n}@${v}`)
+  } else if (indent === depIndent + 2 && t.startsWith('version:') && st.importerDep) {
+    const v = cleanVersion(t.slice('version:'.length))
+    if (!v.startsWith('link:') && !v.startsWith('file:')) roots().push(`${st.importerDep}@${v}`)
+  }
+}
+
+// Campo de um pacote (recuo 4): abre o bloco de dependências ou marca dev.
+function pnpmPackageField(st, node, t) {
+  if (/^(dependencies|optionalDependencies):$/.test(t)) {
+    st.group = 'deps'
+    return
+  }
+  st.group = null
+  if (t === 'dev: true') node.dev = true
+  if (t === 'dev: false') node.dev = false
+}
+
+// Linha dentro de "packages" ou "snapshots": abre um pacote, lê seus campos e suas dependências.
+function pnpmPackageLine(st, nodes, indent, t) {
+  if (indent === 2 && t.endsWith(':')) {
+    const p = pnpmKey(t.slice(0, -1))
+    st.current = p ? `${p.name}@${p.version}` : null
+    if (p && !nodes.has(st.current)) nodes.set(st.current, { name: p.name, version: p.version, deps: [] })
+    st.group = null
+  } else if (st.current && indent === 4) pnpmPackageField(st, nodes.get(st.current), t)
+  else if (st.current && indent === 6 && st.group === 'deps' && t.includes(': ')) {
+    const [n, ...rest] = t.split(': ')
+    const v = cleanVersion(rest.join(': '))
+    // v6: "name: 1.2.3(peer)"; v5: "name: 1.2.3_peer"; alias "name: /other@1.0.0"
+    const target = v.startsWith('/') ? pnpmKey(v) : { name: unquote(n), version: v }
+    if (target) nodes.get(st.current).deps.push(`${target.name}@${target.version}`)
+  }
+}
+
 function pnpmLock(text) {
   const lines = text.split(/\r?\n/)
   const nodes = new Map()
-  const prodRoots = []
-  const devRoots = []
-  let section = null // importers | packages | snapshots | dependencies | devDependencies (v6 top-level)
-  let current = null // chave do pacote atual
-  let group = null // bloco de dependências dentro de um pacote (packages/snapshots)
-  let rootGroup = null // dependencies | devDependencies | optionalDependencies das raízes
-  let importerDep = null // nome da dependência sendo lida nas raízes
+  const st = {
+    prodRoots: [],
+    devRoots: [],
+    section: null, // importers | packages | snapshots | dependencies | devDependencies (v6 top-level)
+    current: null, // chave do pacote atual
+    group: null, // bloco de dependências dentro de um pacote (packages/snapshots)
+    rootGroup: null, // dependencies | devDependencies | optionalDependencies das raízes
+    importerDep: null, // nome da dependência sendo lida nas raízes
+  }
   for (const line of lines) {
     if (!line.trim() || line.trimStart().startsWith('#')) continue
     const indent = line.length - line.trimStart().length
     const t = line.trim()
     if (indent === 0) {
-      section = t.replace(/:.*$/, '')
-      rootGroup = ['dependencies', 'devDependencies', 'optionalDependencies'].includes(section) ? section : null
-      current = null
-      continue
-    }
-    if (section === 'importers' || rootGroup) {
-      // importers: "  .:" → "    dependencies:" → "      name:" → "        version: x"
-      // v6 sem importers: "dependencies:" → "  name:" → "    version: x"
-      const depIndent = section === 'importers' ? 6 : 2
-      if (section === 'importers' && indent === 4) rootGroup = t.replace(/:$/, '')
-      else if (indent === depIndent && t.endsWith(':')) importerDep = unquote(t)
-      else if (indent === depIndent && t.includes(': ')) {
-        // formato curto (v5): "  name: 1.2.3"
-        const [n, v] = [unquote(t.split(': ')[0]), cleanVersion(t.split(': ').slice(1).join(': '))]
-        if (!v.startsWith('link:')) (rootGroup === 'devDependencies' ? devRoots : prodRoots).push(`${n}@${v}`)
-      } else if (indent === depIndent + 2 && t.startsWith('version:') && importerDep) {
-        const v = cleanVersion(t.slice('version:'.length))
-        if (!v.startsWith('link:') && !v.startsWith('file:')) (rootGroup === 'devDependencies' ? devRoots : prodRoots).push(`${importerDep}@${v}`)
-      }
-      continue
-    }
-    if (section === 'packages' || section === 'snapshots') {
-      if (indent === 2 && t.endsWith(':')) {
-        const p = pnpmKey(t.slice(0, -1))
-        current = p ? `${p.name}@${p.version}` : null
-        if (p && !nodes.has(current)) nodes.set(current, { name: p.name, version: p.version, deps: [] })
-        group = null
-      } else if (current && indent === 4) {
-        if (/^(dependencies|optionalDependencies):$/.test(t)) group = 'deps'
-        else {
-          group = null
-          if (t === 'dev: true') nodes.get(current).dev = true
-          if (t === 'dev: false') nodes.get(current).dev = false
-        }
-      } else if (current && indent === 6 && group === 'deps' && t.includes(': ')) {
-        const [n, ...rest] = t.split(': ')
-        const v = cleanVersion(rest.join(': '))
-        // v6: "name: 1.2.3(peer)"; v5: "name: 1.2.3_peer"; alias "name: /other@1.0.0"
-        const target = v.startsWith('/') ? pnpmKey(v) : { name: unquote(n), version: v }
-        if (target) nodes.get(current).deps.push(`${target.name}@${target.version}`)
-      }
-    }
+      st.section = t.replace(/:.*$/, '')
+      st.rootGroup = ['dependencies', 'devDependencies', 'optionalDependencies'].includes(st.section) ? st.section : null
+      st.current = null
+    } else if (st.section === 'importers' || st.rootGroup) pnpmRootLine(st, indent, t)
+    else if (st.section === 'packages' || st.section === 'snapshots') pnpmPackageLine(st, nodes, indent, t)
   }
   // Pacotes de pnpm v9 sem "dev:" viram dev = não alcançável pelas dependências de produção.
   const hasDevFlag = [...nodes.values()].some((n) => n.dev !== undefined)
   if (!hasDevFlag) for (const n of nodes.values()) delete n.dev
-  return resolveGraph(nodes, prodRoots, devRoots)
+  return resolveGraph(nodes, st.prodRoots, st.devRoots)
 }
 
 // ---- yarn ----------------------------------------------------------------------------------------
@@ -226,6 +237,14 @@ function yarnV1(text, manifest) {
   return resolveGraph(nodes, [...roots(manifest.dependencies), ...roots(manifest.optionalDependencies)], roots(manifest.devDependencies))
 }
 
+// Dependência no yarn berry: "    name: ^1.0.0" → "name@npm:^1.0.0" (com protocolo, como workspace:, fica como está).
+function berryDep(line) {
+  const [n, ...r] = line.trim().split(': ')
+  const range = r.join(': ').replace(/^"|"$/g, '')
+  const name = n.replace(/^"|"$/g, '')
+  return range.includes(':') ? `${name}@${range}` : `${name}@npm:${range}`
+}
+
 function yarnBerry(text, manifest) {
   const nodes = new Map()
   const bySpec = new Map()
@@ -247,12 +266,7 @@ function yarnBerry(text, manifest) {
     } else if (current && /^ {2}version: /.test(line)) current.version = line.trim().slice('version: '.length).replace(/^"|"$/g, '')
     else if (current && /^ {2}(dependencies|optionalDependencies):/.test(line)) inDeps = true
     else if (current && /^ {2}\S/.test(line)) inDeps = false
-    else if (current && inDeps && /^ {4}\S/.test(line)) {
-      const [n, ...r] = line.trim().split(': ')
-      const range = r.join(': ').replace(/^"|"$/g, '')
-      const name = n.replace(/^"|"$/g, '')
-      current.rawDeps.push(range.includes(':') ? `${name}@${range}` : `${name}@npm:${range}`)
-    }
+    else if (current && inDeps && /^ {4}\S/.test(line)) current.rawDeps.push(berryDep(line))
   }
   for (const n of all) if (n.version && !n.workspace) nodes.set(`${n.name}@${n.version}`, n)
   const key = (spec) => {

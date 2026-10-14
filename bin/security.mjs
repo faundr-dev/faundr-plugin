@@ -66,6 +66,7 @@ function readText(root, rel) {
     const text = fs.readFileSync(abs, 'utf8')
     return text.includes('\0') ? null : text
   } catch {
+    // Arquivo que sumiu, sem permissão ou ilegível: fica fora da checagem, como se não existisse.
     return null
   }
 }
@@ -161,6 +162,7 @@ function decodeJwt(token) {
   try {
     return JSON.parse(Buffer.from(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'))
   } catch {
+    // Não é um JWT de verdade (o conteúdo não decodifica): segue como chave comum, com confiança baixa.
     return null
   }
 }
@@ -231,6 +233,20 @@ const DOC_PATH = /\.(md|mdx|txt|rst|adoc)$/i
 const ENV_FILE = /(^|\/)\.env(\.[\w.-]+)?$/i
 const isEnvFile = (rel) => ENV_FILE.test(rel) && !EXAMPLE_PATH.test(rel)
 
+function secretSeverity(s) {
+  if (s.dangerous) return 'critical'
+  if (s.confidence === 'high' || s.confidence === 'medium') return s.confidence
+  return 'low'
+}
+
+function secretImpact(s, p, serious) {
+  if (s.ruleId === 'supabase-service-role')
+    return 'A service_role ignora todas as regras de acesso do banco. Quem tiver essa chave lê, altera e apaga qualquer dado do projeto.'
+  if (serious)
+    return `Quem tiver acesso ao código (ou ao site, se o arquivo for para o navegador) pode usar essa chave em seu nome no ${p.name}${p.name === 'Stripe' ? ', inclusive movimentar dinheiro' : ''}.`
+  return 'Se for uma chave de verdade, quem tiver acesso ao código pode usá-la.'
+}
+
 function secretFinding(rel, text, s) {
   const p = provider(s.ruleId)
   const masked = mask(s.secret)
@@ -238,16 +254,11 @@ function secretFinding(rel, text, s) {
   return {
     source: 'secret',
     rule_id: s.ruleId,
-    severity: s.dangerous ? 'critical' : s.confidence === 'high' ? 'high' : s.confidence === 'medium' ? 'medium' : 'low',
+    severity: secretSeverity(s),
     confidence: s.confidence,
     title: s.ruleId === 'supabase-service-role' ? 'Chave service_role do Supabase no código' : `Chave ${p.name === 'chave privada' ? 'privada' : `do ${p.name}`} no código`,
     detail: `Encontrei o que parece ser uma chave secreta${p.name === 'JWT' ? ' (um token JWT)' : ` do ${p.name}`} escrita direto no arquivo: ${masked}.`,
-    impact:
-      s.ruleId === 'supabase-service-role'
-        ? 'A service_role ignora todas as regras de acesso do banco. Quem tiver essa chave lê, altera e apaga qualquer dado do projeto.'
-        : serious
-          ? `Quem tiver acesso ao código (ou ao site, se o arquivo for para o navegador) pode usar essa chave em seu nome no ${p.name}${p.name === 'Stripe' ? ', inclusive movimentar dinheiro' : ''}.`
-          : 'Se for uma chave de verdade, quem tiver acesso ao código pode usá-la.',
+    impact: secretImpact(s, p, serious),
     fix:
       `1. Tire a chave do código: coloque-a no arquivo .env (que não vai para o git) e leia com process.env.NOME_DA_VARIAVEL. ` +
       `2. Troque a chave no ${p.name}${p.url ? ` (${p.url})` : ''}: ela já pode ter vazado. ` +
@@ -315,53 +326,69 @@ export function publicSecretValueFindings(root) {
 // Linha de .env que define a variável (NOME=valor), e não só a menciona.
 const definesVar = (text, index, name) => new RegExp(`^\\s*(export\\s+)?${name}\\s*=\\s*\\S`).test(lineText(text, index))
 
-function scanSecrets(root, files, { tracked, envDir }) {
+// Chaves e variáveis públicas com segredo num arquivo do projeto.
+function secretsInFile(root, rel, tracked) {
+  if (BINARY.test(rel) || LOCKFILES.test(rel)) return []
+  const text = readText(root, rel)
+  if (!text || text.startsWith('// Gerado por engine/secret-rules.mjs')) return []
   const out = []
-  for (const rel of files) {
-    if (BINARY.test(rel) || LOCKFILES.test(rel)) continue
-    const text = readText(root, rel)
-    if (!text || text.startsWith('// Gerado por engine/secret-rules.mjs')) continue
-    const env = isEnvFile(rel)
-    // .env fora do git é o lugar certo da chave; o problema é ele ir para o git (checado abaixo).
-    if (!env || tracked?.has(rel)) for (const s of findSecrets(text, rel)) out.push(secretFinding(rel, text, s))
-    for (const m of text.matchAll(PUBLIC_ENV)) {
-      // Em código, só quando a variável é lida (process.env.X / import.meta.env.X); em .env, quando é definida.
-      const before = text.slice(Math.max(0, m.index - 16), m.index)
-      if (env ? definesVar(text, m.index, m[1]) : /env\.$/.test(before)) out.push(publicEnvFinding(rel, text, m.index, m[1]))
-    }
+  const env = isEnvFile(rel)
+  // .env fora do git é o lugar certo da chave; o problema é ele ir para o git (checado em envFileFinding).
+  if (!env || tracked?.has(rel)) for (const s of findSecrets(text, rel)) out.push(secretFinding(rel, text, s))
+  for (const m of text.matchAll(PUBLIC_ENV)) {
+    // Em código, só quando a variável é lida (process.env.X / import.meta.env.X); em .env, quando é definida.
+    const before = text.slice(Math.max(0, m.index - 16), m.index)
+    if (env ? definesVar(text, m.index, m[1]) : /env\.$/.test(before)) out.push(publicEnvFinding(rel, text, m.index, m[1]))
   }
-  // .env que está (ou vai estar) no git.
-  if (tracked)
-    for (const rel of files.filter(isEnvFile)) {
-      const text = readText(root, rel) ?? ''
-      const hasValues = /^\s*[A-Z0-9_]+\s*=\s*\S+/m.test(text)
-      if (!hasValues) continue
-      const inGit = tracked.has(rel)
-      out.push({
-        source: 'secret',
-        rule_id: inGit ? 'env-in-git' : 'env-not-ignored',
-        severity: inGit ? 'critical' : 'high',
-        confidence: 'high',
-        title: inGit ? `Arquivo ${rel} está no git` : `Arquivo ${rel} fora do .gitignore`,
-        detail: inGit
-          ? `O ${rel} guarda as chaves e senhas do projeto e foi salvo no git.`
-          : `O ${rel} guarda as chaves e senhas do projeto e não está no .gitignore: o próximo "git add" leva ele junto.`,
-        impact: 'Quem tiver acesso ao repositório (ou a uma cópia dele) vê todas as chaves do projeto.',
-        fix: inGit
-          ? `Adicione ".env*" e "!.env.example" ao .gitignore, rode "git rm --cached ${rel}" e troque as chaves que estavam nele: elas continuam no histórico do git.`
-          : 'Adicione ".env*" e "!.env.example" ao .gitignore.',
-        file: rel,
-        line: null,
-        snippet: null,
-        fingerprint: `secret|env-file|${rel}`,
-      })
-    }
-  // .env ignorado pelo git não entra na lista de arquivos, mas uma variável pública com segredo nele vaza pelo site.
+  return out
+}
+
+// .env com valores que está (ou vai estar) no git; null se o arquivo não tem valores.
+function envFileFinding(root, rel, tracked) {
+  const text = readText(root, rel) ?? ''
+  const hasValues = /^\s*[A-Z0-9_]+\s*=\s*\S+/m.test(text)
+  if (!hasValues) return null
+  const inGit = tracked.has(rel)
+  return {
+    source: 'secret',
+    rule_id: inGit ? 'env-in-git' : 'env-not-ignored',
+    severity: inGit ? 'critical' : 'high',
+    confidence: 'high',
+    title: inGit ? `Arquivo ${rel} está no git` : `Arquivo ${rel} fora do .gitignore`,
+    detail: inGit
+      ? `O ${rel} guarda as chaves e senhas do projeto e foi salvo no git.`
+      : `O ${rel} guarda as chaves e senhas do projeto e não está no .gitignore: o próximo "git add" leva ele junto.`,
+    impact: 'Quem tiver acesso ao repositório (ou a uma cópia dele) vê todas as chaves do projeto.',
+    fix: inGit
+      ? `Adicione ".env*" e "!.env.example" ao .gitignore, rode "git rm --cached ${rel}" e troque as chaves que estavam nele: elas continuam no histórico do git.`
+      : 'Adicione ".env*" e "!.env.example" ao .gitignore.',
+    file: rel,
+    line: null,
+    snippet: null,
+    fingerprint: `secret|env-file|${rel}`,
+  }
+}
+
+// .env ignorado pelo git não entra na lista de arquivos, mas uma variável pública com segredo nele vaza pelo site.
+function ignoredEnvFindings(root, files, envDir) {
+  const out = []
   for (const name of envDir ? fs.readdirSync(envDir).filter((f) => isEnvFile(f) && !files.includes(f)) : []) {
     const text = readText(root, name)
     if (!text) continue
     for (const m of text.matchAll(PUBLIC_ENV)) if (definesVar(text, m.index, m[1])) out.push(publicEnvFinding(name, text, m.index, m[1]))
   }
+  return out
+}
+
+function scanSecrets(root, files, { tracked, envDir }) {
+  const out = files.flatMap((rel) => secretsInFile(root, rel, tracked))
+  // .env que está (ou vai estar) no git.
+  if (tracked)
+    for (const rel of files.filter(isEnvFile)) {
+      const f = envFileFinding(root, rel, tracked)
+      if (f) out.push(f)
+    }
+  out.push(...ignoredEnvFindings(root, files, envDir))
   return out
 }
 
@@ -420,6 +447,7 @@ function readCache() {
   try {
     return JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'))
   } catch {
+    // Sem cache ainda (primeira checagem) ou arquivo corrompido: começa vazio e busca tudo no OSV.
     return {}
   }
 }
@@ -452,7 +480,9 @@ async function osvDetails(ids, known) {
   try {
     fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true })
     fs.writeFileSync(CACHE_FILE, JSON.stringify(cache))
-  } catch {}
+  } catch {
+    // Sem gravar o cache a checagem sai igual; só busca os detalhes no OSV de novo da próxima vez.
+  }
   return cache
 }
 
@@ -477,25 +507,36 @@ function vulnSeverity(id, v) {
   if (label) return label
   const score = v.vectors.map(cvss3).find((s) => s !== null)
   if (score == null) return 'medium'
-  return score >= 9 ? 'critical' : score >= 7 ? 'high' : score >= 4 ? 'medium' : 'low'
+  return scoreSeverity(score)
+}
+
+// Nota CVSS → gravidade (as faixas do CVSS 3).
+function scoreSeverity(score) {
+  if (score >= 9) return 'critical'
+  if (score >= 7) return 'high'
+  if (score >= 4) return 'medium'
+  return 'low'
+}
+
+// Versões corrigidas de uma faixa (introduced → fixed) que valem para a versão instalada.
+function fixesInRange(r, version) {
+  const fixes = []
+  let introduced = null
+  for (const e of r.events) {
+    if (e.introduced !== undefined) introduced = e.introduced
+    else if (e.fixed !== undefined && introduced !== null) {
+      if ((introduced === '0' || compareVersions(version, introduced) >= 0) && compareVersions(version, e.fixed) < 0) fixes.push(e.fixed)
+      introduced = null
+    }
+  }
+  return fixes
 }
 
 // Menor versão corrigida para a versão instalada (null = ainda não existe correção).
 function fixedVersion(v, name, version) {
   const fixes = []
-  for (const a of v.affected.filter((x) => x.name === name)) {
-    for (const r of a.ranges) {
-      if (r.type !== 'SEMVER' && r.type !== 'ECOSYSTEM') continue
-      let introduced = null
-      for (const e of r.events) {
-        if (e.introduced !== undefined) introduced = e.introduced
-        else if (e.fixed !== undefined && introduced !== null) {
-          if ((introduced === '0' || compareVersions(version, introduced) >= 0) && compareVersions(version, e.fixed) < 0) fixes.push(e.fixed)
-          introduced = null
-        }
-      }
-    }
-  }
+  for (const a of v.affected.filter((x) => x.name === name))
+    for (const r of a.ranges) if (r.type === 'SEMVER' || r.type === 'ECOSYSTEM') fixes.push(...fixesInRange(r, version))
   return fixes.sort(compareVersions)[0] ?? null
 }
 
@@ -520,13 +561,14 @@ const MANAGER = {
   pipenv: { add: (n, v) => `pipenv install "${n}>=${v}"`, update: (n) => `pipenv update ${n}`, remove: (n) => `pipenv uninstall ${n}`, force: 'no Pipfile' },
 }
 
-async function scanDependencies(root, files) {
-  const lockfiles = files.filter((f) => LOCKFILE.test(f))
+// Pacotes de todos os lockfiles, com o ecossistema, o gerenciador e o lockfile de onde vieram.
+function lockfileEntries(root, lockfiles) {
   const entries = []
   const readManifest = (dir) => {
     try {
       return JSON.parse(readText(root, path.posix.join(dir, 'package.json')) ?? '{}')
     } catch {
+      // package.json ausente ou inválido: o lockfile é lido sem ele.
       return {}
     }
   }
@@ -542,9 +584,13 @@ async function scanDependencies(root, files) {
     if (!parsed) continue
     for (const p of parsed.pkgs) entries.push({ ...p, ecosystem: parsed.ecosystem, manager: parsed.manager, lockfile: lf })
   }
-  const unique = [...new Map(entries.map((e) => [`${e.ecosystem}:${e.name}@${e.version}`, e])).values()]
-  if (!unique.length) return { findings: [], packages: 0, lockfiles, snapshot: { packages: [], known: [] } }
+  return entries
+}
 
+const pkgKey = (e) => `${e.ecosystem}:${e.name}@${e.version}`
+
+// Pergunta ao OSV, em lotes de 1000, quais pacotes têm falha: ids por pacote e quando cada falha mudou.
+async function osvQuery(unique) {
   const known = new Map()
   const hits = new Map() // name@version → ids
   for (let i = 0; i < unique.length; i += 1000) {
@@ -559,63 +605,86 @@ async function scanDependencies(root, files) {
     const { results } = await res.json()
     results.forEach((r, j) => {
       if (!r.vulns?.length) return
-      hits.set(`${batch[j].ecosystem}:${batch[j].name}@${batch[j].version}`, r.vulns.map((v) => v.id))
+      hits.set(pkgKey(batch[j]), r.vulns.map((v) => v.id))
       for (const v of r.vulns) known.set(v.id, v.modified)
     })
   }
+  return { known, hits }
+}
+
+// O GHSA vem primeiro; o resto em ordem alfabética.
+function ghsaFirst(a, b) {
+  if (a.startsWith('GHSA')) return -1
+  if (b.startsWith('GHSA')) return 1
+  return a.localeCompare(b)
+}
+
+// Uma falha costuma ter vários ids (GHSA + CVE): fica o GHSA, com os outros como apelidos.
+function primaryIds(ids, details) {
+  const primary = new Map()
+  for (const id of ids) {
+    const v = details[id]
+    if (!v) continue
+    const group = [id, ...v.aliases].sort(ghsaFirst)[0]
+    if (!primary.has(group) || id.startsWith('GHSA')) primary.set(group, id)
+  }
+  return [...primary.values()]
+}
+
+function dependencyFix(e, cmd, { malicious, fixed, chain }) {
+  if (malicious) return `Remova o pacote (${cmd.remove(e.via?.[0] ?? e.name)}), apague a pasta de dependências instaladas e troque as chaves e senhas deste computador.`
+  if (!fixed) return 'Ainda não existe versão corrigida. Veja se há outra forma de evitar o problema no aviso da falha ou se dá para trocar de pacote.'
+  if (chain) return `O ${e.name} vem de ${chain}. Atualize o ${e.via[0]} (${cmd.update(e.via[0])}); se não resolver, force o ${e.name} ${fixed} ou mais novo ${cmd.force}.`
+  return `Atualize para a versão ${fixed} ou mais nova: ${cmd.add(e.name, fixed)}`
+}
+
+function dependencyFinding(e, id, v) {
+  const cmd = MANAGER[e.manager] ?? MANAGER.npm
+  const malicious = id.startsWith('MAL-')
+  const fixed = malicious ? null : fixedVersion(v, e.name, e.version)
+  const chain = e.via?.length > 1 ? e.via.join(' > ') : null
+  return {
+    source: 'dependency',
+    rule_id: id,
+    severity: vulnSeverity(id, v),
+    confidence: 'high',
+    title: malicious ? `Pacote malicioso: ${e.name}` : `${e.name} ${e.version}: ${v.summary || 'falha de segurança conhecida'}`,
+    detail: malicious
+      ? `O pacote ${e.name} ${e.version} foi marcado como malicioso (código feito para roubar dados ou atacar quem instala).`
+      : `A versão ${e.version} do pacote ${e.name} tem uma falha de segurança publicada (${id}).${firstSentences(v.details)}`,
+    impact: malicious
+      ? 'Ele pode já ter rodado no seu computador ao ser instalado. Remova e troque as chaves que estavam na máquina.'
+      : `Depende de como o projeto usa o pacote${e.dev ? '; como ele só é usado no desenvolvimento, não vai para o site publicado' : ''}.`,
+    fix: dependencyFix(e, cmd, { malicious, fixed, chain }),
+    file: e.lockfile,
+    line: null,
+    snippet: null,
+    package: e.name,
+    version: e.version,
+    fixed_in: fixed,
+    introduced_by: chain,
+    dev: e.dev,
+    cve: [id, ...v.aliases].filter((a) => /^(CVE|GHSA)-/.test(a)),
+    cwe: v.cwe,
+    advisory_url: v.url,
+    fingerprint: `dependency|${e.lockfile}|${e.name}|${id}`,
+  }
+}
+
+async function scanDependencies(root, files) {
+  const lockfiles = files.filter((f) => LOCKFILE.test(f))
+  const entries = lockfileEntries(root, lockfiles)
+  const unique = [...new Map(entries.map((e) => [pkgKey(e), e])).values()]
+  if (!unique.length) return { findings: [], packages: 0, lockfiles, snapshot: { packages: [], known: [] } }
+
+  const { known, hits } = await osvQuery(unique)
   const details = await osvDetails([...known.keys()], known)
 
   const findings = []
   for (const e of entries) {
-    const ids = hits.get(`${e.ecosystem}:${e.name}@${e.version}`)
-    const cmd = MANAGER[e.manager] ?? MANAGER.npm
+    const ids = hits.get(pkgKey(e))
     if (!ids) continue
-    // Uma falha costuma ter vários ids (GHSA + CVE): fica o GHSA, com os outros como apelidos.
-    const primary = new Map()
-    for (const id of ids) {
-      const v = details[id]
-      if (!v) continue
-      const group = [id, ...v.aliases].sort((a, b) => (a.startsWith('GHSA') ? -1 : b.startsWith('GHSA') ? 1 : a.localeCompare(b)))[0]
-      if (!primary.has(group) || id.startsWith('GHSA')) primary.set(group, id)
-    }
-    for (const id of primary.values()) {
-      const v = details[id]
-      const malicious = id.startsWith('MAL-')
-      const fixed = malicious ? null : fixedVersion(v, e.name, e.version)
-      const chain = e.via?.length > 1 ? e.via.join(' > ') : null
-      findings.push({
-        source: 'dependency',
-        rule_id: id,
-        severity: vulnSeverity(id, v),
-        confidence: 'high',
-        title: malicious ? `Pacote malicioso: ${e.name}` : `${e.name} ${e.version}: ${v.summary || 'falha de segurança conhecida'}`,
-        detail: malicious
-          ? `O pacote ${e.name} ${e.version} foi marcado como malicioso (código feito para roubar dados ou atacar quem instala).`
-          : `A versão ${e.version} do pacote ${e.name} tem uma falha de segurança publicada (${id}).${firstSentences(v.details)}`,
-        impact: malicious
-          ? 'Ele pode já ter rodado no seu computador ao ser instalado. Remova e troque as chaves que estavam na máquina.'
-          : `Depende de como o projeto usa o pacote${e.dev ? '; como ele só é usado no desenvolvimento, não vai para o site publicado' : ''}.`,
-        fix: malicious
-          ? `Remova o pacote (${cmd.remove(e.via?.[0] ?? e.name)}), apague a pasta de dependências instaladas e troque as chaves e senhas deste computador.`
-          : fixed
-            ? chain
-              ? `O ${e.name} vem de ${chain}. Atualize o ${e.via[0]} (${cmd.update(e.via[0])}); se não resolver, force o ${e.name} ${fixed} ou mais novo ${cmd.force}.`
-              : `Atualize para a versão ${fixed} ou mais nova: ${cmd.add(e.name, fixed)}`
-            : 'Ainda não existe versão corrigida. Veja se há outra forma de evitar o problema no aviso da falha ou se dá para trocar de pacote.',
-        file: e.lockfile,
-        line: null,
-        snippet: null,
-        package: e.name,
-        version: e.version,
-        fixed_in: fixed,
-        introduced_by: chain,
-        dev: e.dev,
-        cve: [id, ...v.aliases].filter((a) => /^(CVE|GHSA)-/.test(a)),
-        cwe: v.cwe,
-        advisory_url: v.url,
-        fingerprint: `dependency|${e.lockfile}|${e.name}|${id}`,
-      })
-    }
+    for (const id of primaryIds(ids, details)) findings.push(dependencyFinding(e, id, details[id]))
   }
   // Lista de pacotes (só nomes e versões) para o servidor conferir todo dia se surgiu falha nova.
   const snapshot = {
@@ -666,6 +735,112 @@ function tableName(raw) {
   return parts.length === 1 ? { schema: 'public', name: parts[0] } : { schema: parts[0], name: parts[1] }
 }
 
+// Política com condição "true" (não confere quem pede), exceto leitura, service_role e storage.
+function policyFinding(m, rel, stmt) {
+  const policy = m[1].replace(/"/g, '')
+  const t = tableName(m[2])
+  const rest = m[3]
+  const cmd = (rest.match(/ for (all|select|insert|update|delete)\b/i)?.[1] ?? 'all').toLowerCase()
+  const roles = rest.match(/ to ([\w", ]+?)(?: using| with check|$)/i)?.[1]?.toLowerCase() ?? 'public'
+  const alwaysTrue = /(using|with check) \(\s*\(?\s*(true|1\s*=\s*1)\s*\)?\s*\)/i.test(rest)
+  if (!alwaysTrue || cmd === 'select' || /service_role/.test(roles) || t.schema === 'storage') return null
+  return {
+    source: 'database',
+    rule_id: 'rls-policy-always-true',
+    severity: /anon|public/.test(roles) ? 'critical' : 'high',
+    confidence: 'high',
+    title: `Política "${policy}" libera ${cmd === 'all' ? 'tudo' : cmd} em ${t.name} para ${/anon|public/.test(roles) ? 'qualquer pessoa' : 'qualquer usuário logado'}`,
+    detail: `A política "${policy}" da tabela ${t.name} tem a condição "true": ela não confere quem está pedindo.`,
+    impact:
+      cmd === 'insert'
+        ? `${/anon|public/.test(roles) ? 'Qualquer pessoa' : 'Qualquer usuário logado'} pode criar linhas em ${t.name} com qualquer conteúdo, inclusive em nome de outra pessoa.`
+        : `${/anon|public/.test(roles) ? 'Qualquer pessoa' : 'Qualquer usuário logado'} pode ${cmd === 'delete' ? 'apagar' : 'alterar'} linhas de outras pessoas em ${t.name}.`,
+    fix: `Troque "true" por uma condição que confira o dono, por exemplo: using ((select auth.uid()) = user_id)${cmd === 'insert' || cmd === 'update' || cmd === 'all' ? ' with check ((select auth.uid()) = user_id)' : ''}. Faça isso numa nova migration (drop policy + create policy).`,
+    file: rel,
+    line: stmt.line,
+    snippet: stmt.text.trim().split('\n')[0].slice(0, 240),
+    fingerprint: `database|rls-policy-always-true|${t.name}|${policy}`,
+  }
+}
+
+// Bucket do Storage criado como público.
+function bucketFinding(s, rel, stmt) {
+  const cols = s.match(/buckets ?\(([^)]*)\)/i)?.[1]?.split(',').map((c) => c.trim().toLowerCase()) ?? []
+  const values = s.match(/values ?\((.*)\)/i)?.[1]?.split(',').map((v) => v.trim()) ?? []
+  const pub = cols.indexOf('public')
+  if (pub === -1 || !/^true$/i.test(values[pub] ?? '')) return null
+  const bucket = (values[cols.indexOf('id')] ?? values[cols.indexOf('name')] ?? '').replace(/'/g, '')
+  return {
+    source: 'database',
+    rule_id: 'storage-public-bucket',
+    severity: 'medium',
+    confidence: 'high',
+    title: `Bucket de arquivos público: ${bucket}`,
+    detail: `O bucket ${bucket} foi criado como público: qualquer pessoa com o link abre os arquivos, sem login.`,
+    impact: 'Se guardar documentos, fotos pessoais ou arquivos de clientes, eles ficam acessíveis para quem descobrir o link.',
+    fix: 'Se os arquivos não são para o público, deixe o bucket privado (public = false) e entregue os arquivos com links temporários (createSignedUrl).',
+    file: rel,
+    line: stmt.line,
+    snippet: stmt.text.trim().split('\n')[0].slice(0, 240),
+    fingerprint: `database|storage-public-bucket|${bucket}`,
+  }
+}
+
+// Função "security definer" sem search_path fixo.
+function definerFinding(m, rel, stmt) {
+  const fn = m[1].replace(/"/g, '')
+  return {
+    source: 'database',
+    rule_id: 'security-definer-search-path',
+    severity: 'medium',
+    confidence: 'medium',
+    title: `Função ${fn} roda com poder total sem search_path fixo`,
+    detail: `A função ${fn} é "security definer" (roda com as permissões de quem a criou, ignorando as regras de acesso) e não fixa o search_path.`,
+    impact: 'Alguém com permissão para criar objetos no banco pode enganar a função e fazer ela executar código dele com poder total.',
+    fix: `Adicione "set search_path = ''" na definição da função (e use nomes completos, como public.tabela). Confira também se ela precisa mesmo ser security definer.`,
+    file: rel,
+    line: stmt.line,
+    snippet: stmt.text.trim().split('\n')[0].slice(0, 240),
+    fingerprint: `database|security-definer-search-path|${fn.toLowerCase()}`,
+  }
+}
+
+function rlsDisabledFinding(name, t) {
+  return {
+    source: 'database',
+    rule_id: 'rls-disabled',
+    severity: 'critical',
+    confidence: 'high',
+    title: `Tabela ${name} sem proteção de acesso (RLS)`,
+    detail: `A tabela public.${name} foi criada sem "enable row level security". Sem isso, as regras de acesso do Supabase não valem para ela.`,
+    impact: `Qualquer pessoa com a chave pública do app (que fica no navegador) pode ler, alterar e apagar tudo em ${name}.`,
+    fix: `Numa nova migration: alter table public.${name} enable row level security; e crie políticas que só deixam cada usuário ver e mudar os próprios dados.`,
+    file: t.file,
+    line: t.line,
+    snippet: `create table public.${name} (…)`,
+    fingerprint: `database|rls-disabled|${name}`,
+  }
+}
+
+// Um comando SQL: atualiza o mapa de tabelas (criada, RLS ligado, apagada) ou devolve um achado (null se nenhum).
+function databaseStatement(stmt, rel, tables) {
+  const s = strip(stmt.text).replace(/\s+/g, ' ').trim()
+  let m
+  if ((m = s.match(/^create (?:unlogged )?table (?:if not exists )?([\w."]+)/i)) && !/ partition of /i.test(s)) {
+    const t = tableName(m[1])
+    if (t.schema === 'public') tables.set(t.name, { file: rel, line: stmt.line, rls: false })
+  } else if ((m = s.match(/^alter table (?:if exists )?(?:only )?([\w."]+) (enable|disable|force) row level security/i))) {
+    const t = tableName(m[1])
+    if (t.schema === 'public' && tables.has(t.name)) tables.get(t.name).rls = m[2].toLowerCase() !== 'disable'
+  } else if ((m = s.match(/^drop table (?:if exists )?([\w.", ]+)/i))) {
+    for (const raw of m[1].split(',')) tables.delete(tableName(raw.trim().split(' ')[0]).name)
+  } else if ((m = s.match(/^create policy ("[^"]+"|\S+) on ([\w."]+)(.*)$/i))) return policyFinding(m, rel, stmt)
+  else if (/^insert into storage\.buckets/i.test(s) && /\btrue\b/i.test(s)) return bucketFinding(s, rel, stmt)
+  else if ((m = s.match(/^create (?:or replace )?function ([\w."]+)/i)) && /security definer/i.test(s) && !/set search_path/i.test(s))
+    return definerFinding(m, rel, stmt)
+  return null
+}
+
 function scanDatabase(root, files) {
   const sqlFiles = files.filter((f) => /(^|\/)supabase\/.*\.sql$/i.test(f)).sort()
   const tables = new Map() // public.nome → { file, line, rls }
@@ -674,97 +849,11 @@ function scanDatabase(root, files) {
     const text = readText(root, rel)
     if (!text) continue
     for (const stmt of splitSql(text)) {
-      const s = strip(stmt.text).replace(/\s+/g, ' ').trim()
-      let m
-      if ((m = s.match(/^create (?:unlogged )?table (?:if not exists )?([\w."]+)/i)) && !/ partition of /i.test(s)) {
-        const t = tableName(m[1])
-        if (t.schema === 'public') tables.set(t.name, { file: rel, line: stmt.line, rls: false })
-      } else if ((m = s.match(/^alter table (?:if exists )?(?:only )?([\w."]+) (enable|disable|force) row level security/i))) {
-        const t = tableName(m[1])
-        if (t.schema === 'public' && tables.has(t.name)) tables.get(t.name).rls = m[2].toLowerCase() !== 'disable'
-      } else if ((m = s.match(/^drop table (?:if exists )?([\w.", ]+)/i))) {
-        for (const raw of m[1].split(',')) tables.delete(tableName(raw.trim().split(' ')[0]).name)
-      } else if ((m = s.match(/^create policy ("[^"]+"|\S+) on ([\w."]+)(.*)$/i))) {
-        const policy = m[1].replace(/"/g, '')
-        const t = tableName(m[2])
-        const rest = m[3]
-        const cmd = (rest.match(/ for (all|select|insert|update|delete)\b/i)?.[1] ?? 'all').toLowerCase()
-        const roles = rest.match(/ to ([\w", ]+?)(?: using| with check|$)/i)?.[1]?.toLowerCase() ?? 'public'
-        const alwaysTrue = /(using|with check) \(\s*\(?\s*(true|1\s*=\s*1)\s*\)?\s*\)/i.test(rest)
-        if (alwaysTrue && cmd !== 'select' && !/service_role/.test(roles) && t.schema !== 'storage')
-          findings.push({
-            source: 'database',
-            rule_id: 'rls-policy-always-true',
-            severity: /anon|public/.test(roles) ? 'critical' : 'high',
-            confidence: 'high',
-            title: `Política "${policy}" libera ${cmd === 'all' ? 'tudo' : cmd} em ${t.name} para ${/anon|public/.test(roles) ? 'qualquer pessoa' : 'qualquer usuário logado'}`,
-            detail: `A política "${policy}" da tabela ${t.name} tem a condição "true": ela não confere quem está pedindo.`,
-            impact:
-              cmd === 'insert'
-                ? `${/anon|public/.test(roles) ? 'Qualquer pessoa' : 'Qualquer usuário logado'} pode criar linhas em ${t.name} com qualquer conteúdo, inclusive em nome de outra pessoa.`
-                : `${/anon|public/.test(roles) ? 'Qualquer pessoa' : 'Qualquer usuário logado'} pode ${cmd === 'delete' ? 'apagar' : 'alterar'} linhas de outras pessoas em ${t.name}.`,
-            fix: `Troque "true" por uma condição que confira o dono, por exemplo: using ((select auth.uid()) = user_id)${cmd === 'insert' || cmd === 'update' || cmd === 'all' ? ' with check ((select auth.uid()) = user_id)' : ''}. Faça isso numa nova migration (drop policy + create policy).`,
-            file: rel,
-            line: stmt.line,
-            snippet: stmt.text.trim().split('\n')[0].slice(0, 240),
-            fingerprint: `database|rls-policy-always-true|${t.name}|${policy}`,
-          })
-      } else if (/^insert into storage\.buckets/i.test(s) && /\btrue\b/i.test(s)) {
-        const cols = s.match(/buckets ?\(([^)]*)\)/i)?.[1]?.split(',').map((c) => c.trim().toLowerCase()) ?? []
-        const values = s.match(/values ?\((.*)\)/i)?.[1]?.split(',').map((v) => v.trim()) ?? []
-        const pub = cols.indexOf('public')
-        if (pub !== -1 && /^true$/i.test(values[pub] ?? '')) {
-          const bucket = (values[cols.indexOf('id')] ?? values[cols.indexOf('name')] ?? '').replace(/'/g, '')
-          findings.push({
-            source: 'database',
-            rule_id: 'storage-public-bucket',
-            severity: 'medium',
-            confidence: 'high',
-            title: `Bucket de arquivos público: ${bucket}`,
-            detail: `O bucket ${bucket} foi criado como público: qualquer pessoa com o link abre os arquivos, sem login.`,
-            impact: 'Se guardar documentos, fotos pessoais ou arquivos de clientes, eles ficam acessíveis para quem descobrir o link.',
-            fix: 'Se os arquivos não são para o público, deixe o bucket privado (public = false) e entregue os arquivos com links temporários (createSignedUrl).',
-            file: rel,
-            line: stmt.line,
-            snippet: stmt.text.trim().split('\n')[0].slice(0, 240),
-            fingerprint: `database|storage-public-bucket|${bucket}`,
-          })
-        }
-      } else if ((m = s.match(/^create (?:or replace )?function ([\w."]+)/i)) && /security definer/i.test(s) && !/set search_path/i.test(s)) {
-        const fn = m[1].replace(/"/g, '')
-        findings.push({
-          source: 'database',
-          rule_id: 'security-definer-search-path',
-          severity: 'medium',
-          confidence: 'medium',
-          title: `Função ${fn} roda com poder total sem search_path fixo`,
-          detail: `A função ${fn} é "security definer" (roda com as permissões de quem a criou, ignorando as regras de acesso) e não fixa o search_path.`,
-          impact: 'Alguém com permissão para criar objetos no banco pode enganar a função e fazer ela executar código dele com poder total.',
-          fix: `Adicione "set search_path = ''" na definição da função (e use nomes completos, como public.tabela). Confira também se ela precisa mesmo ser security definer.`,
-          file: rel,
-          line: stmt.line,
-          snippet: stmt.text.trim().split('\n')[0].slice(0, 240),
-          fingerprint: `database|security-definer-search-path|${fn.toLowerCase()}`,
-        })
-      }
+      const f = databaseStatement(stmt, rel, tables)
+      if (f) findings.push(f)
     }
   }
-  for (const [name, t] of tables)
-    if (!t.rls)
-      findings.push({
-        source: 'database',
-        rule_id: 'rls-disabled',
-        severity: 'critical',
-        confidence: 'high',
-        title: `Tabela ${name} sem proteção de acesso (RLS)`,
-        detail: `A tabela public.${name} foi criada sem "enable row level security". Sem isso, as regras de acesso do Supabase não valem para ela.`,
-        impact: `Qualquer pessoa com a chave pública do app (que fica no navegador) pode ler, alterar e apagar tudo em ${name}.`,
-        fix: `Numa nova migration: alter table public.${name} enable row level security; e crie políticas que só deixam cada usuário ver e mudar os próprios dados.`,
-        file: t.file,
-        line: t.line,
-        snippet: `create table public.${name} (…)`,
-        fingerprint: `database|rls-disabled|${name}`,
-      })
+  for (const [name, t] of tables) if (!t.rls) findings.push(rlsDisabledFinding(name, t))
   return { findings, tables: tables.size, files: sqlFiles.length }
 }
 
@@ -893,10 +982,9 @@ const LINE_RULES = [
   },
 ]
 
-// Regras por arquivo: o que falta no arquivo inteiro (ex.: webhook que não confere a assinatura).
-function fileRules(rel, text) {
+// Webhooks do Stripe: assinatura não conferida, conferida com o corpo já convertido, pagamento sem idempotência.
+function webhookRules(rel, text, isRoute) {
   const out = []
-  const isRoute = SERVER_ROUTE.test(rel)
   // Webhook do Stripe sem conferir a assinatura.
   if (isRoute && /stripe/i.test(text) && /webhook|stripe-signature/i.test(rel + text) && /(checkout\.session|payment_intent|invoice\.|customer\.subscription|event\.type)/.test(text) && !/constructEvent(Async)?\s*\(/.test(text))
     out.push({
@@ -935,6 +1023,12 @@ function fileRules(rel, text) {
       impact: 'O Stripe reenvia o mesmo aviso quando a resposta demora ou falha: o cliente ganha créditos, e-mails ou pedidos em dobro.',
       fix: 'Guarde event.id numa tabela com chave única e pare se já existir; ou grave com upsert pelo id do pagamento, para repetir não ter efeito.',
     })
+  return out
+}
+
+// Pagamento: valor vindo do navegador, produto liberado na página de obrigado e chave de admin no navegador.
+function paymentRules(rel, text, isRoute) {
+  const out = []
   // Preço ou valor vindo do navegador na criação da cobrança.
   const clientAmount = text.search(/\b(unit_amount|amount|transaction_amount)\s*:\s*(Number\(|parseInt\(|parseFloat\()?\s*(req\.|request\.|c\.req\.)?(body|data|input|params|query|payload)\??\.\w*(price|amount|valor|total|preco|preço)/i)
   if (isRoute && clientAmount >= 0 && /stripe|mercadopago|checkout|payment|pagamento|pix/i.test(text))
@@ -976,6 +1070,12 @@ function fileRules(rel, text) {
       fix: 'No navegador, use só a chave pública (anon/publishable) com RLS. Operações de admin vão para o servidor (rota de API, server action, edge function).',
     })
   return out
+}
+
+// Regras por arquivo: o que falta no arquivo inteiro (ex.: webhook que não confere a assinatura).
+function fileRules(rel, text) {
+  const isRoute = SERVER_ROUTE.test(rel)
+  return [...webhookRules(rel, text, isRoute), ...paymentRules(rel, text, isRoute)]
 }
 
 function scanCode(root, files) {
@@ -1039,76 +1139,70 @@ function configFinding(ruleId, severity, file, extra) {
   return { source: 'config', rule_id: ruleId, severity, confidence: 'medium', file, line: null, snippet: null, fingerprint: `config|${ruleId}${extra?.key ? `|${extra.key}` : ''}`, ...extra }
 }
 
-function scanConfig(root, files) {
+// Limite de pedidos e de tamanho do corpo nas rotas do servidor.
+function routeLimitFindings({ routes, code, files, deps, read }) {
   const out = []
-  const code = files.filter((f) => CODE_FILE.test(f) && !TEST_PATH.test(f) && !/\.d\.ts$/.test(f))
-  const routes = code.filter((f) => SERVER_ROUTE.test(f))
-  // Dependências da raiz e das partes (num projeto dividido, o React fica em frontend/package.json).
-  const parts = projectParts(root)
-  const deps = allDeps(root, parts)
-  const texts = new Map()
-  const read = (f) => {
-    if (!texts.has(f)) texts.set(f, readText(root, f) ?? '')
-    return texts.get(f)
-  }
+  const serverCode = code.filter((f) => SERVER_ROUTE.test(f) || /(^|\/)(server|middleware|lib\/server|src\/server)(\/|\.)/i.test(f))
+  const hasLimit =
+    Object.keys(deps).some((d) => RATE_LIMIT_DEPS.test(d)) ||
+    serverCode.some((f) => RATE_LIMIT_CODE.test(read(f))) ||
+    files.filter((f) => /wrangler\.(jsonc?|toml)$/.test(f)).some((f) => /ratelimit/i.test(read(f)))
+  if (!hasLimit)
+    out.push(
+      configFinding('no-rate-limit', 'high', routes[0], {
+        title: 'Nenhum limite de pedidos (rate limit) nas rotas do servidor',
+        detail: `O projeto tem ${routes.length} rota(s) de servidor (ex.: ${routes.slice(0, 4).join(', ')}) e nenhuma delas limita quantos pedidos uma pessoa pode fazer por minuto.`,
+        impact: 'Alguém pode chamar as rotas sem parar: tentar senhas e tokens em massa, encher o banco, disparar e-mails ou gastar a sua conta de IA e de servidor até derrubar o app ou gerar uma conta alta.',
+        fix: 'Limite por usuário/IP nas rotas sensíveis (login, cadastro, envio de e-mail, IA, escrita no banco). Na Cloudflare: binding de Rate Limiting do Workers; na Vercel/Node: @upstash/ratelimit ou express-rate-limit. Responda 429 quando passar do limite.',
+        cwe: ['CWE-770'],
+      }),
+    )
+  // Corpo do pedido lido inteiro sem limite de tamanho.
+  const noBodyLimit = routes.filter((f) => /request\.(json|text|formData|arrayBuffer)\(\)|req\.(json|text)\(\)/.test(read(f)) && !/content-length|maxBody|bodyLimit|MAX_BYTES|MAX_BODY/i.test(read(f)))
+  if (noBodyLimit.length && !deps.express)
+    out.push(
+      configFinding('no-body-size-limit', 'medium', noBodyLimit[0], {
+        title: `Rotas leem o pedido inteiro sem limite de tamanho (${noBodyLimit.length})`,
+        detail: `Estas rotas leem o corpo do pedido sem conferir o tamanho antes: ${noBodyLimit.slice(0, 6).join(', ')}${noBodyLimit.length > 6 ? '…' : ''}.`,
+        impact: 'Um pedido gigante pode estourar a memória ou o tempo do servidor e derrubar o app, ou encher o banco.',
+        fix: 'Antes de ler o corpo, confira o cabeçalho content-length (ex.: acima de 1 MB responda 413) e limite também o tamanho dos campos que vão para o banco.',
+        cwe: ['CWE-400'],
+      }),
+    )
+  return out
+}
 
-  // Limite de pedidos: nenhuma rota do servidor tem, nem o projeto usa biblioteca ou configuração para isso.
-  if (routes.length) {
-    const serverCode = code.filter((f) => SERVER_ROUTE.test(f) || /(^|\/)(server|middleware|lib\/server|src\/server)(\/|\.)/i.test(f))
-    const hasLimit =
-      Object.keys(deps).some((d) => RATE_LIMIT_DEPS.test(d)) ||
-      serverCode.some((f) => RATE_LIMIT_CODE.test(read(f))) ||
-      files.filter((f) => /wrangler\.(jsonc?|toml)$/.test(f)).some((f) => /ratelimit/i.test(read(f)))
-    if (!hasLimit)
-      out.push(
-        configFinding('no-rate-limit', 'high', routes[0], {
-          title: 'Nenhum limite de pedidos (rate limit) nas rotas do servidor',
-          detail: `O projeto tem ${routes.length} rota(s) de servidor (ex.: ${routes.slice(0, 4).join(', ')}) e nenhuma delas limita quantos pedidos uma pessoa pode fazer por minuto.`,
-          impact: 'Alguém pode chamar as rotas sem parar: tentar senhas e tokens em massa, encher o banco, disparar e-mails ou gastar a sua conta de IA e de servidor até derrubar o app ou gerar uma conta alta.',
-          fix: 'Limite por usuário/IP nas rotas sensíveis (login, cadastro, envio de e-mail, IA, escrita no banco). Na Cloudflare: binding de Rate Limiting do Workers; na Vercel/Node: @upstash/ratelimit ou express-rate-limit. Responda 429 quando passar do limite.',
-          cwe: ['CWE-770'],
-        }),
-      )
-    // Corpo do pedido lido inteiro sem limite de tamanho.
-    const noBodyLimit = routes.filter((f) => /request\.(json|text|formData|arrayBuffer)\(\)|req\.(json|text)\(\)/.test(read(f)) && !/content-length|maxBody|bodyLimit|MAX_BYTES|MAX_BODY/i.test(read(f)))
-    if (noBodyLimit.length && !deps.express)
-      out.push(
-        configFinding('no-body-size-limit', 'medium', noBodyLimit[0], {
-          title: `Rotas leem o pedido inteiro sem limite de tamanho (${noBodyLimit.length})`,
-          detail: `Estas rotas leem o corpo do pedido sem conferir o tamanho antes: ${noBodyLimit.slice(0, 6).join(', ')}${noBodyLimit.length > 6 ? '…' : ''}.`,
-          impact: 'Um pedido gigante pode estourar a memória ou o tempo do servidor e derrubar o app, ou encher o banco.',
-          fix: 'Antes de ler o corpo, confira o cabeçalho content-length (ex.: acima de 1 MB responda 413) e limite também o tamanho dos campos que vão para o banco.',
-          cwe: ['CWE-400'],
-        }),
-      )
-  }
-
-  // Cabeçalhos de segurança do site.
+// Cabeçalhos de segurança do site (só quando o projeto tem um site).
+function securityHeaderFindings({ root, parts, files, code, deps, read }) {
+  const out = []
   const webDep = ['react', 'next', 'vue', 'svelte', '@sveltejs/kit', 'astro', 'nuxt', 'solid-js', 'vite'].find((d) => deps[d])
-  if (webDep) {
-    const sitePkg = [partWith(root, webDep, parts)?.dir, 'package.json'].filter(Boolean).join('/')
-    const headerText = files.filter((f) => HEADER_FILES.test(f)).map(read).join('\n') + code.filter((f) => /middleware|headers|security/i.test(f)).map(read).join('\n')
-    // O cabeçalho precisa estar sendo definido (nome seguido de valor), não só citado num texto.
-    const sets = (name) => new RegExp(`(^|['"\\s])(${name})['"]?\\s*[:,=]\\s*['"]?[\\w'-]`, 'im')
-    const missing = [
-      [sets('Content-Security-Policy'), 'Content-Security-Policy (CSP)'],
-      [sets('X-Frame-Options|frame-ancestors'), 'X-Frame-Options / frame-ancestors'],
-      [sets('Strict-Transport-Security'), 'Strict-Transport-Security (HSTS)'],
-      [sets('X-Content-Type-Options'), 'X-Content-Type-Options'],
-    ].filter(([re]) => !re.test(headerText))
-    if (missing.length >= 2)
-      out.push(
-        configFinding('missing-security-headers', 'medium', sitePkg, {
-          title: 'Cabeçalhos de segurança do site ausentes',
-          detail: `Não encontrei estes cabeçalhos de segurança na configuração do site: ${missing.map(([, n]) => n).join(', ')}.`,
-          impact: 'Sem eles, fica mais fácil explorar uma falha de XSS, abrir o seu site escondido dentro de outro para enganar cliques (clickjacking) ou forçar conexão sem HTTPS.',
-          fix: 'Envie os cabeçalhos em todas as respostas do site (middleware, headers() do next.config, _headers da Cloudflare/Netlify ou vercel.json). Comece pela CSP em modo "Report-Only" para não quebrar nada.',
-          cwe: ['CWE-693'],
-        }),
-      )
-  }
+  if (!webDep) return out
+  const sitePkg = [partWith(root, webDep, parts)?.dir, 'package.json'].filter(Boolean).join('/')
+  const headerText = files.filter((f) => HEADER_FILES.test(f)).map(read).join('\n') + code.filter((f) => /middleware|headers|security/i.test(f)).map(read).join('\n')
+  // O cabeçalho precisa estar sendo definido (nome seguido de valor), não só citado num texto.
+  const sets = (name) => new RegExp(`(^|['"\\s])(${name})['"]?\\s*[:,=]\\s*['"]?[\\w'-]`, 'im')
+  const missing = [
+    [sets('Content-Security-Policy'), 'Content-Security-Policy (CSP)'],
+    [sets('X-Frame-Options|frame-ancestors'), 'X-Frame-Options / frame-ancestors'],
+    [sets('Strict-Transport-Security'), 'Strict-Transport-Security (HSTS)'],
+    [sets('X-Content-Type-Options'), 'X-Content-Type-Options'],
+  ].filter(([re]) => !re.test(headerText))
+  if (missing.length >= 2)
+    out.push(
+      configFinding('missing-security-headers', 'medium', sitePkg, {
+        title: 'Cabeçalhos de segurança do site ausentes',
+        detail: `Não encontrei estes cabeçalhos de segurança na configuração do site: ${missing.map(([, n]) => n).join(', ')}.`,
+        impact: 'Sem eles, fica mais fácil explorar uma falha de XSS, abrir o seu site escondido dentro de outro para enganar cliques (clickjacking) ou forçar conexão sem HTTPS.',
+        fix: 'Envie os cabeçalhos em todas as respostas do site (middleware, headers() do next.config, _headers da Cloudflare/Netlify ou vercel.json). Comece pela CSP em modo "Report-Only" para não quebrar nada.',
+        cwe: ['CWE-693'],
+      }),
+    )
+  return out
+}
 
-  // Segredo em "vars" do wrangler (vai em texto claro para o código e para o git).
+// Segredo em "vars" do wrangler (vai em texto claro para o código e para o git).
+function wranglerVarsFindings(files, read) {
+  const out = []
   for (const f of files.filter((x) => /(^|\/)wrangler\.(jsonc?|toml)$/.test(x))) {
     const text = read(f)
     const vars = text.match(/"vars"\s*:\s*\{([^}]*)\}|\[vars\]([\s\S]*?)(\n\[|$)/)
@@ -1126,24 +1220,47 @@ function scanConfig(root, files) {
       )
   }
 
-  // Regras do Firebase abertas.
+  return out
+}
+
+// Tipo de regra aberta do Firestore/Storage: liberada para todos, modo de teste (só data) ou qualquer logado escrevendo.
+function firebaseRuleKind(cond, ops) {
+  if (/^true$/.test(cond)) return 'open'
+  if (/request\.time\s*<\s*timestamp\.date/.test(cond)) return 'testMode'
+  if (/^request\.auth\s*!=\s*null$/.test(cond) && /write|create|update|delete/.test(ops)) return 'anyUser'
+  return null
+}
+
+const FIREBASE_RULE_KINDS = {
+  open: { id: 'firebase-rules-open', anyone: true, title: (ops) => `Regra do Firebase libera ${ops} para qualquer pessoa`, why: 'não confere nada' },
+  testMode: { id: 'firebase-rules-test-mode', anyone: true, title: () => 'Regras do Firebase em modo de teste', why: 'só confere uma data (modo de teste)' },
+  anyUser: {
+    id: 'firebase-rules-any-user',
+    anyone: false,
+    title: (ops) => `Regra do Firebase libera ${ops} para qualquer usuário logado`,
+    why: 'só confere se a pessoa está logada, não se o dado é dela',
+  },
+}
+
+// Regras do Firebase (Firestore e Storage) abertas.
+function firebaseRulesFindings(files, read) {
+  const out = []
   for (const f of files.filter((x) => /(^|\/)(firestore|storage)\.rules$/.test(x))) {
     const text = read(f)
     for (const m of text.matchAll(/allow\s+([\w, ]+?)\s*(?::\s*if\s+([^;]+))?;/g)) {
       const cond = (m[2] ?? 'true').trim()
       const ops = m[1]
-      const open = /^true$/.test(cond)
-      const testMode = /request\.time\s*<\s*timestamp\.date/.test(cond)
-      const anyUser = /^request\.auth\s*!=\s*null$/.test(cond)
-      if (!open && !testMode && !(anyUser && /write|create|update|delete/.test(ops))) continue
+      const kind = firebaseRuleKind(cond, ops)
+      if (!kind) continue
+      const k = FIREBASE_RULE_KINDS[kind]
       out.push({
         source: 'config',
-        rule_id: open ? 'firebase-rules-open' : testMode ? 'firebase-rules-test-mode' : 'firebase-rules-any-user',
-        severity: open || testMode ? 'critical' : 'high',
+        rule_id: k.id,
+        severity: k.anyone ? 'critical' : 'high',
         confidence: 'high',
-        title: open ? `Regra do Firebase libera ${ops} para qualquer pessoa` : testMode ? 'Regras do Firebase em modo de teste' : `Regra do Firebase libera ${ops} para qualquer usuário logado`,
-        detail: `Em ${f}, a regra "allow ${ops}${m[2] ? `: if ${cond}` : ''}" ${open ? 'não confere nada' : testMode ? 'só confere uma data (modo de teste)' : 'só confere se a pessoa está logada, não se o dado é dela'}.`,
-        impact: open || testMode ? 'Qualquer pessoa na internet pode ler e mudar esses dados, sem login.' : 'Qualquer pessoa que criar uma conta pode mudar ou apagar dados de outros usuários.',
+        title: k.title(ops),
+        detail: `Em ${f}, a regra "allow ${ops}${m[2] ? `: if ${cond}` : ''}" ${k.why}.`,
+        impact: k.anyone ? 'Qualquer pessoa na internet pode ler e mudar esses dados, sem login.' : 'Qualquer pessoa que criar uma conta pode mudar ou apagar dados de outros usuários.',
         fix: 'Confira o dono do dado na regra, ex.: allow read, write: if request.auth != null && request.auth.uid == resource.data.userId; e restrinja por coleção.',
         file: f,
         line: lineOf(text, m.index),
@@ -1153,6 +1270,12 @@ function scanConfig(root, files) {
       })
     }
   }
+  return out
+}
+
+// Realtime Database com ".read"/".write": true.
+function rtdbRulesFindings(files, read) {
+  const out = []
   for (const f of files.filter((x) => /(^|\/)database\.rules\.json$/.test(x))) {
     const text = read(f)
     for (const m of text.matchAll(/"\.(read|write)"\s*:\s*(true|"true")/g))
@@ -1173,6 +1296,27 @@ function scanConfig(root, files) {
       })
   }
   return out
+}
+
+function scanConfig(root, files) {
+  const code = files.filter((f) => CODE_FILE.test(f) && !TEST_PATH.test(f) && !/\.d\.ts$/.test(f))
+  const routes = code.filter((f) => SERVER_ROUTE.test(f))
+  // Dependências da raiz e das partes (num projeto dividido, o React fica em frontend/package.json).
+  const parts = projectParts(root)
+  const deps = allDeps(root, parts)
+  const texts = new Map()
+  const read = (f) => {
+    if (!texts.has(f)) texts.set(f, readText(root, f) ?? '')
+    return texts.get(f)
+  }
+  return [
+    // Limite de pedidos: nenhuma rota do servidor tem, nem o projeto usa biblioteca ou configuração para isso.
+    ...(routes.length ? routeLimitFindings({ routes, code, files, deps, read }) : []),
+    ...securityHeaderFindings({ root, parts, files, code, deps, read }),
+    ...wranglerVarsFindings(files, read),
+    ...firebaseRulesFindings(files, read),
+    ...rtdbRulesFindings(files, read),
+  ]
 }
 
 // ---- chaves no histórico do git --------------------------------------------------------------

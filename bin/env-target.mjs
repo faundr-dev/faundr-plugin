@@ -53,7 +53,9 @@ export function remoteDatabases(root) {
   for (const f of PROD_CONFIG) {
     try {
       config += fs.readFileSync(path.join(root, f), 'utf8').toLowerCase()
-    } catch {}
+    } catch {
+      // Arquivo de configuração que o projeto não tem: segue com os outros.
+    }
   }
   const seen = new Set()
   return remote

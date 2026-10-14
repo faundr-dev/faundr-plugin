@@ -71,7 +71,8 @@ test('voltar desfaz edições, apaga o que foi criado depois, traz o apagado e p
 test('um por sessão, de novo depois de 30 min, só com git', () => {
   const root = repo()
   const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-cfg-'))
-  const t0 = Date.now()
+  // Hora fixa: o resultado não depende do dia em que o teste roda.
+  const t0 = Date.UTC(2026, 0, 15, 12)
   fs.writeFileSync(path.join(root, 'a.txt'), 'x\n')
   assert.ok(ensureSessionCheckpoint(root, 's1', { configDir, now: t0 }))
   fs.writeFileSync(path.join(root, 'a.txt'), 'y\n')

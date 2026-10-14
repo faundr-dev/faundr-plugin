@@ -96,24 +96,32 @@ function removalRisk(target, cwd) {
   return 'outside'
 }
 
+const REMOVE_PROGRAMS = new Set(['rm', 'rmdir', 'rd', 'remove-item', 'ri', 'del', 'erase'])
+const WINDOWS_REMOVE = new Set(['rd', 'rmdir', 'del', 'erase'])
+
+// Opções de um comando de apagar: se é recursivo e quais caminhos ele recebe.
+function removalArgs(program, words) {
+  const windowsStyle = WINDOWS_REMOVE.has(program)
+  let recursive = false
+  const targets = []
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i]
+    if (windowsStyle && /^\/[a-z]$/i.test(w)) {
+      if (/^\/s$/i.test(w)) recursive = true
+      continue
+    }
+    if (/^--?recurse$|^-recurse$|^--recursive$/i.test(w)) recursive = true
+    else if (/^-[a-zA-Z]+$/.test(w) && program === 'rm') recursive ||= /r/i.test(w)
+    else if (/^-(path|literalpath)$/i.test(w)) targets.push(words[++i] ?? '')
+    else if (!w.startsWith('-')) targets.push(w)
+  }
+  return { recursive, targets }
+}
+
 function removal(seg, cwd) {
   const { program, words } = seg
-  let recursive = false
-  let targets = []
-  if (program === 'rm' || program === 'rmdir' || program === 'rd' || program === 'remove-item' || program === 'ri' || program === 'del' || program === 'erase') {
-    const windowsStyle = program === 'rd' || program === 'rmdir' || program === 'del' || program === 'erase'
-    for (let i = 0; i < words.length; i++) {
-      const w = words[i]
-      if (windowsStyle && /^\/[a-z]$/i.test(w)) {
-        if (/^\/s$/i.test(w)) recursive = true
-        continue
-      }
-      if (/^--?recurse$|^-recurse$|^--recursive$/i.test(w)) recursive = true
-      else if (/^-[a-zA-Z]+$/.test(w) && program === 'rm') recursive ||= /r/i.test(w)
-      else if (/^-(path|literalpath)$/i.test(w)) targets.push(words[++i] ?? '')
-      else if (!w.startsWith('-')) targets.push(w)
-    }
-  } else return null
+  if (!REMOVE_PROGRAMS.has(program)) return null
+  const { recursive, targets } = removalArgs(program, words)
   if (!recursive) return null
   const risks = targets.map((t) => [t, removalRisk(t, cwd)]).filter(([, r]) => r)
   const worst = risks.find(([, r]) => r === 'catastrophe') ?? risks[0]

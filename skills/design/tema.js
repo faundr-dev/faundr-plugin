@@ -24,7 +24,9 @@
   for (const s of doc.styleSheets) {
     try {
       walk(s.cssRules)
-    } catch {}
+    } catch {
+      // Folha de outro domínio (CORS) não deixa ler as regras: fica como está.
+    }
   }
   for (const m of doc.querySelectorAll('link[rel=stylesheet][media*="prefers-color-scheme"], style[media*="prefers-color-scheme"]'))
     m.media = flip(m.media)

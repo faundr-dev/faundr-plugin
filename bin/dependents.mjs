@@ -10,6 +10,7 @@ export function readGraph(root) {
   try {
     return JSON.parse(fs.readFileSync(faundrPath(root, 'graph'), 'utf8'))
   } catch {
+    // Grafo ainda não gerado (ou ilegível): sem lista de dependentes.
     return null
   }
 }

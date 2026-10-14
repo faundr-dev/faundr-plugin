@@ -18,6 +18,13 @@ export function parseImport(json, maskSecrets = (t) => t) {
   throw new Error('Formato não reconhecido. Aceito: JSON do "snyk test --json", SARIF (.sarif/.json) e o resultado do Security Advisor do Supabase.')
 }
 
+// Dica de correção do Snyk: o caminho de atualização sugerido, a versão corrigida ou nenhuma ainda.
+function snykFix(v, upgrade, fixed, chain) {
+  if (upgrade) return `Atualize para ${upgrade}${chain ? ` (o pacote vem de ${chain})` : ''}.`
+  if (fixed) return `Atualize ${v.packageName} para ${fixed} ou mais nova${chain ? ` (ele vem de ${chain}; atualize primeiro o ${chain.split(' > ')[0]})` : ''}.`
+  return 'Ainda não existe versão corrigida.'
+}
+
 function snykOpenSource(projects) {
   const findings = []
   for (const p of projects) {
@@ -34,11 +41,7 @@ function snykOpenSource(projects) {
         title: `${v.packageName} ${v.version}: ${v.title}`,
         detail: `O Snyk encontrou a falha ${v.id} na versão ${v.version} do pacote ${v.packageName}. Detalhes no aviso do Snyk (link abaixo).`,
         impact: v.malicious ? 'O pacote foi marcado como malicioso.' : 'Depende de como o projeto usa o pacote; veja o aviso do Snyk.',
-        fix: upgrade
-          ? `Atualize para ${upgrade}${chain ? ` (o pacote vem de ${chain})` : ''}.`
-          : fixed
-            ? `Atualize ${v.packageName} para ${fixed} ou mais nova${chain ? ` (ele vem de ${chain}; atualize primeiro o ${chain.split(' > ')[0]})` : ''}.`
-            : 'Ainda não existe versão corrigida.',
+        fix: snykFix(v, upgrade, fixed, chain),
         file,
         package: v.packageName,
         version: v.version,
@@ -52,6 +55,19 @@ function snykOpenSource(projects) {
     }
   }
   return { tool: 'snyk', findings: [...new Map(findings.map((f) => [f.fingerprint, f])).values()] }
+}
+
+// Gravidade no SARIF: pela nota security-severity (CVSS) quando existe; senão, pelo nível do resultado.
+function sarifSeverity(score, level) {
+  if (Number.isFinite(score) && score > 0) {
+    if (score >= 9) return 'critical'
+    if (score >= 7) return 'high'
+    if (score >= 4) return 'medium'
+    return 'low'
+  }
+  if (level === 'error') return 'high'
+  if (level === 'note' || level === 'none') return 'low'
+  return 'medium'
 }
 
 function sarif(doc, maskSecrets) {
@@ -68,9 +84,7 @@ function sarif(doc, maskSecrets) {
       const file = loc?.artifactLocation?.uri ? decodeURIComponent(loc.artifactLocation.uri).replace(/^file:\/\/\/?/, '').replace(/\\/g, '/') : null
       const line = loc?.region?.startLine ?? null
       const score = Number(rule.properties?.['security-severity'] ?? r.properties?.['security-severity'])
-      const severity = Number.isFinite(score) && score > 0
-        ? score >= 9 ? 'critical' : score >= 7 ? 'high' : score >= 4 ? 'medium' : 'low'
-        : r.level === 'error' ? 'high' : r.level === 'note' || r.level === 'none' ? 'low' : 'medium'
+      const severity = sarifSeverity(score, r.level)
       const message = maskSecrets(String(r.message?.text ?? rule.shortDescription?.text ?? r.ruleId ?? ''))
       const title = maskSecrets(String(rule.shortDescription?.text ?? rule.name ?? message.split(/(?<=\.)\s/)[0] ?? r.ruleId)).slice(0, 280)
       const cwe = [...new Set(JSON.stringify(rule.properties?.tags ?? rule.properties?.cwe ?? []).match(/CWE-\d+/gi) ?? [])]
@@ -98,6 +112,12 @@ function sarif(doc, maskSecrets) {
 
 // Security Advisor do Supabase: o mesmo verificador do painel do Supabase, olhando o banco de verdade
 // (inclusive o que foi configurado direto no painel e não está nas migrations).
+function advisorSeverity(level) {
+  if (level === 'ERROR') return 'critical'
+  if (level === 'WARN') return 'medium'
+  return 'low'
+}
+
 export function supabaseAdvisors(lints) {
   const findings = lints
     .filter((l) => (l.categories ?? ['SECURITY']).includes('SECURITY'))
@@ -106,7 +126,7 @@ export function supabaseAdvisors(lints) {
       return {
         source: 'database',
         rule_id: `supabase:${l.name}`,
-        severity: l.level === 'ERROR' ? 'critical' : l.level === 'WARN' ? 'medium' : 'low',
+        severity: advisorSeverity(l.level),
         confidence: 'high',
         title: `${l.title}${obj ? `: ${obj}` : ''}`.slice(0, 280),
         detail: `O Security Advisor do Supabase apontou: ${l.detail ?? l.description ?? l.title}`.slice(0, 3000),

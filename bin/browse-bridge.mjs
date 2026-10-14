@@ -18,12 +18,15 @@ export const acceptKey = (key) =>
 export function encodeFrame(text, opcode = 0x1) {
   const payload = Buffer.from(text)
   const n = payload.length
-  const head = n < 126 ? Buffer.from([0x80 | opcode, n]) : n < 65536 ? Buffer.alloc(4) : Buffer.alloc(10)
-  if (n >= 126 && n < 65536) {
+  let head
+  if (n < 126) head = Buffer.from([0x80 | opcode, n])
+  else if (n < 65536) {
+    head = Buffer.alloc(4)
     head[0] = 0x80 | opcode
     head[1] = 126
     head.writeUInt16BE(n, 2)
-  } else if (n >= 65536) {
+  } else {
+    head = Buffer.alloc(10)
     head[0] = 0x80 | opcode
     head[1] = 127
     head.writeBigUInt64BE(BigInt(n), 2)

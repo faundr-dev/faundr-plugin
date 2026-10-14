@@ -27,7 +27,9 @@ function log(message) {
   try {
     fs.mkdirSync(CONFIG_DIR, { recursive: true })
     fs.appendFileSync(path.join(CONFIG_DIR, 'hook.log'), `${new Date().toISOString()} guard-cmd: ${message}\n`)
-  } catch {}
+  } catch {
+    // Sem onde registrar: o hook nunca pode quebrar o agente.
+  }
 }
 
 function linked(dir) {
@@ -53,6 +55,7 @@ function databaseNote(root, verdict, sql) {
   try {
     return remoteNote(remoteDatabases(root))
   } catch {
+    // Sem ler o .env, o aviso sai sem a nota do banco (o pedido de confirmação continua).
     return null
   }
 }
@@ -79,11 +82,28 @@ function currentBranch(cwd) {
     const head = fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf8').trim()
     return head.startsWith('ref: refs/heads/') ? head.slice(16) : null
   } catch {
+    // Sem git ou HEAD ilegível: sem branch, o aviso de push com o time não se aplica.
     return null
   }
 }
 
 const reply = (output) => process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', ...output } }))
+
+// Comando perigoso: barra ou pergunta, com o motivo em português.
+function replyVerdict(verdict, { payload, cwd, root, command, sql }) {
+  // Risco nos arquivos: um ponto de volta antes (o usuário ainda vai decidir; se aprovar, dá para desfazer).
+  let checkpoint = null
+  if (verdict.files && verdict.level === 'ask' && gitRoot(cwd)) {
+    try {
+      checkpoint = createCheckpoint(gitRoot(cwd), { reason: `antes de: ${command.replace(/\s+/g, ' ').slice(0, 120)}`, session: payload.session_id })
+    } catch (err) {
+      log(`ponto de volta: ${err.message}`)
+    }
+  }
+  log(`${verdict.level}: ${verdict.what} :: ${command.slice(0, 200)}`)
+  if (verdict.restore) return reply({ permissionDecision: 'ask', permissionDecisionReason: restoreReason(cwd, verdict.restore) })
+  return reply({ permissionDecision: verdict.level, permissionDecisionReason: guardMessage(verdict, { command, checkpoint, note: databaseNote(root, verdict, sql) }) })
+}
 
 async function main() {
   const payload = JSON.parse(await readStdin())
@@ -96,20 +116,7 @@ async function main() {
   if (typeof command !== 'string') return
 
   const verdict = classifyCommand(command, { cwd, sql })
-  if (verdict) {
-    // Risco nos arquivos: um ponto de volta antes (o usuário ainda vai decidir; se aprovar, dá para desfazer).
-    let checkpoint = null
-    if (verdict.files && verdict.level === 'ask' && gitRoot(cwd)) {
-      try {
-        checkpoint = createCheckpoint(gitRoot(cwd), { reason: `antes de: ${command.replace(/\s+/g, ' ').slice(0, 120)}`, session: payload.session_id })
-      } catch (err) {
-        log(`ponto de volta: ${err.message}`)
-      }
-    }
-    log(`${verdict.level}: ${verdict.what} :: ${command.slice(0, 200)}`)
-    if (verdict.restore) return reply({ permissionDecision: 'ask', permissionDecisionReason: restoreReason(cwd, verdict.restore) })
-    return reply({ permissionDecision: verdict.level, permissionDecisionReason: guardMessage(verdict, { command, checkpoint, note: databaseNote(root, verdict, sql) }) })
-  }
+  if (verdict) return replyVerdict(verdict, { payload, cwd, root, command, sql })
 
   const push = !sql && pushWarning(readTeam(root), payload.session_id, command, currentBranch(cwd))
   if (push) {

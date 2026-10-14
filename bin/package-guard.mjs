@@ -22,31 +22,45 @@ export function installedPackages(command) {
     const words = part.trim().match(/"[^"]*"|'[^']*'|\S+/g)?.map(strip) ?? []
     while (words.length && (/^\w+=/.test(words[0]) || words[0] === 'sudo')) words.shift()
     if (words.some((w) => /^--(registry|index-url|extra-index-url|find-links)\b|^-i$/.test(w))) continue
-    const prog = path.basename(words[0] ?? '').toLowerCase().replace(/\.(exe|cmd)$/, '')
-    let rest = null
-    let eco = null
-    if (['npm', 'pnpm', 'yarn', 'bun', 'cnpm'].includes(prog)) {
-      const i = words.findIndex((w, k) => k > 0 && ['install', 'i', 'add', 'isntall'].includes(w))
-      if (i > 0) [rest, eco] = [words.slice(i + 1), 'npm']
-    } else if (/^(pip3?|pipx)$/.test(prog) || (/^python3?$/.test(prog) && words[1] === '-m' && /^pip3?$/.test(words[2]))) {
-      const i = words.indexOf('install')
-      if (i > 0) [rest, eco] = [words.slice(i + 1), 'pypi']
-    } else if (prog === 'uv') {
-      const i = words[1] === 'add' ? 1 : words[1] === 'pip' && words[2] === 'install' ? 2 : -1
-      if (i > 0) [rest, eco] = [words.slice(i + 1), 'pypi']
-    } else if (prog === 'poetry' && words[1] === 'add') [rest, eco] = [words.slice(2), 'pypi']
-    if (!rest) continue
-    for (let k = 0; k < rest.length; k++) {
-      const w = rest[k]
-      if (w.startsWith('-')) {
-        if (/^-(r|c|e)$|^--(requirement|constraint|editable|target|prefix|filter|workspace|tag)$/.test(w)) k++
-        continue
-      }
-      const name = eco === 'npm' ? npmName(w) : pypiName(w)
-      if (name) found.push({ ecosystem: eco, name })
-    }
+    const install = installArgs(words)
+    if (install) found.push(...namesFrom(install.rest, install.eco))
   }
   return found.filter((p, i, a) => a.findIndex((q) => q.ecosystem === p.ecosystem && q.name === p.name) === i)
+}
+
+// uv add x (posição 1) ou uv pip install x (posição 2); -1 quando não instala.
+function uvInstallIndex(words) {
+  if (words[1] === 'add') return 1
+  return words[1] === 'pip' && words[2] === 'install' ? 2 : -1
+}
+
+// O programa e o subcomando de instalar: o que vem depois dele e o registro ({ rest, eco }), ou null.
+function installArgs(words) {
+  const prog = path.basename(words[0] ?? '').toLowerCase().replace(/\.(exe|cmd)$/, '')
+  let i = -1
+  let eco = 'pypi'
+  if (['npm', 'pnpm', 'yarn', 'bun', 'cnpm'].includes(prog)) {
+    i = words.findIndex((w, k) => k > 0 && ['install', 'i', 'add', 'isntall'].includes(w))
+    eco = 'npm'
+  } else if (/^(pip3?|pipx)$/.test(prog) || (/^python3?$/.test(prog) && words[1] === '-m' && /^pip3?$/.test(words[2]))) i = words.indexOf('install')
+  else if (prog === 'uv') i = uvInstallIndex(words)
+  else if (prog === 'poetry' && words[1] === 'add') i = 1
+  return i > 0 ? { rest: words.slice(i + 1), eco } : null
+}
+
+// Nomes de pacote entre os argumentos (pula as opções e o valor das que recebem um).
+function namesFrom(rest, eco) {
+  const found = []
+  for (let k = 0; k < rest.length; k++) {
+    const w = rest[k]
+    if (w.startsWith('-')) {
+      if (/^-(r|c|e)$|^--(requirement|constraint|editable|target|prefix|filter|workspace|tag)$/.test(w)) k++
+      continue
+    }
+    const name = eco === 'npm' ? npmName(w) : pypiName(w)
+    if (name) found.push({ ecosystem: eco, name })
+  }
+  return found
 }
 
 function npmName(spec) {
@@ -96,6 +110,7 @@ export async function checkPackage({ ecosystem, name }, { fetchImpl = fetch, now
     if (created && now - created < NEW_DAYS * 86400_000) return { status: 'new', created }
     return { status: 'ok' }
   } catch {
+    // Sem rede ou registro fora do ar: não dá para saber, e quem chama deixa passar (nunca trava o trabalho).
     return null
   }
 }
@@ -105,6 +120,7 @@ function readCache(file) {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8'))
   } catch {
+    // Cache ausente ou corrompido: começa vazio e confere tudo na rede.
     return {}
   }
 }
@@ -124,7 +140,9 @@ export async function guardInstall(command, { configDir, fetchImpl, now = Date.n
     try {
       fs.mkdirSync(configDir, { recursive: true })
       fs.writeFileSync(cacheFile, JSON.stringify(cache))
-    } catch {}
+    } catch {
+      // O cache é só atalho: sem gravar, a próxima vez confere de novo na rede.
+    }
   }
   const registry = (p) => (p.ecosystem === 'npm' ? 'npm' : 'PyPI')
   const missing = results.filter((x) => x.r?.status === 'missing')

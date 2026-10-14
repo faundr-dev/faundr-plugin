@@ -18,6 +18,7 @@ export function listMaps(root) {
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true })
     } catch {
+      // Pasta sem permissão ou que sumiu: só pula, a busca segue nas outras.
       return
     }
     for (const e of entries) {
@@ -42,7 +43,9 @@ export function findMap(root, rawFile, debugId) {
         const head = fs.readFileSync(m, 'utf8')
         const found = head.match(/"debug_?[iI]d"\s*:\s*"([^"]+)"/)
         if (found && found[1].toLowerCase().replace(/-/g, '') === id) return m
-      } catch {}
+      } catch {
+        // Mapa ilegível: tenta o próximo; sem achar, cai na busca pelo nome do arquivo abaixo.
+      }
     }
   }
   const base = path.basename(String(rawFile ?? '').replace(/[?#].*$/, ''))
@@ -90,6 +93,7 @@ export function resolvePosition(mapFile, line, column) {
   try {
     map = JSON.parse(fs.readFileSync(mapFile, 'utf8'))
   } catch {
+    // Mapa ausente ou JSON quebrado: sem tradução, quem chama mostra a posição do build.
     return null
   }
   if (map.sections) {
@@ -135,6 +139,7 @@ export function contextLines(root, pos, around = 2) {
     try {
       text = fs.readFileSync(path.join(root, pos.source), 'utf8')
     } catch {
+      // Fonte não está no mapa nem no disco: sem trecho para mostrar.
       return null
     }
   }

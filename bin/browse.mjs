@@ -128,7 +128,9 @@ class Browser {
     while (Date.now() < deadline) {
       try {
         if ((await this.evaluate('document.readyState')) === 'complete') break
-      } catch {}
+      } catch {
+        // Documento trocando no meio da carga: tenta de novo até o prazo.
+      }
       await sleep(20)
     }
   }
@@ -173,7 +175,9 @@ class Browser {
           }))(${JSON.stringify(action)})`,
           { awaitPromise: true },
         )
-      } catch {}
+      } catch {
+        // A espera é só um atalho: se a página mudou no meio, a leitura logo abaixo tenta de novo.
+      }
     }
     // Navegação em andamento: tenta de novo por até ~5 s.
     for (let attempt = 0; attempt < 100; attempt++) {
@@ -407,6 +411,65 @@ export function stuck(history) {
   return last.length === 3 && last.every((h) => !h.page_changed && h.action === step.action && h.text === step.text)
 }
 
+// Uma rodada do laço: o Jev escolhe, a ação acontece e o passo vai para o histórico. Para o laço mudando run.status.
+async function decideAndAct(run) {
+  const { browser, args, history } = run
+  if (!(await browser.fresh(run.page))) run.page = await browser.observe()
+  run.decisions++
+  const { operation, action, state } = await choose(run.jev, run.page, args.goal, history, args.values, args.secrets, run.trace)
+  if (operation === 'DONE' || operation === 'BLOCKED') {
+    if (!(await browser.fresh(run.page))) throw new StalePage('A página mudou antes de concluir')
+    run.status = operation === 'DONE' ? 'done' : 'blocked'
+    run.reason = operation === 'BLOCKED' ? 'o Jev não achou como avançar' : ''
+    return
+  }
+  let text = null
+  let secret = false
+  if (action.kind === 'fill') {
+    const picked = await chooseValue(run.jev, state, args.goal, action, args.values, args.secrets)
+    if (picked == null) {
+      run.status = 'blocked'
+      run.reason = `nenhum valor serve para o campo "${action.label}"`
+      return
+    }
+    ;({ text, secret } = picked)
+  }
+  const before = run.page.fingerprint
+  await browser.act(action, run.page, text)
+  run.page = await browser.observe()
+  const step = {
+    ms: Math.round(performance.now() - run.started),
+    action: action.label,
+    kind: action.kind,
+    ...(text != null ? { text: secret ? '[senha oculta]' : text } : {}),
+    page_changed: run.page.fingerprint !== before,
+  }
+  history.push(step)
+  run.log(`${String(step.ms).padStart(6)} ms  ${operation.padEnd(11)} ${action.label}${step.text ? ` ← "${step.text}"` : ''}`)
+  if (stuck(history)) {
+    run.status = 'blocked'
+    run.reason = `repetiu "${step.action}" sem a página mudar`
+  }
+}
+
+// Laço de decisões até concluir, travar ou bater no limite de passos. Página trocada no meio: lê de novo e segue.
+async function runSteps(run) {
+  while (run.status === 'running') {
+    if (run.decisions >= MAX_DECISIONS || run.history.length >= MAX_ACTIONS) {
+      run.status = 'blocked'
+      run.reason = 'limite de passos'
+      return
+    }
+    try {
+      await decideAndAct(run)
+    } catch (e) {
+      if (!(e instanceof StalePage)) throw e
+      run.stale++
+      run.page = await run.browser.observe()
+    }
+  }
+}
+
 export async function browse(args, { key, profile, log = () => {} }) {
   if (!key) throw new Error('Falta a chave do Jev: defina TYPESAFE_API_KEY ou rode faundr browse-key.')
   const jev = new Jev(key)
@@ -422,69 +485,17 @@ export async function browse(args, { key, profile, log = () => {} }) {
   const browser = new Browser(cdp, { tab: Boolean(args.chrome) })
   const history = []
   const trace = args.trace ? [] : null
-  let status = 'running'
-  let reason = ''
-  let page
-  let decisions = 0
-  let stale = 0
-  let started
+  const run = { jev, browser, args, history, trace, log, status: 'running', reason: '', page: undefined, decisions: 0, stale: 0, started: undefined }
   try {
     await browser.open(args.url)
-    page = await browser.observe()
-    started = performance.now()
-    while (status === 'running') {
-      if (decisions >= MAX_DECISIONS || history.length >= MAX_ACTIONS) {
-        status = 'blocked'
-        reason = 'limite de passos'
-        break
-      }
-      try {
-        if (!(await browser.fresh(page))) page = await browser.observe()
-        decisions++
-        const { operation, action, state } = await choose(jev, page, args.goal, history, args.values, args.secrets, trace)
-        if (operation === 'DONE' || operation === 'BLOCKED') {
-          if (!(await browser.fresh(page))) throw new StalePage('A página mudou antes de concluir')
-          status = operation === 'DONE' ? 'done' : 'blocked'
-          reason = operation === 'BLOCKED' ? 'o Jev não achou como avançar' : ''
-          break
-        }
-        let text = null
-        let secret = false
-        if (action.kind === 'fill') {
-          const picked = await chooseValue(jev, state, args.goal, action, args.values, args.secrets)
-          if (picked == null) {
-            status = 'blocked'
-            reason = `nenhum valor serve para o campo "${action.label}"`
-            break
-          }
-          ;({ text, secret } = picked)
-        }
-        const before = page.fingerprint
-        await browser.act(action, page, text)
-        page = await browser.observe()
-        const step = {
-          ms: Math.round(performance.now() - started),
-          action: action.label,
-          kind: action.kind,
-          ...(text != null ? { text: secret ? '[senha oculta]' : text } : {}),
-          page_changed: page.fingerprint !== before,
-        }
-        history.push(step)
-        log(`${String(step.ms).padStart(6)} ms  ${operation.padEnd(11)} ${action.label}${step.text ? ` ← "${step.text}"` : ''}`)
-        if (stuck(history)) {
-          status = 'blocked'
-          reason = `repetiu "${step.action}" sem a página mudar`
-        }
-      } catch (e) {
-        if (!(e instanceof StalePage)) throw e
-        stale++
-        page = await browser.observe()
-      }
-    }
+    run.page = await browser.observe()
+    run.started = performance.now()
+    await runSteps(run)
   } catch (e) {
-    status = 'error'
-    reason = e.message
+    run.status = 'error'
+    run.reason = e.message
   }
+  const { status, reason, page, stale, started } = run
   const totalMs = started ? Math.round(performance.now() - started) : 0
   const result = {
     status,
@@ -503,7 +514,11 @@ export async function browse(args, { key, profile, log = () => {} }) {
     final: page ? { url: page.url, title: page.title, text: page.text.slice(0, 1500) } : null,
     steps: history,
   }
-  if (page && args.style) result.style = await browser.evaluate(STYLE_SCRIPT).catch(() => null)
+  if (page && args.style)
+    result.style = await browser.evaluate(STYLE_SCRIPT).catch(() => {
+      // Estilo é extra do resultado: se a leitura falhar, sai sem ele (null).
+      return null
+    })
   if (page && args.shot) {
     try {
       const { data } = await browser.call('Page.captureScreenshot', { format: 'png' })

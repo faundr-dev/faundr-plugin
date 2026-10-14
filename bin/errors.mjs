@@ -95,7 +95,9 @@ function maskSecrets(text) {
   let out = text
   try {
     for (const s of findSecrets(text)) out = out.split(s.secret).join(mask(s.secret))
-  } catch {}
+  } catch {
+    // findSecrets falhou: o texto segue e a máscara por "senha="/"token:" logo abaixo ainda roda.
+  }
   // Valor depois de "senha=", "token:"… mesmo quando não tem formato de chave conhecida.
   return out.replace(
     /\b(pass(?:word|wd)?|senha|secret|token|api[_-]?key|authorization|cookie)(["']?\s*[:=]\s*["']?)(?:bearer\s+)?([^\s"',;]{6,})/gi,

@@ -19,6 +19,7 @@ export function stepOff(root, key) {
     const off = JSON.parse(fs.readFileSync(file(root), 'utf8'))
     return Array.isArray(off) && off.includes(key)
   } catch {
+    // Sem cópia local (ou ilegível): tudo ligado.
     return false
   }
 }

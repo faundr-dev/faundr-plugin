@@ -43,6 +43,7 @@ function jsonc(text) {
   try {
     return JSON.parse(text.replace(/\/\*[\s\S]*?\*\/|(^|[^:"'])\/\/.*$/gm, '$1').replace(/,(\s*[}\]])/g, '$1'))
   } catch {
+    // Config com JSON quebrado: tratada como sem variáveis.
     return null
   }
 }
@@ -116,6 +117,7 @@ export function readHostingCache(root) {
   try {
     return JSON.parse(fs.readFileSync(faundrPath(root, 'envHosting'), 'utf8'))
   } catch {
+    // Sem cache da CLI (ou corrompido): a hospedagem fica "não dá para saber".
     return null
   }
 }
@@ -125,7 +127,8 @@ export function readHostingCache(root) {
  * hosting: true (está), false (a CLI listou tudo e ela não está), null (não dá para saber sem a CLI).
  * Variável pública é embutida na hora do build: no ar, ela precisa estar onde o build roda.
  */
-export function envMatrix(root, files, { cache = readHostingCache(root) } = {}) {
+// Variáveis que o código lê: nome → arquivos (até 3) e se algum uso é opcional (com valor padrão ou conferido antes).
+function codeReads(root, files) {
   const code = new Map()
   const optional = new Map()
   for (const f of files.filter((x) => CODE.test(x) && !SKIP.test(x) && !TEST.test(x) && !NOT_APP.test(x)).slice(0, 4000)) {
@@ -146,6 +149,17 @@ export function envMatrix(root, files, { cache = readHostingCache(root) } = {}) 
       optional.set(m[1], (optional.get(m[1]) ?? false) || opt)
     }
   }
+  return { code, optional }
+}
+
+// Está na hospedagem? true (config ou CLI), false (a CLI listou tudo e ela não está), null (não dá para saber).
+function hostingState(inConfig, cli, name, publicPrefix) {
+  if (inConfig || cli?.has(name)) return true
+  return cli && !publicPrefix.test(name) ? false : null
+}
+
+export function envMatrix(root, files, { cache = readHostingCache(root) } = {}) {
+  const { code, optional } = codeReads(root, files)
   const example = new Set(files.filter((f) => EXAMPLE.test(f)).flatMap((f) => namesIn(read(root, f))))
   const local = new Set(LOCAL.flatMap((f) => namesIn(read(root, f))))
   const config = configuredHosting(root, files)
@@ -155,7 +169,7 @@ export function envMatrix(root, files, { cache = readHostingCache(root) } = {}) 
   const names = [...new Set([...code.keys(), ...example, ...local])].filter((n) => !IGNORE.has(n) && !IGNORE_PREFIX.test(n)).sort()
   const rows = names.map((name) => {
     const inConfig = config.names.has(name)
-    const hosting = inConfig || cli?.has(name) ? true : cli && !publicPrefix.test(name) ? false : null
+    const hosting = hostingState(inConfig, cli, name, publicPrefix)
     return {
       name,
       scope: publicPrefix.test(name) ? 'publica' : 'servidor',

@@ -17,6 +17,7 @@ function readEntries(file) {
   try {
     text = fs.readFileSync(file, 'utf8')
   } catch {
+    // Transcrição ausente ou ilegível: nada a somar.
     return []
   }
   const out = []
@@ -24,13 +25,18 @@ function readEntries(file) {
     if (!line) continue
     try {
       out.push(JSON.parse(line))
-    } catch {}
+    } catch {
+      // Linha cortada (o arquivo ainda está sendo escrito): pula só ela.
+    }
   }
   return out
 }
 
-const textOf = (content) =>
-  typeof content === 'string' ? content : Array.isArray(content) ? content.map((c) => (typeof c === 'string' ? c : c?.text ?? '')).join('') : ''
+const contentText = (c) => (typeof c === 'string' ? c : c?.text ?? '')
+const textOf = (content) => {
+  if (typeof content === 'string') return content
+  return Array.isArray(content) ? content.map(contentText).join('') : ''
+}
 
 // Pedido de verdade do usuário (não resultado de ferramenta, não mensagem interna do Claude Code).
 function isPrompt(e) {
@@ -72,74 +78,83 @@ export function emptyUsage() {
   }
 }
 
+/** Avisos dos hooks do Faundr: o que entrou no contexto, o que foi mandado e os bloqueios do fim. Devolve o novo inGate. */
+function countHook(a, usage, inGate) {
+  if (a?.type === 'hook_additional_context') {
+    // O que entrou de fato no contexto (pode ser só a prévia, quando passou do limite do Claude Code).
+    for (const c of a.content ?? []) {
+      const s = textOf(c)
+      if (s.includes(FAUNDR_MARK)) {
+        usage.injected_chars += s.length
+        usage.injected_count += 1
+      }
+    }
+  }
+  if (a?.type === 'hook_success' && typeof a.stdout === 'string' && a.stdout.includes(FAUNDR_MARK)) {
+    try {
+      usage.injected_sent_chars += (JSON.parse(a.stdout).hookSpecificOutput?.additionalContext ?? '').length
+    } catch {
+      // Saída do hook sem JSON válido: não dá para medir, não conta.
+    }
+  }
+  if (a?.type === 'hook_blocking_error' && a.hookEvent === 'Stop' && textOf(a.blockingError?.blockingError).includes(FAUNDR_MARK)) {
+    usage.gate_blocks += 1
+    return true
+  }
+  return inGate
+}
+
+/** Resposta do Claude: tokens por chamada (e os gastos depois de um bloqueio do fim) e as ferramentas pedidas. */
+function countAssistant(e, usage, seen, st) {
+  const id = e.message.id ?? e.uuid
+  const model = e.message.model
+  if (model && model !== '<synthetic>') {
+    seen.set(id, { model, usage: e.message.usage })
+    if (st.inGate && !st.gateSeen.has(id)) {
+      st.gateSeen.add(id)
+      addTokens(usage.gate_tokens, e.message.usage)
+    }
+  }
+  for (const b of Array.isArray(e.message.content) ? e.message.content : []) {
+    if (b?.type !== 'tool_use' || st.toolSeen.has(b.id)) continue
+    st.toolSeen.add(b.id)
+    usage.tools[b.name] = (usage.tools[b.name] ?? 0) + 1
+    const command = b.name === 'Bash' || b.name === 'PowerShell' ? String(b.input?.command ?? '') : ''
+    st.toolNames.set(b.id, { name: b.name, command })
+    if (GRAPH_CMD.test(command)) usage.graph_queries += 1
+  }
+}
+
+/** Resultados das ferramentas: o que foi lido para explorar e o tamanho das respostas do grafo. */
+function countToolResults(content, usage, toolNames) {
+  for (const b of content) {
+    if (b?.type !== 'tool_result') continue
+    const tool = toolNames.get(b.tool_use_id)
+    if (!tool) continue
+    const out = textOf(b.content)
+    if (EXPLORE_TOOLS.has(tool.name) || (tool.command && EXPLORE_BASH.test(tool.command) && !GRAPH_CMD.test(tool.command)))
+      usage.explore_chars += out.length
+    const m = GRAPH_CMD.test(tool.command) && out.match(GRAPH_FOOTER)
+    if (m) {
+      usage.graph_answer_tokens += Number(m[1])
+      usage.graph_files_tokens += Number(m[2])
+    }
+  }
+}
+
 /** Soma o uso de uma lista de entradas da conversa. `main` = conversa principal (pedidos, hooks e aviso do fim). */
 export function summarizeEntries(entries, { main = true, usage = emptyUsage(), seen = new Map() } = {}) {
-  const toolNames = new Map() // tool_use_id → { name, command }
-  const toolSeen = new Set()
-  let inGate = false
-  const gateSeen = new Set()
+  // toolNames: tool_use_id → { name, command }
+  const st = { toolNames: new Map(), toolSeen: new Set(), inGate: false, gateSeen: new Set() }
 
   for (const e of entries) {
-    const a = e.attachment
-    if (main && a?.type === 'hook_additional_context') {
-      // O que entrou de fato no contexto (pode ser só a prévia, quando passou do limite do Claude Code).
-      for (const c of a.content ?? []) {
-        const s = textOf(c)
-        if (s.includes(FAUNDR_MARK)) {
-          usage.injected_chars += s.length
-          usage.injected_count += 1
-        }
-      }
-    }
-    if (main && a?.type === 'hook_success' && typeof a.stdout === 'string' && a.stdout.includes(FAUNDR_MARK)) {
-      try {
-        usage.injected_sent_chars += (JSON.parse(a.stdout).hookSpecificOutput?.additionalContext ?? '').length
-      } catch {}
-    }
-    if (main && a?.type === 'hook_blocking_error' && a.hookEvent === 'Stop' && textOf(a.blockingError?.blockingError).includes(FAUNDR_MARK)) {
-      usage.gate_blocks += 1
-      inGate = true
-    }
+    if (main) st.inGate = countHook(e.attachment, usage, st.inGate)
     if (main && isPrompt(e)) {
       usage.user_prompts += 1
-      inGate = false
+      st.inGate = false
     }
-
-    if (e.type === 'assistant' && e.message?.usage) {
-      const id = e.message.id ?? e.uuid
-      const model = e.message.model
-      if (model && model !== '<synthetic>') {
-        seen.set(id, { model, usage: e.message.usage })
-        if (inGate && !gateSeen.has(id)) {
-          gateSeen.add(id)
-          addTokens(usage.gate_tokens, e.message.usage)
-        }
-      }
-      for (const b of Array.isArray(e.message.content) ? e.message.content : []) {
-        if (b?.type !== 'tool_use' || toolSeen.has(b.id)) continue
-        toolSeen.add(b.id)
-        usage.tools[b.name] = (usage.tools[b.name] ?? 0) + 1
-        const command = b.name === 'Bash' || b.name === 'PowerShell' ? String(b.input?.command ?? '') : ''
-        toolNames.set(b.id, { name: b.name, command })
-        if (GRAPH_CMD.test(command)) usage.graph_queries += 1
-      }
-    }
-
-    if (e.type === 'user' && Array.isArray(e.message?.content)) {
-      for (const b of e.message.content) {
-        if (b?.type !== 'tool_result') continue
-        const tool = toolNames.get(b.tool_use_id)
-        if (!tool) continue
-        const out = textOf(b.content)
-        if (EXPLORE_TOOLS.has(tool.name) || (tool.command && EXPLORE_BASH.test(tool.command) && !GRAPH_CMD.test(tool.command)))
-          usage.explore_chars += out.length
-        const m = GRAPH_CMD.test(tool.command) && out.match(GRAPH_FOOTER)
-        if (m) {
-          usage.graph_answer_tokens += Number(m[1])
-          usage.graph_files_tokens += Number(m[2])
-        }
-      }
-    }
+    if (e.type === 'assistant' && e.message?.usage) countAssistant(e, usage, seen, st)
+    if (e.type === 'user' && Array.isArray(e.message?.content)) countToolResults(e.message.content, usage, st.toolNames)
   }
   return { usage, seen }
 }
@@ -152,7 +167,9 @@ export function transcriptUsage(transcriptPath) {
   let subFiles = []
   try {
     subFiles = fs.readdirSync(subDir).filter((f) => f.endsWith('.jsonl'))
-  } catch {}
+  } catch {
+    // Sessão sem subagentes: a pasta não existe.
+  }
   for (const f of subFiles) summarizeEntries(readEntries(path.join(subDir, f)), { main: false, usage, seen })
   usage.subagents = subFiles.length
 
@@ -186,7 +203,9 @@ export function graphFooter(output, root) {
       const text = fs.readFileSync(path.join(root, f), 'utf8')
       chars += text.split('\n').slice(0, READ_LINES).join('\n').length
       counted += 1
-    } catch {}
+    } catch {
+      // Arquivo citado sumiu ou não abre: fica fora da estimativa.
+    }
   }
   if (!counted) return ''
   return `[Faundr] Grafo: resposta ~${tokensOf(output.length)} tokens; arquivos citados: ${counted}, ~${tokensOf(chars)} tokens se lidos inteiros.`

@@ -273,8 +273,7 @@ export function runTests(root, runner, { dir = '', python = null, changed = fals
   }
   const local = files?.length ? insideDir(dir, files) : null
   const args = commandFor(runner, out, { changed, files: local, nodeArgs, exclude: insideDir(dir, exclude) })
-  // node --test: os reporters vêm em pares com o destino; os arquivos ficam no fim.
-  const full = runner === 'node' ? [...args.slice(0, 3), ...covArgs, ...args.slice(3)] : [...args.slice(0, local?.length ? -local.length : undefined), ...covArgs, ...(local ?? [])]
+  const full = withCoverageArgs(runner, args, covArgs, local)
   const r = spawnSync(runner === 'pytest' ? python : process.execPath, [...(bin ? [bin] : []), ...full], {
     cwd: path.join(root, dir),
     encoding: 'utf8',
@@ -285,14 +284,35 @@ export function runTests(root, runner, { dir = '', python = null, changed = fals
     env: { ...process.env, CI: '1', FORCE_COLOR: '0', NO_COLOR: '1', PYTHONIOENCODING: 'utf-8', PLAYWRIGHT_JSON_OUTPUT_FILE: out, PLAYWRIGHT_HTML_OPEN: 'never' },
   })
   const durationMs = Date.now() - started
-  if (r.error?.code === 'ETIMEDOUT') return { runner, durationMs, error: `passou do tempo limite (${Math.round(timeout / 60000)} min)` }
-  if (r.error?.code === 'ENOENT') return { runner, durationMs, error: `não consegui abrir o ${runner === 'pytest' ? 'Python' : 'node'} (${path.basename(String(r.error.path ?? ''))})` }
-  if (runner === 'node' || runner === 'pytest') {
-    const xml = read(out, '')
-    // pytest sem o pacote instalado ("No module named pytest") ou que nem coletou: a última linha diz o porquê.
-    if (!xml) return { runner, durationMs, error: clean(lastLine(r.stderr) || lastLine(r.stdout)) || `o ${runner === 'node' ? 'node --test' : 'pytest'} terminou sem relatório (código ${r.status})` }
-    return { runner, durationMs, cases: runner === 'pytest' ? fromPytest(xml, root, path.join(root, dir)) : fromJUnit(xml, root), error: null }
-  }
+  const failed = spawnError(runner, r, timeout)
+  if (failed) return { runner, durationMs, error: failed }
+  if (runner === 'node' || runner === 'pytest') return xmlReport(root, runner, dir, out, r, durationMs)
+  return jsonReport(root, runner, out, r, durationMs)
+}
+
+// node --test: os reporters vêm em pares com o destino; os arquivos ficam no fim.
+function withCoverageArgs(runner, args, covArgs, local) {
+  if (runner === 'node') return [...args.slice(0, 3), ...covArgs, ...args.slice(3)]
+  return [...args.slice(0, local?.length ? -local.length : undefined), ...covArgs, ...(local ?? [])]
+}
+
+/** O executor nem rodou até o fim: passou do tempo ou o programa não abriu. */
+function spawnError(runner, r, timeout) {
+  if (r.error?.code === 'ETIMEDOUT') return `passou do tempo limite (${Math.round(timeout / 60000)} min)`
+  if (r.error?.code === 'ENOENT') return `não consegui abrir o ${runner === 'pytest' ? 'Python' : 'node'} (${path.basename(String(r.error.path ?? ''))})`
+  return null
+}
+
+/** Relatório JUnit (node --test e pytest). */
+function xmlReport(root, runner, dir, out, r, durationMs) {
+  const xml = read(out, '')
+  // pytest sem o pacote instalado ("No module named pytest") ou que nem coletou: a última linha diz o porquê.
+  if (!xml) return { runner, durationMs, error: clean(lastLine(r.stderr) || lastLine(r.stdout)) || `o ${runner === 'node' ? 'node --test' : 'pytest'} terminou sem relatório (código ${r.status})` }
+  return { runner, durationMs, cases: runner === 'pytest' ? fromPytest(xml, root, path.join(root, dir)) : fromJUnit(xml, root), error: null }
+}
+
+/** Relatório JSON (Vitest, Jest e Playwright). */
+function jsonReport(root, runner, out, r, durationMs) {
   const json = readJson(out, '')
   if (!json) return { runner, durationMs, error: firstLine(r.stderr || r.stdout) || `o ${runner} terminou sem relatório (código ${r.status})` }
   const cases = runner === 'playwright' ? fromPlaywright(json, root) : fromJestLike(json, root)
@@ -343,6 +363,18 @@ export function fromJestLike(json, root) {
 
 const PW_STATUS = { expected: 'passed', unexpected: 'failed', flaky: 'flaky', skipped: 'skipped' }
 
+// Pulado com motivo: o motivo; falhou: o primeiro erro da tentativa que falhou.
+function playwrightMessage(t, skip, failed) {
+  if (t.status === 'skipped' && skip?.description) return `Pulado: ${skip.description}`
+  return failed ? clean((failed.errors?.[0] ?? failed.error)?.message) : null
+}
+
+// Situação de um <testcase> do JUnit: pulado, falhou ou passou.
+function caseStatus(skipped, failure) {
+  if (skipped) return 'skipped'
+  return failure ? 'failed' : 'passed'
+}
+
 /** Playwright: suites → specs → tests (um por navegador) → results (uma por tentativa). */
 export function fromPlaywright(json, root) {
   projectRoot = root
@@ -360,7 +392,7 @@ export function fromPlaywright(json, root) {
           name: [...here, spec.title].join(' › ') + (t.projectName ? ` [${t.projectName}]` : ''),
           status: PW_STATUS[t.status] ?? 'skipped',
           durationMs: results.reduce((s, x) => s + (x.duration ?? 0), 0),
-          message: t.status === 'skipped' && skip?.description ? `Pulado: ${skip.description}` : failed ? clean((failed.errors?.[0] ?? failed.error)?.message) : null,
+          message: playwrightMessage(t, skip, failed),
         })
       }
     for (const child of suite.suites ?? []) walk(child, here)
@@ -391,13 +423,19 @@ export function fromJUnit(xml, root) {
       out.push({
         file: file ? rel(root, file) : null,
         name: [...suites.filter(Boolean), attr(tag, 'name')].join(' › '),
-        status: skipped ? (attr(skipped[1], 'type') === 'todo' ? 'todo' : 'skipped') : failure ? 'failed' : 'passed',
+        status: skipped && attr(skipped[1], 'type') === 'todo' ? 'todo' : caseStatus(skipped, failure),
         durationMs: Math.round(Number(attr(tag, 'time')) * 1000) || 0,
         message: failure ? clean(unescapeXml(failure[2] || attr(failure[1] ?? failure[3], 'message'))) : null,
       })
     }
   }
   return out
+}
+
+// O resumo (ex.: "assert 21 == 22") primeiro; depois o trecho do código em que quebrou. Pulado: o motivo.
+function pytestMessage(failure, skipNote) {
+  if (failure) return clean([attr(failure[2] ?? failure[4], 'message'), unescapeXml(failure[3] ?? '').replace(/\r/g, '')].filter(Boolean).join('\n'))
+  return skipNote ? `Pulado: ${skipNote}` : null
 }
 
 /**
@@ -421,10 +459,9 @@ export function fromPytest(xml, root, cwd = root) {
     out.push({
       file: file ? rel(root, path.resolve(cwd, file)) : null,
       name: [/^[A-Z]/.test(cls) ? cls : null, attr(tag, 'name')].filter(Boolean).join(' › '),
-      status: skipped ? 'skipped' : failure ? 'failed' : 'passed',
+      status: caseStatus(skipped, failure),
       durationMs: Math.round(Number(attr(tag, 'time')) * 1000) || 0,
-      // O resumo (ex.: "assert 21 == 22") primeiro; depois o trecho do código em que quebrou.
-      message: failure ? clean([attr(failure[2] ?? failure[4], 'message'), unescapeXml(failure[3] ?? '').replace(/\r/g, '')].filter(Boolean).join('\n')) : skipNote ? `Pulado: ${skipNote}` : null,
+      message: pytestMessage(failure, skipNote),
     })
   }
   return out

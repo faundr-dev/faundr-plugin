@@ -14,6 +14,7 @@ export function readTeam(root) {
   try {
     return JSON.parse(fs.readFileSync(faundrPath(root, 'team'), 'utf8'))
   } catch {
+    // Sem foto local do time (ou ilegível): ninguém mais no projeto.
     return null
   }
 }

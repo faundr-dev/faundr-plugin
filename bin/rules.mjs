@@ -11,6 +11,7 @@ export function readRules(root) {
     const rules = JSON.parse(fs.readFileSync(rulesFile(root), 'utf8'))
     return Array.isArray(rules) ? rules : []
   } catch {
+    // Sem cópia local das regras (ou ilegível): nenhuma regra para mostrar.
     return []
   }
 }
@@ -22,13 +23,22 @@ export function writeRules(root, rules) {
 
 const isGlob = (p) => /[*?]/.test(p)
 
+// Um pedaço do padrão em expressão regular: ** (qualquer pasta), * (dentro de uma pasta), ? (um caractere) ou texto.
+function globPart(part) {
+  if (part === '**/') return '(?:.*/)?'
+  if (part === '**') return '(?:.*/)?.*'
+  if (part === '*') return '[^/]*'
+  if (part === '?') return '[^/]'
+  return part.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+}
+
 /** `src/server/**`, `*.sql`, `plugin/bin/faundr.mjs` ou uma pasta (`src/server` vale para tudo dentro dela). */
 export function matchesPath(pattern, rel) {
   const p = pattern.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/$/, '')
   if (!isGlob(p)) return rel === p || rel.startsWith(`${p}/`)
   const re = p
     .split(/(\*\*\/?|\*|\?)/)
-    .map((part) => (part === '**/' || part === '**' ? '(?:.*/)?' + (part === '**' ? '.*' : '') : part === '*' ? '[^/]*' : part === '?' ? '[^/]' : part.replace(/[.+^${}()|[\]\\]/g, '\\$&')))
+    .map(globPart)
     .join('')
   // Sem barra no padrão (`*.sql`), vale em qualquer pasta.
   return new RegExp(`^${p.includes('/') ? '' : '(?:.*/)?'}${re}$`).test(rel)
@@ -93,6 +103,7 @@ export function readMemoryIndex(root) {
     const items = JSON.parse(fs.readFileSync(memoryFile(root), 'utf8'))
     return Array.isArray(items) ? items : []
   } catch {
+    // Sem cópia local da memória (ou ilegível): nenhuma regra para mostrar.
     return []
   }
 }

@@ -33,6 +33,12 @@ const findMarkers = (lines) => {
   return { s, e }
 }
 
+// Quebra antes do bloco acrescentado, para sobrar uma linha em branco entre o texto e ele.
+function blankLineBefore(text, eol) {
+  if (text.endsWith(eol + eol)) return ''
+  return text.endsWith(eol) ? eol : eol + eol
+}
+
 /** Cria, troca ou acrescenta o bloco; o resto do arquivo fica igual. */
 export function upsertBlock(file, body) {
   const fenced = (eol) => [START, ...body.split('\n'), END].join(eol)
@@ -50,8 +56,7 @@ export function upsertBlock(file, body) {
     fs.writeFileSync(file, [...lines.slice(0, s), ...fenced(eol).split(eol), ...lines.slice(e + 1)].join(eol))
     return 'atualizado'
   }
-  const sep = text.endsWith(eol + eol) ? '' : text.endsWith(eol) ? eol : eol + eol
-  fs.writeFileSync(file, `${text}${sep}${fenced(eol)}${eol}`)
+  fs.writeFileSync(file, `${text}${blankLineBefore(text, eol)}${fenced(eol)}${eol}`)
   return 'acrescentado'
 }
 

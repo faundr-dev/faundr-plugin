@@ -123,7 +123,9 @@ function dependencies(root, files) {
     try {
       const pkg = JSON.parse(read(root, f))
       for (const d of Object.keys({ ...pkg.dependencies })) deps.add(d)
-    } catch {}
+    } catch {
+      // package.json com JSON quebrado: fica de fora da lista de pacotes.
+    }
   }
   return deps
 }
@@ -134,6 +136,52 @@ const TERMS_PATH = /(^|\/)[^/]*(termos|terms|condicoes|condições)[^/]*(\/(page
 // Link para a página de termos (não só o texto citado numa explicação).
 const TERMS_LINK = /\b(href|to)=\{?["'`][^"'`]*(termos|terms|condicoes)[^"'`]*["'`]/i
 const DELETE_ACCOUNT = /(excluir (minha )?conta|apagar (minha )?conta|deletar (minha )?conta|delete (my )?account|deleteUser\(|auth\.admin\.deleteUser|delete_account|account\/delete|excluir-conta)/i
+
+// Serviços de fora que recebem dados: pelo pacote instalado ou pelo endereço citado no código.
+function thirdParties(deps, code, texts) {
+  const third = []
+  for (const t of THIRD_PARTIES) {
+    const viaDep = t.dep && [...deps].some((d) => t.dep.test(d))
+    const viaCode = t.re ? code.filter((f) => t.re.test(texts.get(f))).slice(0, 3) : []
+    if (viaDep || viaCode.length) third.push({ name: t.name, kind: t.kind, cookies: t.cookies, what: t.what, evidence: viaCode.length ? viaCode : ['package.json'] })
+  }
+  return third
+}
+
+function termsCheck(termsFile, has) {
+  if (termsFile) return { key: 'lgpd-termos', status: 'ok', detail: `Há uma página de termos (${termsFile}).`, evidence: [termsFile] }
+  if (has(TERMS_LINK)) return { key: 'lgpd-termos', status: 'aviso', detail: 'O site cita os termos de uso, mas não achei a página deles.', evidence: [] }
+  return { key: 'lgpd-termos', status: 'falta', detail: 'Não há termos de uso: as regras de uso do app, o que a pessoa pode e não pode fazer e as responsabilidades.', evidence: [] }
+}
+
+function cookiesCheck(cookieTrackers, consent) {
+  if (!cookieTrackers.length) return { key: 'lgpd-cookies', status: 'na', detail: 'Não achei rastreadores que usem cookies (analytics, pixel de anúncios, gravação de tela).', evidence: [] }
+  if (consent) return { key: 'lgpd-cookies', status: 'ok', detail: `Há aviso de cookies para: ${cookieTrackers.map((t) => t.name).join(', ')}.`, evidence: [] }
+  return {
+    key: 'lgpd-cookies',
+    status: 'falta',
+    detail: `O site usa ${cookieTrackers.map((t) => t.name).join(', ')} sem pedir o consentimento da pessoa antes. Rastreador de anúncios e de comportamento precisa do "aceito" antes de ligar.`,
+    evidence: cookieTrackers.flatMap((t) => t.evidence).slice(0, 5),
+  }
+}
+
+function deletionCheck(auth, has) {
+  if (!auth) return { key: 'lgpd-exclusao', status: 'na', detail: 'O app não tem contas de usuário.', evidence: [] }
+  if (has(DELETE_ACCOUNT)) return { key: 'lgpd-exclusao', status: 'ok', detail: 'A pessoa consegue pedir para excluir a conta.', evidence: [] }
+  return { key: 'lgpd-exclusao', status: 'falta', detail: 'O app tem contas, mas não achei como a pessoa exclui a própria conta e os dados. A LGPD garante esse direito (art. 18).', evidence: [] }
+}
+
+function sensitiveCheck(sensitive) {
+  if (sensitive.length)
+    return { key: 'lgpd-sensiveis', status: 'aviso', detail: `O app parece guardar dados sensíveis: ${sensitive.map((d) => d.category).join(', ')}. Eles pedem consentimento específico e destacado, e cuidado redobrado com quem acessa.`, evidence: [] }
+  return { key: 'lgpd-sensiveis', status: 'ok', detail: 'Não achei dados sensíveis (saúde, religião, origem racial, biometria, crianças…).', evidence: [] }
+}
+
+function thirdPartiesCheck(third, abroad, policy) {
+  const outside = abroad.length ? ' Parte delas fica fora do Brasil: a política de privacidade precisa dizer isso.' : ''
+  const detail = third.length ? `Os dados passam por ${third.length} empresa(s): ${third.map((t) => t.name).join(', ')}.${outside}` : 'Não achei serviços de fora que recebam dados das pessoas.'
+  return { key: 'lgpd-terceiros', status: abroad.length && policy.status !== 'ok' ? 'aviso' : 'ok', detail, evidence: [] }
+}
 
 /** Inventário de dados pessoais e terceiros, e os itens de LGPD para o checklist. */
 export function privacyScan(root, files) {
@@ -171,12 +219,7 @@ export function privacyScan(root, files) {
     add('Foto ou imagem da pessoa', 'login com Google/rede social')
   }
 
-  const third = []
-  for (const t of THIRD_PARTIES) {
-    const viaDep = t.dep && [...deps].some((d) => t.dep.test(d))
-    const viaCode = t.re ? code.filter((f) => t.re.test(texts.get(f))).slice(0, 3) : []
-    if (viaDep || viaCode.length) third.push({ name: t.name, kind: t.kind, cookies: t.cookies, what: t.what, evidence: viaCode.length ? viaCode : ['package.json'] })
-  }
+  const third = thirdParties(deps, code, texts)
 
   const has = (re) => code.some((f) => re.test(texts.get(f)))
   const policy = checkPrivacy(root, files)
@@ -188,30 +231,11 @@ export function privacyScan(root, files) {
 
   const checks = [
     { key: 'lgpd-privacidade', status: policy.status, detail: policy.detail, evidence: policy.evidence },
-    termsFile
-      ? { key: 'lgpd-termos', status: 'ok', detail: `Há uma página de termos (${termsFile}).`, evidence: [termsFile] }
-      : has(TERMS_LINK)
-        ? { key: 'lgpd-termos', status: 'aviso', detail: 'O site cita os termos de uso, mas não achei a página deles.', evidence: [] }
-        : { key: 'lgpd-termos', status: 'falta', detail: 'Não há termos de uso: as regras de uso do app, o que a pessoa pode e não pode fazer e as responsabilidades.', evidence: [] },
-    !cookieTrackers.length
-      ? { key: 'lgpd-cookies', status: 'na', detail: 'Não achei rastreadores que usem cookies (analytics, pixel de anúncios, gravação de tela).', evidence: [] }
-      : consent
-        ? { key: 'lgpd-cookies', status: 'ok', detail: `Há aviso de cookies para: ${cookieTrackers.map((t) => t.name).join(', ')}.`, evidence: [] }
-        : {
-            key: 'lgpd-cookies',
-            status: 'falta',
-            detail: `O site usa ${cookieTrackers.map((t) => t.name).join(', ')} sem pedir o consentimento da pessoa antes. Rastreador de anúncios e de comportamento precisa do "aceito" antes de ligar.`,
-            evidence: cookieTrackers.flatMap((t) => t.evidence).slice(0, 5),
-          },
-    !auth
-      ? { key: 'lgpd-exclusao', status: 'na', detail: 'O app não tem contas de usuário.', evidence: [] }
-      : has(DELETE_ACCOUNT)
-        ? { key: 'lgpd-exclusao', status: 'ok', detail: 'A pessoa consegue pedir para excluir a conta.', evidence: [] }
-        : { key: 'lgpd-exclusao', status: 'falta', detail: 'O app tem contas, mas não achei como a pessoa exclui a própria conta e os dados. A LGPD garante esse direito (art. 18).', evidence: [] },
-    sensitive.length
-      ? { key: 'lgpd-sensiveis', status: 'aviso', detail: `O app parece guardar dados sensíveis: ${sensitive.map((d) => d.category).join(', ')}. Eles pedem consentimento específico e destacado, e cuidado redobrado com quem acessa.`, evidence: [] }
-      : { key: 'lgpd-sensiveis', status: 'ok', detail: 'Não achei dados sensíveis (saúde, religião, origem racial, biometria, crianças…).', evidence: [] },
-    { key: 'lgpd-terceiros', status: abroad.length && policy.status !== 'ok' ? 'aviso' : 'ok', detail: third.length ? `Os dados passam por ${third.length} empresa(s): ${third.map((t) => t.name).join(', ')}.${abroad.length ? ' Parte delas fica fora do Brasil: a política de privacidade precisa dizer isso.' : ''}` : 'Não achei serviços de fora que recebam dados das pessoas.', evidence: [] },
+    termsCheck(termsFile, has),
+    cookiesCheck(cookieTrackers, consent),
+    deletionCheck(auth, has),
+    sensitiveCheck(sensitive),
+    thirdPartiesCheck(third, abroad, policy),
   ]
   return {
     data: [...data.values()].map((d) => ({ category: d.category, sensitive: d.sensitive, where: [...d.where] })).sort((a, b) => Number(b.sensitive) - Number(a.sensitive) || a.category.localeCompare(b.category)),

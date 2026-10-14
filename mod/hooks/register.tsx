@@ -14,6 +14,7 @@ async function readPrefs($: EngineInterface): Promise<Prefs> {
   try {
     return JSON.parse(await $.fs.read(`${await $.session.root()}/.faundr/painel/bar.json`)) as Prefs
   } catch {
+    // Sem bar.json (ou ilegível): preferências padrão.
     return {}
   }
 }

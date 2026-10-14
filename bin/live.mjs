@@ -16,6 +16,7 @@ function readJson(file) {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8'))
   } catch {
+    // Arquivo ausente ou ilegível: quem chama trata como sem projeto ou sem configuração.
     return null
   }
 }
@@ -44,6 +45,7 @@ function gitBranch(cwd) {
     const head = fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf8').trim()
     return head.startsWith('ref: refs/heads/') ? head.slice('ref: refs/heads/'.length) : head.slice(0, 12)
   } catch {
+    // Sem git (ou .git ilegível): o estado vai sem branch.
     return null
   }
 }
@@ -96,4 +98,7 @@ async function main() {
 }
 
 // Os testes importam as funções sem disparar o envio.
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch(() => {})
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))
+  main().catch(() => {
+    // Sem rede ou servidor fora do ar: o estado ao vivo é só um extra, e o agente nunca espera por ele.
+  })
