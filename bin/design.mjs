@@ -2,14 +2,15 @@
 // Acha o design.md e aponta padrões que quase sempre são problema:
 //   - cores escritas direto no código em vez de vir da paleta do design.md;
 //   - o mesmo estilo de elemento repetido em vários lugares (candidato a componente);
-//   - menus/popovers dentro de caixas com overflow escondido (o menu abre cortado).
+//   - menus/popovers dentro de caixas com overflow escondido (o menu abre cortado);
+//   - com tema claro e escuro, cor da paleta escrita fixa (não troca com o tema).
 // O julgamento fino (a tela segue o design.md? faz sentido?) fica com a auditoria do agente.
 
 import fs from 'node:fs'
 import path from 'node:path'
 import { isClaudePlugin, projectParts } from './parts.mjs'
 import { extractTokens } from './design-tokens.mjs'
-import { runRules } from './design-rules.mjs'
+import { detectThemes, runRules } from './design-rules.mjs'
 
 const SKIP = /(^|\/)(node_modules|\.git|\.faundr|dist|build|out|coverage|\.claude|\.remember|\.wrangler|\.next|\.nuxt|\.svelte-kit|\.tanstack|\.vercel|\.output)(\/|$)/
 const UI_EXT = /\.(tsx|jsx|vue|svelte|astro)$/
@@ -182,6 +183,39 @@ function looseColors(rel, text, colors, hasDesign) {
   ]
 }
 
+/**
+ * Projeto com tema claro e escuro: cor da paleta escrita fixa (bg-[#151515], style com hex) não troca quando o tema
+ * muda, a não ser que a linha traga a variante do outro tema (dark:/light:). As cores fora da paleta já viram
+ * "cor fora da paleta"; aqui entram só as da paleta, que parecem certas mas ficam iguais nos dois temas.
+ */
+function fixedThemeColors(rel, text, colors) {
+  const hits = []
+  text.split(/\r?\n/).forEach((line, i) => {
+    // Variante do outro tema na linha, ou hex só como reserva de uma variável CSS (var(--x, #…), lerVar('--x', '#…')).
+    if (/(^|[\s"'`])(dark|light):/.test(line) || /var\(--|['"`]--[\w-]+['"`]/.test(line)) return
+    const candidates = [
+      ...[...line.matchAll(/-\[(#[0-9a-f]{3,6})\]/gi)].map((m) => m[1]),
+      ...(/style=|(color|background|fill|stroke|border)\w*\s*:/i.test(line) ? line.match(HEX) ?? [] : []),
+    ]
+    for (const c of candidates) if (colors.has(normHex(c))) hits.push({ color: normHex(c), line: i + 1 })
+  })
+  if (!hits.length) return []
+  const unique = [...new Set(hits.map((h) => h.color))]
+  const lines = [...new Set(hits.map((h) => h.line))]
+  return [
+    {
+      kind: 'off_spec',
+      severity: 'medium',
+      title: `${unique.length === 1 ? 'Cor fixa que não muda' : `${unique.length} cores fixas que não mudam`} com o tema`,
+      detail: `${unique.slice(0, 8).join(', ')} escrita(s) direto no código: a cor é da paleta, mas fica igual no tema claro e no escuro, e num deles o texto ou o fundo some. Use o token da cor (que troca com o tema) ou acrescente a variante do outro tema (dark:… / light:…). Linhas: ${lines.slice(0, 12).join(', ')}${lines.length > 12 ? '…' : ''}.`,
+      file: rel,
+      line: hits[0].line,
+      rule: 'design/cor-fixa-sem-tema',
+      fingerprint: `lint:theme-color|${rel}`,
+    },
+  ]
+}
+
 /** Mesma lista de classes num elemento, repetida em vários lugares: vire um componente. */
 function repeatedStyles(texts) {
   const byStyle = new Map()
@@ -272,9 +306,43 @@ export function lintProject(root) {
     ...texts.flatMap(([rel, text]) => looseColors(rel, text, colors, !!designMdPath)),
     ...repeatedStyles(texts),
     ...rawButtons(texts),
+    ...(rules.themes?.both && designMdPath ? texts.flatMap(([rel, text]) => fixedThemeColors(rel, text, colors)) : []),
     ...rules.findings,
   ]
-  return { designMdPath, designMd, tokens, uiFiles: files.length, findings, ignored: rules.ignored, rulesError: rules.error }
+  return { designMdPath, designMd, tokens, themes: rules.themes ?? null, uiFiles: files.length, findings, ignored: rules.ignored, rulesError: rules.error }
+}
+
+/** Temas do projeto pelo código (principal, se tem o outro, se segue o sistema). */
+export function projectThemes(root) {
+  let tokens = null
+  try {
+    tokens = extractTokens(root, findDesignMd(root))
+  } catch {}
+  return detectThemes(root, { uiExt: UI_EXT, tokens })
+}
+
+const OTHER = { claro: 'escuro', escuro: 'claro' }
+
+/**
+ * Quais temas medir e em quais larguras. Escopo de um tema só: só ele. "Os dois" (ou sem escopo, com o código
+ * mostrando os dois): o principal em todas as larguras e o outro só no celular e no desktop (a menor e a maior
+ * largura pedidas, que pegam quase todo problema de cor). Sem escopo e com um tema só no código: como a tela abre.
+ */
+export function measurePlan(scopeTheme, detected, widths) {
+  const sorted = [...widths].sort((a, b) => a - b)
+  const ends = [...new Set([sorted[0], sorted.at(-1)])].filter((w) => w !== undefined)
+  if (scopeTheme === 'claro' || scopeTheme === 'escuro') return { themes: [{ tema: scopeTheme, widths: sorted }] }
+  const base = detected?.base ?? 'claro'
+  if (scopeTheme === 'ambos' || detected?.both)
+    return {
+      themes: [
+        { tema: base, widths: sorted },
+        { tema: OTHER[base], widths: ends },
+      ],
+      hint: scopeTheme === 'ambos' ? null : 'O código tem tema claro e escuro, mas o escopo do design não diz: grave com faundr design-scope --theme ambos (ou só um tema, se o outro não vale).',
+    }
+  // Um tema só e sem escopo: mede como a tela abre, sem forçar nem marcar tema.
+  return { themes: [{ tema: null, widths: sorted }] }
 }
 
 /** O arquivo é de tela? (para a auditoria do fim da resposta) */

@@ -114,7 +114,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { findDesignMd, isUiFile, lintProject, uiFiles } from './design.mjs'
+import { findDesignMd, isUiFile, lintProject, measurePlan, projectThemes, uiFiles } from './design.mjs'
 import { measureFindings } from './measure-findings.mjs'
 import { buildShowcase, detectRuntime, readShowcase, SHOWCASE_FILE, showcaseHashes, showcaseStatus } from './showcase.mjs'
 import { ensureFaundrPath, FAUNDR_DIR, FILES, faundrPath, organizeFaundrDir, relPath } from './paths.mjs'
@@ -3841,13 +3841,16 @@ function scopeLines(s) {
 
 // Medição no navegador (fase 4): o script roda na página; o resultado vira achados por tela e largura.
 const MEASURE_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'skills', 'design', 'medir.js')
+const THEME_SCRIPT = path.join(path.dirname(MEASURE_SCRIPT), 'tema.js')
 
 /**
  * Sem --url: o script que mede a página na largura atual da janela.
  * Com --url: um script para rodar em qualquer página do mesmo site, que abre a tela num iframe invisível em cada
  * largura (375/768/1024/1440 por padrão), mede lá dentro e devolve uma lista — não depende de redimensionar a janela.
+ * Com tema claro e escuro (escopo "ambos", ou o código mostra os dois), força cada tema: o principal em todas as
+ * larguras e o outro só na menor e na maior. --themes claro,escuro escolhe na mão (o primeiro é o principal).
  */
-function designMeasureScript(args) {
+async function designMeasureScript(args) {
   const code = fs.readFileSync(MEASURE_SCRIPT, 'utf8')
   const url = flag(args, '--url')
   if (!url) return console.log(code)
@@ -3855,26 +3858,70 @@ function designMeasureScript(args) {
     .split(',')
     .map(Number)
     .filter((w) => w >= 200 && w <= 4000)
-  console.log(`(async () => {
+  const { root } = linkedProject()
+  let scopeTheme = null
+  try {
+    scopeTheme = (await designApi({ action: 'scope' })).scope?.theme ?? null
+  } catch {}
+  const manual = flag(args, '--themes')
+    ?.split(',')
+    .map((t) => t.trim())
+    .filter((t) => t === 'claro' || t === 'escuro')
+  const plan = manual?.length
+    ? { themes: manual.map((tema, i) => ({ tema, widths: i === 0 ? widths : measurePlan('ambos', { base: manual[0] }, widths).themes[1].widths })) }
+    : measurePlan(scopeTheme, projectThemes(root), widths)
+  const runs = plan.themes.flatMap((t) => t.widths.map((w) => ({ w, tema: t.tema })))
+  const header = [
+    `// Temas: ${plan.themes.map((t) => (t.tema ? `${t.tema} em ${t.widths.join(', ')} px` : `como a tela abre, em ${t.widths.join(', ')} px`)).join('; ')}.`,
+    ...(plan.hint ? [`// ${plan.hint}`] : []),
+  ].join('\n')
+  console.log(`${header}
+(async () => {
   const code = ${JSON.stringify(code)}
+  const tema = ${JSON.stringify(fs.readFileSync(THEME_SCRIPT, 'utf8'))}
+  // Fundo da página: o do body ou do html; se os dois forem transparentes, o de quem cobre o canto de baixo (subindo
+  // pelos pais até achar cor opaca). O meio da tela não serve: cai em ícone, botão ou card. 0 = preto, 1 = branco.
+  const fundo = (win, doc) => {
+    const ctx = Object.assign(document.createElement('canvas'), { width: 1, height: 1 }).getContext('2d', { willReadFrequently: true })
+    const lum = (n) => {
+      ctx.clearRect(0, 0, 1, 1)
+      ctx.fillStyle = win.getComputedStyle(n).backgroundColor
+      ctx.fillRect(0, 0, 1, 1)
+      const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data
+      return a > 200 ? (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 : null
+    }
+    for (const n of [doc.body, doc.documentElement]) { const l = n && lum(n); if (l != null) return l }
+    for (let n = doc.elementFromPoint(win.innerWidth - 4, win.innerHeight - 4); n && n.nodeType === 1; n = n.parentElement) { const l = lum(n); if (l != null) return l }
+    return 1
+  }
   const out = []
-  for (const w of ${JSON.stringify(widths)}) {
+  for (const { w, tema: t } of ${JSON.stringify(runs)}) {
     const f = document.createElement('iframe')
     f.style.cssText = 'position:fixed;left:-20000px;top:0;height:900px;border:0;width:' + w + 'px'
     document.body.appendChild(f)
     await new Promise((r) => { f.onload = r; f.src = ${JSON.stringify(url)} })
     await new Promise((r) => setTimeout(r, 3500))
     try {
+      if (t) {
+        f.contentWindow.eval(tema)(f.contentDocument, t)
+        await new Promise((r) => setTimeout(r, 800))
+        const lum = fundo(f.contentWindow, f.contentDocument)
+        if ((t === 'claro' && lum < 0.4) || (t === 'escuro' && lum > 0.6)) {
+          out.push({ largura: w, tema: t, erro: 'não consegui pôr a tela no tema ' + t + ' (o fundo continuou ' + (lum < 0.4 ? 'escuro' : 'claro') + ')' })
+          f.remove()
+          continue
+        }
+      }
       const res = JSON.parse(f.contentWindow.eval(code))
-      out.push({ ...res, largura: w, areaUtil: res.largura })
-    } catch (e) { out.push({ largura: w, erro: String(e) }) }
+      out.push({ ...res, largura: w, areaUtil: res.largura, ...(t && { tema: t }) })
+    } catch (e) { out.push({ largura: w, ...(t && { tema: t }), erro: String(e) }) }
     f.remove()
   }
-  // O resultado completo fica na página (a resposta da ferramenta é curta): pegue uma largura por vez.
+  // O resultado completo fica na página (a resposta da ferramenta é curta): pegue uma medição por vez.
   window.__faundrMedicao = out
   return out
-    .map((m, i) => m.erro ? \`[\${i}] \${m.largura} px: falhou (\${m.erro})\` : \`[\${i}] \${m.largura} px: \${m.rolagem ? 'ROLA PARA O LADO, ' : ''}\${m.toque.length} toque, \${m.cortado.length} cortado, \${m.contraste.length} contraste, \${m.miudo.length} miúdo, \${m.lento.length} lento, \${m.borda.length} borda\`)
-    .join(' | ') + ' — para salvar cada largura: JSON.stringify(window.__faundrMedicao[i])'
+    .map((m, i) => { const at = \`[\${i}] \${m.largura} px\${m.tema ? ' ' + m.tema : ''}\`; return m.erro ? \`\${at}: falhou (\${m.erro})\` : \`\${at}: \${m.rolagem ? 'ROLA PARA O LADO, ' : ''}\${m.toque.length} toque, \${m.cortado.length} cortado, \${m.contraste.length} contraste, \${m.miudo.length} miúdo, \${m.lento.length} lento, \${m.borda.length} borda\` })
+    .join(' | ') + ' — para salvar cada uma: JSON.stringify(window.__faundrMedicao[i])'
 })()`)
 }
 
@@ -3893,16 +3940,25 @@ async function designMeasureSave(args) {
   }
   // Uma medição (janela atual) ou a lista do script com --url (uma por largura).
   for (const m of Array.isArray(data) ? data : [data]) {
+    const tema = m?.tema === 'claro' || m?.tema === 'escuro' ? m.tema : undefined
+    const at = `${screen} em ${m?.largura} px${tema ? ` (tema ${tema})` : ''}`
     if (m?.erro) {
-      console.log(`${screen} em ${m.largura} px: a medição falhou (${m.erro})`)
+      console.log(`${at}: a medição falhou (${m.erro})`)
       continue
     }
     if (!Number.isInteger(m?.largura)) throw new Error('O arquivo não parece o resultado do script de medição (falta "largura").')
     // A largura pedida (375, 768, 1024, 1440) é a coluna da matriz.
     const width = Number(flag(args, '--width')) || m.largura
     const findings = measureFindings({ ...m, largura: width }, screen)
-    const r = await designApi({ action: 'measure', screen, url: m.url, viewport: width, findings })
-    const parts = [`${screen} em ${width} px: ${findings.length ? `${findings.length} problema(s)` : 'nenhum problema medido'}`]
+    let r
+    try {
+      r = await designApi({ action: 'measure', screen, url: m.url, viewport: width, ...(tema && { appearance: tema }), findings })
+    } catch (err) {
+      // Tema fora do escopo (ex.: escopo só escuro): avisa e segue com as outras medições.
+      console.log(`${at}: ${err.message}`)
+      continue
+    }
+    const parts = [`${screen} em ${width} px${tema ? ` (tema ${tema})` : ''}: ${findings.length ? `${findings.length} problema(s)` : 'nenhum problema medido'}`]
     if (r.added) parts.push(`${r.added} novo(s)`)
     if (r.resolved) parts.push(`${r.resolved} resolvido(s) desde a última medição`)
     if (r.skipped) parts.push(`${r.skipped} de regras desligadas`)
@@ -4301,7 +4357,7 @@ async function cli() {
     else if (command === 'design-reopen') await designReopen(args)
     else if (command === 'design-scope') await designScope(args)
     else if (command === 'design-coverage') await designCoverage(args)
-    else if (command === 'design-measure-script') designMeasureScript(args)
+    else if (command === 'design-measure-script') await designMeasureScript(args)
     else if (command === 'design-measure-save') await designMeasureSave(args)
     else if (command === 'showcase-context') await showcaseContext()
     else if (command === 'showcase-save') await showcaseSave(args)

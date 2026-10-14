@@ -10,7 +10,7 @@ const who = (x) => `${x.el}${x.text ? ` ("${x.text}")` : ''}`
 
 /** Resultado do script de medição → achados (um por tela, largura e regra). */
 export function measureFindings(m, screen) {
-  const at = `${screen} em ${m.largura} px`
+  const at = `${screen} em ${m.largura} px${m.tema ? ` (tema ${m.tema})` : ''}`
   const out = []
   const add = (rule, kind, severity, title, detail) => out.push({ rule, kind, severity, title, detail: `${detail} Página: ${m.url}.`.slice(0, 2000) })
   if (m.rolagem)

@@ -22,6 +22,7 @@ export const RULES = {
   'identidade/sem-imagem-de-compartilhamento': { kind: 'identity', severity: 'low' },
   'identidade/sem-idioma': { kind: 'identity', severity: 'medium' },
   'identidade/sem-theme-color': { kind: 'identity', severity: 'low' },
+  'identidade/theme-color-unico': { kind: 'identity', severity: 'low' },
   'responsivo/sem-viewport': { kind: 'responsive', severity: 'high' },
   'responsivo/zoom-desligado': { kind: 'responsive', severity: 'high' },
   'responsivo/grid-sem-celular': { kind: 'responsive', severity: 'medium' },
@@ -58,6 +59,7 @@ export const RULES = {
   'design/texto-miudo': { kind: 'off_spec', severity: 'low' },
   'design/texto-em-degrade': { kind: 'off_spec', severity: 'low' },
   'design/emoji-como-icone': { kind: 'off_spec', severity: 'low' },
+  'design/tema-nao-segue-sistema': { kind: 'off_spec', severity: 'low' },
 }
 
 // ---------- leitura do projeto ----------
@@ -111,6 +113,8 @@ function loadProject(root, uiExt) {
   const ui = all.filter((f) => uiExt.test(f) && !NOT_APP.test(f))
   const css = all.filter((f) => /\.(css|scss)$/.test(f) && !NOT_APP.test(f))
   const head = all.filter((f) => HEAD_FILES.some((re) => re.test(f)))
+  // Quem troca o tema costuma morar num arquivo de lógica (theme.ts, useColorMode…), fora das telas.
+  const themeCode = all.filter((f) => /\.(m?[jt]sx?)$/.test(f) && /theme|color-?mode|dark-?mode|appearance/i.test(f) && !NOT_APP.test(f) && !uiExt.test(f))
   // Dependências da raiz e das partes (um Next em frontend/ também conta).
   const deps = allDeps(root)
   return {
@@ -118,6 +122,7 @@ function loadProject(root, uiExt) {
     ui: ui.map((rel) => ({ rel, text: read(root, rel) })),
     css: css.map((rel) => ({ rel, text: read(root, rel) })),
     head: head.map((rel) => ({ rel, text: read(root, rel) })),
+    themeCode: themeCode.slice(0, 20).map((rel) => ({ rel, text: read(root, rel) })),
     deps,
   }
 }
@@ -308,10 +313,34 @@ const TEXT = {
   'design/z-index-alto': (c, n) => [`z-index de três dígitos (${c.token})${n > 1 ? `, ${n} lugares` : ''}`, 'z-index enorme é sinal de briga de camadas. Defina uma escala pequena (ex.: 10 menu, 20 header, 30 popover, 50 modal) e use só ela.'],
   'design/texto-miudo': (c, n) => [`Texto menor que 12 px (${c.token})${n > 1 ? `, ${n} lugares` : ''}`, 'Abaixo de 12 px fica difícil de ler, ainda mais no celular. Use no mínimo text-xs (12 px), ou registre no design.md se for um rótulo proposital.'],
   'design/texto-em-degrade': (c, n) => [`Texto em degradê${n > 1 ? ` (${n} lugares)` : ''}`, 'Texto com gradiente é a marca registrada de página feita por IA e costuma ter contraste ruim. Use uma cor sólida da paleta.'],
+  'design/tema-nao-segue-sistema': () => ['Tema claro e escuro sem seguir o do sistema', 'O app tem os dois temas, mas não olha a preferência do aparelho (prefers-color-scheme): quem usa o celular no escuro abre o app claro, e vice-versa. Comece pelo tema do sistema (ou ofereça a opção "Sistema") e deixe a pessoa trocar.'],
+  'identidade/theme-color-unico': () => ['Uma cor de barra do navegador para os dois temas', 'O theme-color pinta a barra do navegador no celular. Com uma cor só, no outro tema a barra fica destoando da página. Use duas tags theme-color com media="(prefers-color-scheme: light)" e "(prefers-color-scheme: dark)", ou troque a cor junto com o tema.'],
   'design/emoji-como-icone': (c, n) => [`Emoji usado como ícone ou enfeite (${c.token})${n > 1 ? `, ${n} lugares` : ''}`, 'Emoji muda de cara em cada sistema e não segue o traço dos ícones do app. Use a biblioteca de ícones do projeto.'],
 }
 
 const lineList = (lines) => (lines.length ? ` Linhas: ${lines.slice(0, 12).join(', ')}${lines.length > 12 ? '…' : ''}.` : '')
+
+/**
+ * Quais temas o projeto tem, pelo código: o principal (a cor de fundo do design.md, ou o que os sinais indicam) e se
+ * existe o outro (variantes dark:/light:, [data-theme], .dark, prefers-color-scheme). followsSystem = olha a
+ * preferência do aparelho (o dark: do Tailwind sem @custom-variant dark já segue o sistema).
+ */
+export function themeSupport(p, tokens) {
+  const code = [...p.ui, ...p.css, ...p.head, ...(p.themeCode ?? [])].map((f) => f.text).join('\n')
+  const dark = /prefers-color-scheme\s*:\s*dark|\[data-(theme|mode|color-scheme)=['"]?dark|(^|[\s"'`.])\.dark\b|(^|[\s"'`])dark:[a-z!-]|@custom-variant\s+dark|darkMode\s*:/m.test(code)
+  const light = /prefers-color-scheme\s*:\s*light|\[data-(theme|mode|color-scheme)=['"]?light|(^|[\s"'`])\.light\b|(^|[\s"'`])light:[a-z!-]|@custom-variant\s+light/m.test(code)
+  const bgs = (tokens?.colors ?? []).filter((t) => /fundo|background|superf[ií]cie/i.test(t.usage ?? '')).map((t) => parseColor(t.value)).filter(Boolean)
+  const base = bgs.length ? (luminance(bgs[0]) < 0.2 ? 'escuro' : 'claro') : light && !dark ? 'escuro' : 'claro'
+  const both = base === 'claro' ? dark : light
+  const usesTailwindDark = /(^|[\s"'`])dark:[a-z!-]/m.test(code) && !/@custom-variant\s+dark|darkMode\s*:/.test(code)
+  const followsSystem = /prefers-color-scheme/.test(code) || usesTailwindDark
+  return { base, both, followsSystem }
+}
+
+/** Temas do projeto pelo código (para a medição no navegador saber quais forçar). */
+export function detectThemes(root, { uiExt, tokens }) {
+  return themeSupport(loadProject(root, uiExt), tokens)
+}
 
 /** Roda as regras e devolve achados no formato da CLI. */
 export function runRules(root, { uiExt, designMdPath, designMd, tokens }) {
@@ -320,6 +349,7 @@ export function runRules(root, { uiExt, designMdPath, designMd, tokens }) {
   const isNext = !!p.deps?.next
   const isNuxt = !!p.deps?.nuxt
   const designText = designMd ?? ''
+  const themes = themeSupport(p, tokens)
   let ignoredHits = 0
 
   // ---- elementos e linhas dos arquivos de tela ----
@@ -470,6 +500,8 @@ export function runRules(root, { uiExt, designMdPath, designMd, tokens }) {
     if (!/og:image|openGraph\s*:/.test(headText) && !anyFile(/opengraph-image\./)) c.add('identidade/sem-imagem-de-compartilhamento', headFile, null, {})
     if (/<html\b/.test(headText) && !/<html\b[^>]*\blang\s*=/.test(headText)) c.add('identidade/sem-idioma', headFile, null, {})
     if (!/theme-color|themeColor/.test(headText)) c.add('identidade/sem-theme-color', headFile, null, {})
+    else if (themes.both && !/prefers-color-scheme/.test(headText) && !/theme-?color/i.test((p.themeCode ?? []).map((f) => f.text).join('\n')))
+      c.add('identidade/theme-color-unico', headFile, null, {})
     const viewport = headText.match(/name\s*[:=]\s*['"]viewport['"][^>}]*?content\s*[:=]\s*['"]([^'"]*)['"]/)?.[1] ?? headText.match(/export const viewport[\s\S]{0,300}/)?.[0]
     if (!viewport && !isNext && !isNuxt && !/name\s*[:=]\s*['"]viewport/.test(headText)) c.add('responsivo/sem-viewport', headFile, null, {})
     if (viewport && /user-scalable\s*[=:]\s*['"]?(no|0|false)|maximum-scale\s*[=:]\s*['"]?1(\.0)?\b/.test(viewport)) c.add('responsivo/zoom-desligado', headFile, null, {})
@@ -482,6 +514,8 @@ export function runRules(root, { uiExt, designMdPath, designMd, tokens }) {
   const animated = /@keyframes|\banimate-(?!none)[\w-]+|framer-motion|from ['"]motion|transition-(transform|all|opacity)/.test(code)
   if (animated && !/prefers-reduced-motion|motion-reduce:|motion-safe:|useReducedMotion|reducedMotion/.test(code))
     c.add('acessibilidade/sem-reduced-motion', null, null, {})
+
+  if (themes.both && !themes.followsSystem) c.add('design/tema-nao-segue-sistema', p.themeCode?.[0]?.rel ?? null, null, {})
 
   const toasters = (code.match(/<Toaster\b/g) ?? []).length
   if (toasters > 1) c.add('movimento/toaster-duplicado', p.ui.find((f) => /<Toaster\b/.test(f.text))?.rel ?? null, null, { count: toasters })
@@ -551,5 +585,5 @@ export function runRules(root, { uiExt, designMdPath, designMd, tokens }) {
       fingerprint: `lint:${h.rule}|${h.file ?? ''}${h.rule === 'acessibilidade/contraste-baixo' ? `|${h.ctx.text}` : ''}`,
     })
   }
-  return { findings, ignored: ignoredHits }
+  return { findings, ignored: ignoredHits, themes }
 }
