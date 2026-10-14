@@ -1578,7 +1578,7 @@ async function architectureCheck(args) {
     return data
   }
   const quiet = args.includes('--quiet')
-  const { spec } = await api({ action: 'architecture' })
+  const { spec, marked = [] } = await api({ action: 'architecture' })
   // --pull: grava a arquitetura atual para o agente editar (ex.: pôr uma pasta fora do plano nos paths de uma peça).
   if (args.includes('--pull')) {
     if (!spec) return console.log('O projeto ainda não tem arquitetura (Arquitetura (menu do projeto)).')
@@ -1597,11 +1597,14 @@ async function architectureCheck(args) {
   try {
     ignore = readIgnore(fs.readFileSync(path.join(root, '.faundrignore'), 'utf8'))
   } catch {}
-  const { names, ...outside } = offPlan(spec, files, ignore)
+  // O painel recebe a lista completa e esconde as pastas marcadas como fora de propósito (assim "voltar" devolve a pasta
+  // na hora); o aviso no terminal e o resumo daqui já pulam as marcadas.
+  const { names: _, ...outside } = offPlan(spec, files, ignore)
+  const { names, ...shown } = offPlan(spec, files, ignore, marked)
   // Pasta nova fora do plano: o próximo pedido desta sessão leva o aviso (uma vez; a seguinte já conhece a pasta).
   const fresh = newOffPlan(names, readState(root).offPlanSeen)
   const sid = flag(args, '--session')
-  if (fresh.length && sid) addSessionNotes(root, sid, [offPlanNote(fresh, outside)])
+  if (fresh.length && sid) addSessionNotes(root, sid, [offPlanNote(fresh, shown)])
   writeState(root, { offPlanSeen: names })
   const key = JSON.stringify({ built, outside })
   if (readState(root).architectureChecked === key && quiet) return
@@ -1610,8 +1613,8 @@ async function architectureCheck(args) {
   if (quiet) return
   const parts = Object.values(built)
   console.log(`Arquitetura conferida: ${parts.filter((p) => p.built).length} de ${parts.length} partes com caminho já existem no código. Já aparece em Arquitetura (menu do projeto).`)
-  if (outside.folders.length)
-    console.log(`Fora do plano (${outside.total} arquivos de código em nenhuma parte): ${outside.folders.map((f) => `${f.folder} (${f.files})`).join(', ')}${outside.more ? ` e mais ${outside.more} pasta(s)` : ''}.`)
+  if (shown.folders.length)
+    console.log(`Fora do plano (${shown.total} arquivos de código em nenhuma parte): ${shown.folders.map((f) => `${f.folder} (${f.files})`).join(', ')}${shown.more ? ` e mais ${shown.more} pasta(s)` : ''}.`)
 }
 
 function offPlanNote(fresh, outside) {
@@ -1624,7 +1627,7 @@ function offPlanNote(fresh, outside) {
     `apareceu código fora da arquitetura do projeto: ${list}${fresh.length > 5 ? ' e outras' : ''}. Diga isso ao usuário em uma linha e sugira, ` +
     'olhando o código, se cabe numa parte que já existe (diga qual) ou se vira uma parte nova. Só mude a arquitetura com o OK dele: ' +
     'faundr architecture-check --pull, acrescente a pasta nos paths da parte (ou crie a parte) e faundr diagram-save .faundr/painel/architecture.json --architecture. ' +
-    'Se for de propósito fora do plano, ele pode pôr a pasta no .faundrignore.'
+    'Se for de propósito fora do plano, ele marca a pasta em Arquitetura → Fora do plano → Fora de propósito.'
   )
 }
 

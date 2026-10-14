@@ -71,3 +71,11 @@ test('pasta nova fora do plano: só o que não estava antes; a primeira conferê
   assert.deepEqual(newOffPlan(['src/lib', 'worker'], ['src/lib']), ['worker'])
   assert.deepEqual(newOffPlan(['src/lib'], ['src/lib', 'worker']), [])
 })
+
+test('fora do plano: pasta marcada no painel some pelo nome do grupo, sem esconder as de dentro', () => {
+  const spec = { nodes: [{ id: 'x', paths: ['app/**'] }] }
+  const all = ['src/a.ts', 'src/lib/b.ts', 'scripts/c.mjs']
+  const r = offPlan(spec, all, [], ['src', 'scripts'])
+  assert.deepEqual(r.folders, [{ folder: 'src/lib', files: 1 }])
+  assert.deepEqual(r.names, ['src/lib'])
+})

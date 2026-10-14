@@ -54,9 +54,10 @@ export function readIgnore(text) {
 
 /**
  * { folders: [{ folder, files }] (as maiores primeiro, até OFF_PLAN_MAX), more, total, names } ou null sem peça com
- * paths. `names` tem todas as pastas (para achar as novas); não vai para o painel.
+ * paths. `names` tem todas as pastas (para achar as novas); não vai para o painel. `marked`: pastas que o dono marcou
+ * no painel como fora do plano de propósito.
  */
-export function offPlan(spec, files, ignore = []) {
+export function offPlan(spec, files, ignore = [], marked = []) {
   const matchers = (spec?.nodes ?? []).flatMap((n) => (Array.isArray(n.paths) ? n.paths : [])).filter((p) => typeof p === 'string' && p.trim()).map(pathMatcher)
   if (!matchers.length) return null
   const ignored = ignore.map(pathMatcher)
@@ -66,6 +67,8 @@ export function offPlan(spec, files, ignore = []) {
     const folder = f.split('/').slice(0, -1).slice(0, 2).join('/')
     count.set(folder, (count.get(folder) ?? 0) + 1)
   }
+  // Pastas marcadas no painel como fora do plano de propósito: pelo nome do grupo (marcar "src" não esconde "src/lib").
+  for (const folder of marked) count.delete(folder)
   const all = [...count].map(([folder, n]) => ({ folder, files: n })).sort((a, b) => b.files - a.files || a.folder.localeCompare(b.folder))
   const shown = all.slice(0, OFF_PLAN_MAX)
   return { folders: shown, more: all.length - shown.length, total: all.reduce((s, f) => s + f.files, 0), names: all.map((f) => f.folder) }
