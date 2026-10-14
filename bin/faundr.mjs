@@ -394,7 +394,12 @@ async function gate() {
   // Pedido, recado ou nota que chegou enquanto o agente trabalhava: entrega agora, mesmo sem arquivo mudado.
   const inbox = linkFile && sid ? takeInbox(path.dirname(linkFile), sid) : []
   const inboxStep = inbox.length ? `chegou pelo painel enquanto você trabalhava; trate antes de encerrar: ${inbox.join(' ')}` : null
-  if (!linkFile || !sid || !fs.existsSync(editedFile(sid))) return inboxStep ? blockStop([inboxStep]) : undefined // o resto só quando a sessão mexeu em arquivos
+  // Evento desta sessão (commit, push ou deploy, erro novo) com skill ou workflow ligado nele: vale mesmo sem arquivo mexido.
+  const eventSteps = linkFile && sid ? eventTriggers(path.dirname(linkFile), sid) : []
+  if (!linkFile || !sid || !fs.existsSync(editedFile(sid))) {
+    const early = [inboxStep, ...eventSteps].filter(Boolean)
+    return early.length ? blockStop(early) : undefined // o resto só quando a sessão mexeu em arquivos
+  }
   const root = path.dirname(linkFile)
   const { projectId } = readJson(linkFile) ?? {}
   const { token, apiUrl } = loadConfig()
@@ -420,7 +425,7 @@ async function gate() {
   const proof = on('stop.proof') && hasChecks(root) ? proofNeeded(CONFIG_DIR, sid) : null
   const untracked = on('stop.untracked') ? untrackedWork(root, sid) : null
   const triggered = stopTriggers(root, sid)
-  if (!inboxStep && !handoff && !stale && !stackStale && !designFiles.length && !finished && !proof && !untracked && !triggered.length) return
+  if (!inboxStep && !handoff && !stale && !stackStale && !designFiles.length && !finished && !proof && !untracked && !triggered.length && !eventSteps.length) return
   if (untracked) writeState(root, { untrackedNudged: sid })
   if (stale) writeState(root, { overviewNudgedSession: sid })
   if (stackStale) writeState(root, { stackNudgedSession: sid })
@@ -465,7 +470,7 @@ async function gate() {
         : `o checklist de "${finished.feature.title}" terminou e não há próxima etapa registrada: se este trabalho tiver continuação (outra fase, algo que ficou de fora de propósito), registre cada etapa com faundr feature "<etapa>" --after atual --desc "<o que entra>" e diga ao usuário qual é a próxima; se não tiver, diga que a funcionalidade está completa`,
     )
   if (stackStale) steps.push(`atualize a Stack do projeto (${stackStale}) usando a skill "stack" do Faundr e seguindo as instruções dela`)
-  steps.push(...triggered)
+  steps.push(...triggered, ...eventSteps)
   if (stale) steps.push(`atualize a Visão do projeto, que está desatualizada (${stale}), usando a skill "overview" do Faundr e seguindo as instruções dela`)
   blockStop(steps)
 }
@@ -501,6 +506,52 @@ function stopTriggers(root, sid) {
   ].filter((i) => (seen[i.id] ?? 0) < lastEdit)
   if (items.length) writeState(root, { stopTriggered: { session: sid, at: { ...seen, ...Object.fromEntries(items.map((i) => [i.id, lastEdit])) } } })
   return items.map((i) => i.text)
+}
+
+// ---- Gatilhos por evento ----------------------------------------------------------------------------------------
+// O hook depois de cada comando (em segundo plano) guarda o evento; o fim da resposta pede as skills e os workflows
+// que o time ligou nele e esvazia a lista. Push ou deploy que falhou não chega aqui (é PostToolUseFailure).
+
+const DEPLOY = /\b(git\s+push|(npm|pnpm|yarn|bun)\s+(run\s+)?deploy|vercel(\s+--prod|\s+deploy)?|wrangler\s+(pages\s+)?deploy|fly(ctl)?\s+deploy|supabase\s+functions\s+deploy|netlify\s+deploy)\b/
+
+/** Comando que vira evento quando dá certo: 'commit', 'push' (push ou deploy) ou null. */
+function commandEvent(command) {
+  const cmd = String(command ?? '')
+  if (/\bgit\s+commit\b/.test(cmd) && !/--dry-run/.test(cmd)) return 'commit'
+  if (DEPLOY.test(cmd) && !/--dry-run/.test(cmd)) return 'push'
+  return null
+}
+
+function pushEvent(root, sid, event) {
+  if (!sid) return
+  const pending = readState(root).eventsPending
+  const list = pending?.session === sid ? pending.list : []
+  writeState(root, { eventsPending: { session: sid, list: [...new Set([...list, event])] } })
+}
+
+const EVENT_PT = { commit: 'depois do commit', push: 'depois do push ou deploy', error: 'com o erro novo nos comandos' }
+
+/** Passos do fim da resposta para os eventos desta sessão; esvazia a lista (cada evento pede uma vez). */
+function eventTriggers(root, sid) {
+  const pending = readState(root).eventsPending
+  if (pending?.session !== sid || !pending.list?.length) return []
+  writeState(root, { eventsPending: { session: sid, list: [] } })
+  return pending.list.flatMap((ev) => [
+    ...readSkillIndex(root)
+      .filter((s) => skillMoment(s, ev))
+      .map((s) =>
+        onlyUser(s)
+          ? `o time pede /${s.name} ${EVENT_PT[ev]}, mas só a pessoa chama: diga em uma linha "vale rodar /${s.name} agora?" (não rode)`
+          : `rode a skill ${s.name}${s.when ? ` (${s.when})` : ''}: o time pediu ${EVENT_PT[ev]}`,
+      ),
+    ...readWorkflows(root)
+      .filter((w) => workflowMoment(w, ev))
+      .map((w) =>
+        w.call === 'user'
+          ? `o time tem o workflow ${w.ref} ${w.name} ${EVENT_PT[ev]}, mas só quando a pessoa pedir: pergunte em uma linha se ela quer seguir`
+          : `siga o workflow ${w.ref} ${w.name} (faundr workflow show ${w.ref}): o time pediu ${EVENT_PT[ev]}`,
+      ),
+  ])
 }
 
 // Fim da resposta barrado: o agente faz os passos antes de encerrar.
@@ -597,6 +648,11 @@ async function hook(agent) {
     background.push(['quality-scan', '--quiet', '--session', payload.session_id, '--edited'])
 
 
+  // Gatilhos por evento: commit, push ou deploy que deram certo (o fim da resposta pede o que o time ligou neles).
+  if (event === 'PostToolUse' && payload.tool_name === 'Bash') {
+    const done = commandEvent(payload.tool_input?.command)
+    if (done) pushEvent(path.dirname(linkFile), payload.session_id, done)
+  }
   // Erros no desenvolvimento: comando de build, tipos, testes, lint ou script que falhou (ou voltou a passar).
   if ((event === 'PostToolUse' || event === 'PostToolUseFailure') && payload.tool_name === 'Bash' && !stepOff(path.dirname(linkFile), 'run.errors'))
     await captureErrors(payload, path.dirname(linkFile), projectId, { token, apiUrl }).catch((err) => log(`errors: ${err.message}`))
@@ -1935,6 +1991,8 @@ async function captureErrors(payload, root, projectId, config) {
     { projectId, config },
   )
   writeState(root, { errorsOpenKeys: sent.openKeys ?? [] })
+  // Erro novo (não o mesmo E-n reaberto): gatilho "Quando aparece um erro novo" no fim da resposta.
+  if (sent.added?.length) pushEvent(root, payload.session_id, 'error')
   log(`errors: ${c.checkKey} → ${sent.added?.length ?? 0} novo(s), ${sent.reopened?.length ?? 0} voltaram, ${sent.resolved ?? 0} resolvido(s)`)
 }
 

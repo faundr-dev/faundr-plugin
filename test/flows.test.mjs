@@ -34,7 +34,7 @@ test('o hook do pedido não sugere planejar quando "prompt.feature" está deslig
 // ---- Gatilho em campos e quem chama ---------------------------------------------------------------------------
 
 import { blockedSkill, skillNote, skillsForFile, skillsForPrompt, writeSkillIndex } from '../bin/skills.mjs'
-import { workflowsForFile, workflowsForPrompt } from '../bin/workflows.mjs'
+import { workflowsForFile, workflowsForPrompt, writeWorkflows } from '../bin/workflows.mjs'
 
 test('skill "Só você": o guard barra o Claude e o aviso vira lembrete em uma linha', () => {
   const root = tmpProject()
@@ -84,4 +84,23 @@ test('passo desligado numa skill do Faundr: o aviso chega pela ferramenta Skill 
   const hook = fileURLToPath(new URL('../bin/prompt-check.mjs', import.meta.url))
   const typed = spawnSync(process.execPath, [hook], { input: JSON.stringify({ cwd: root, session_id: 's9', prompt: '/faundr:design' }), encoding: 'utf8' }).stdout
   assert.match(typed, /medir as telas no navegador/)
+})
+
+// ---- Gatilhos por evento ---------------------------------------------------------------------------------------
+
+test('evento: commit e deploy que deram certo pedem o que o time ligou, uma vez; push que falhou não', () => {
+  const root = tmpProject()
+  writeSkillIndex(root, [{ name: 'code-review', manual: false, call: 'both', moments: ['commit'], paths: [], topics: [] }])
+  writeWorkflows(root, [{ id: 'w1', ref: 'W-9', name: 'Publicar', call: 'user', moments: ['push'] }])
+  const faundr = fileURLToPath(new URL('../bin/faundr.mjs', import.meta.url))
+  const sid = `teste-evento-${process.pid}`
+  const hook = (p) => spawnSync(process.execPath, [faundr, 'hook', 'claude'], { input: JSON.stringify({ session_id: sid, cwd: root, tool_name: 'Bash', ...p }), encoding: 'utf8' })
+  const gate = () => spawnSync(process.execPath, [faundr, 'gate', 'claude'], { input: JSON.stringify({ hook_event_name: 'Stop', session_id: sid, cwd: root }), encoding: 'utf8' }).stdout
+  hook({ hook_event_name: 'PostToolUse', tool_input: { command: 'git commit -m "x"' } })
+  assert.match(gate(), /rode a skill code-review: o time pediu depois do commit/)
+  assert.equal(gate(), '')
+  hook({ hook_event_name: 'PostToolUseFailure', tool_input: { command: 'git push origin main' } })
+  assert.equal(gate(), '')
+  hook({ hook_event_name: 'PostToolUse', tool_input: { command: 'vercel --prod' } })
+  assert.match(gate(), /W-9 Publicar depois do push ou deploy, mas só quando a pessoa pedir/)
 })
