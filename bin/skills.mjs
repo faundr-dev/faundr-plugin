@@ -6,6 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { faundrPath } from './paths.mjs'
 import { topicHit } from './workflows.mjs'
+import { matchesPath } from './rules.mjs'
 
 const unquote = (v) => {
   const t = v.trim()
@@ -127,13 +128,18 @@ export function writeSkillIndex(root, list) {
   fs.writeFileSync(file(root), JSON.stringify(list ?? []))
 }
 
+/** Momentos do gatilho da skill (painel → Skills): sem a lista (índice antigo), só o assunto do pedido. */
+export const skillMoment = (s, m) => (s.moments ?? ['prompt']).includes(m)
+/** Só a pessoa chama: a própria skill diz (manual) ou o time escolheu "Só você no terminal". */
+export const onlyUser = (s) => !!s.manual || s.call === 'user'
+
 /** Skills cujo assunto bate com o pedido. Sem assuntos definidos, usa o nome (ex.: "copywriting"). */
 export function skillsForPrompt(list, prompt, shownIds = [], max = 2) {
   const clean = String(prompt ?? '').replace(/<pasted_content[\s\S]*?<\/pasted_content>/g, ' ')
   // Quem já chamou a skill pelo nome não precisa do aviso.
   if (/(^|\s)\/[\w:-]+/.test(clean.trim().split('\n')[0])) return []
   return list
-    .filter((s) => !shownIds.includes(s.name))
+    .filter((s) => !shownIds.includes(s.name) && skillMoment(s, 'prompt'))
     .filter((s) => {
       const topics = s.topics?.length ? s.topics : [s.name.split(':').pop().replace(/-/g, ' ')]
       return topics.some((t) => topicHit(t, clean))
@@ -141,25 +147,39 @@ export function skillsForPrompt(list, prompt, shownIds = [], max = 2) {
     .slice(0, max)
 }
 
-export function skillNote(items) {
+/** Linha de uma skill no aviso: a que só a pessoa chama vira um lembrete em uma linha para ela, nunca uma chamada. */
+const skillLine = (s) =>
+  `- ${onlyUser(s) ? `/${s.name} (só a pessoa chama: não rode; diga em uma linha "isso parece trabalho para /${s.name}, quer rodar?")` : `skill ${s.name}`}${s.when ? ` — quando: ${s.when}` : s.description ? ` — ${clip(s.description, 160)}` : ''}`
+
+export function skillNote(items, where = 'este tipo de pedido') {
   if (!items.length) return null
-  return [
-    '[Faundr] O time usa estas skills para este tipo de pedido (chame antes de fazer na mão, se fizer sentido):',
-    ...items.map(
-      (s) =>
-        `- ${s.manual ? `/${s.name} (só a pessoa chama: peça para ela rodar)` : `skill ${s.name}`}${s.when ? ` — quando: ${s.when}` : s.description ? ` — ${clip(s.description, 160)}` : ''}`,
-    ),
-  ].join('\n')
+  return [`[Faundr] O time usa estas skills para ${where} (chame antes de fazer na mão, se fizer sentido):`, ...items.map(skillLine)].join('\n')
 }
+
+/** Skills com o momento "antes de editar" cujos arquivos batem com o arquivo editado. */
+export const skillsForFile = (list, rel, shownIds = []) =>
+  list.filter((s) => !shownIds.includes(s.name) && skillMoment(s, 'edit') && (s.paths ?? []).some((p) => matchesPath(p, rel)))
 
 const readState = (root) => readJson(faundrPath(root, 'state')) ?? {}
 
-export function skillsOnce(root, sid, prompt) {
+/** Entrega cada skill uma vez por sessão (pelo pedido ou pelo arquivo editado): devolve o aviso e marca. */
+function skillsShownOnce(root, sid, pick, where) {
   if (!sid) return null
   const state = readState(root)
   const ids = state.skillsShown?.session === sid ? state.skillsShown.ids : []
-  const items = skillsForPrompt(readSkillIndex(root), prompt, ids)
+  const items = pick(readSkillIndex(root), ids)
   if (!items.length) return null
   fs.writeFileSync(faundrPath(root, 'state'), JSON.stringify({ ...readState(root), skillsShown: { session: sid, ids: [...ids, ...items.map((s) => s.name)] } }, null, 2))
-  return skillNote(items)
+  return skillNote(items, where)
+}
+
+export const skillsOnce = (root, sid, prompt) => skillsShownOnce(root, sid, (list, ids) => skillsForPrompt(list, prompt, ids), 'este tipo de pedido')
+
+export const skillsFileOnce = (root, sid, rel) => skillsShownOnce(root, sid, (list, ids) => skillsForFile(list, rel, ids), `a edição de ${rel}`)
+
+/** Skill que o Claude não pode chamar sozinho (o time escolheu "Só você no terminal"); null quando pode. */
+export function blockedSkill(root, name) {
+  const short = String(name ?? '').replace(/^\//, '')
+  const s = readSkillIndex(root).find((x) => x.name === short || x.name.split(':').pop() === short)
+  return s && s.call === 'user' ? s : null
 }

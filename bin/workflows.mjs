@@ -43,19 +43,27 @@ export function topicHit(topic, prompt) {
   return parts.every((w) => (w.length < 4 ? raw.has(w) : [...stemsOf(w)].every((s) => asked.has(s))))
 }
 
+/** Momentos do gatilho do workflow (painel): sem a lista (índice antigo), o assunto do pedido e os arquivos. */
+export const workflowMoment = (w, m) => (w.moments ?? ['prompt', 'edit']).includes(m)
+
 export function workflowsForPrompt(list, prompt, shownIds = []) {
   const clean = String(prompt ?? '').replace(/<pasted_content[\s\S]*?<\/pasted_content>/g, ' ')
-  return list.filter((w) => !shownIds.includes(w.id) && (w.topics ?? []).some((t) => topicHit(t, clean)))
+  return list.filter((w) => !shownIds.includes(w.id) && workflowMoment(w, 'prompt') && (w.topics ?? []).some((t) => topicHit(t, clean)))
 }
 
 export const workflowsForFile = (list, rel, shownIds = []) =>
-  list.filter((w) => !shownIds.includes(w.id) && (w.paths ?? []).some((p) => matchesPath(p, rel)))
+  list.filter((w) => !shownIds.includes(w.id) && workflowMoment(w, 'edit') && (w.paths ?? []).some((p) => matchesPath(p, rel)))
 
 export function workflowNote(items, where) {
   if (!items.length) return null
   return [
     `[Faundr] ${where} bate com ${items.length > 1 ? 'workflows' : 'um workflow'} do projeto (é como o time quer que você trabalhe nisso). Antes de seguir, leia os passos e siga na ordem, marcando o progresso (o show explica como; o time acompanha no canvas):`,
-    ...items.map((w) => `- ${w.ref} ${w.name}${w.trigger ? ` — quando: ${w.trigger}` : ''} → faundr workflow show ${w.ref}`),
+    ...items.map(
+      (w) =>
+        `- ${w.ref} ${w.name}${w.trigger ? ` — quando: ${w.trigger}` : ''} → ${
+          w.call === 'user' ? `só quando a pessoa pedir: não siga sozinho; pergunte em uma linha se ela quer seguir o ${w.ref}` : `faundr workflow show ${w.ref}`
+        }`,
+    ),
   ].join('\n')
 }
 

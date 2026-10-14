@@ -127,10 +127,10 @@ import { contextLines, findMap, resolvePosition } from './sourcemap.mjs'
 import { detectStack } from './stack.mjs'
 import { graphFooter, rememberTranscript, transcriptUsage, transcriptsToSync } from './usage.mjs'
 import { dependentsNote, readGraph } from './dependents.mjs'
-import { readSkillIndex, scanSkills, writeSkillIndex } from './skills.mjs'
-import { parseItem, workflowsForFile, workflowsOnce, writeWorkflows } from './workflows.mjs'
+import { onlyUser, readSkillIndex, scanSkills, skillMoment, skillsFileOnce, writeSkillIndex } from './skills.mjs'
+import { parseItem, readWorkflows, workflowMoment, workflowsForFile, workflowsOnce, writeWorkflows } from './workflows.mjs'
 import { stepOff, writeFlows } from './flows.mjs'
-import { forbiddenIn, forbiddenNote, globalRules, readMemoryIndex, readRules, rulesFor, rulesNote, writeMemoryIndex, writeRules } from './rules.mjs'
+import { forbiddenIn, forbiddenNote, globalRules, matchesPath, readMemoryIndex, readRules, rulesFor, rulesNote, writeMemoryIndex, writeRules } from './rules.mjs'
 import { installStatusline, metersSnapshot, statusFromBoard, statusLine } from './statusline.mjs'
 import { agentsBlock, removeBlock, upsertBlock } from './agents-md.mjs'
 import { editLoopNote, proofNeeded, recordCheck, recordEdit, takeLoopAlerts } from './loop.mjs'
@@ -419,7 +419,8 @@ async function gate() {
   // Prova: código mudou e nenhuma checagem passou depois (uma vez por leva de mudanças, só se há o que rodar).
   const proof = on('stop.proof') && hasChecks(root) ? proofNeeded(CONFIG_DIR, sid) : null
   const untracked = on('stop.untracked') ? untrackedWork(root, sid) : null
-  if (!inboxStep && !handoff && !stale && !stackStale && !designFiles.length && !finished && !proof && !untracked) return
+  const triggered = stopTriggers(root, sid)
+  if (!inboxStep && !handoff && !stale && !stackStale && !designFiles.length && !finished && !proof && !untracked && !triggered.length) return
   if (untracked) writeState(root, { untrackedNudged: sid })
   if (stale) writeState(root, { overviewNudgedSession: sid })
   if (stackStale) writeState(root, { stackNudgedSession: sid })
@@ -464,8 +465,42 @@ async function gate() {
         : `o checklist de "${finished.feature.title}" terminou e não há próxima etapa registrada: se este trabalho tiver continuação (outra fase, algo que ficou de fora de propósito), registre cada etapa com faundr feature "<etapa>" --after atual --desc "<o que entra>" e diga ao usuário qual é a próxima; se não tiver, diga que a funcionalidade está completa`,
     )
   if (stackStale) steps.push(`atualize a Stack do projeto (${stackStale}) usando a skill "stack" do Faundr e seguindo as instruções dela`)
+  steps.push(...triggered)
   if (stale) steps.push(`atualize a Visão do projeto, que está desatualizada (${stale}), usando a skill "overview" do Faundr e seguindo as instruções dela`)
   blockStop(steps)
+}
+
+/**
+ * Skills e workflows do time com o momento "no fim da resposta": entram quando a sessão mexeu em arquivos que batem com
+ * os deles (sem arquivos escolhidos, qualquer um) e houve mudança nova desde a última vez que entraram.
+ */
+function stopTriggers(root, sid) {
+  const files = sessionEditedFiles(sid).filter(Boolean).map((f) => path.relative(root, f).split(path.sep).join('/'))
+  if (!files.length) return []
+  const lastEdit = fs.statSync(editedFile(sid)).mtimeMs
+  const seen = readState(root).stopTriggered?.session === sid ? readState(root).stopTriggered.at : {}
+  const hits = (paths) => !paths?.length || files.some((f) => paths.some((p) => matchesPath(p, f)))
+  const items = [
+    ...readSkillIndex(root)
+      .filter((s) => skillMoment(s, 'stop') && hits(s.paths))
+      .map((s) => ({
+        id: `skill:${s.name}`,
+        text: onlyUser(s)
+          ? `o time pede /${s.name} no fim das respostas que mexem nesses arquivos, mas só a pessoa chama: diga em uma linha "vale rodar /${s.name} agora?" (não rode)`
+          : `rode a skill ${s.name}${s.when ? ` (${s.when})` : ''}: o time pediu no fim das respostas que mexem nesses arquivos`,
+      })),
+    ...readWorkflows(root)
+      .filter((w) => workflowMoment(w, 'stop') && hits(w.paths))
+      .map((w) => ({
+        id: `workflow:${w.id}`,
+        text:
+          w.call === 'user'
+            ? `o time tem o workflow ${w.ref} ${w.name} para o fim destas respostas, mas só quando a pessoa pedir: pergunte em uma linha se ela quer seguir`
+            : `siga o workflow ${w.ref} ${w.name} (faundr workflow show ${w.ref}): o time pediu no fim das respostas que mexem nesses arquivos`,
+      })),
+  ].filter((i) => (seen[i.id] ?? 0) < lastEdit)
+  if (items.length) writeState(root, { stopTriggered: { session: sid, at: { ...seen, ...Object.fromEntries(items.map((i) => [i.id, lastEdit])) } } })
+  return items.map((i) => i.text)
 }
 
 // Fim da resposta barrado: o agente faz os passos antes de encerrar.
@@ -613,6 +648,10 @@ async function hook(agent) {
   if (answer.bar !== undefined) fs.writeFileSync(ensureFaundrPath(path.dirname(linkFile), 'bar'), JSON.stringify(answer.bar ?? {}))
   // Passos dos workflows padrão desligados no painel: o pedido seguinte e o fim da resposta leem sem rede.
   if (Array.isArray(answer.flows)) writeFlows(path.dirname(linkFile), answer.flows)
+  // Workflows ativos e skills ligadas, com o gatilho: chegam no início, a cada pedido e no fim da resposta, para uma
+  // mudança no painel valer no próximo pedido; o hook do pedido, o guard e o fim da resposta leem sem rede.
+  if (Array.isArray(answer.workflows)) writeWorkflows(path.dirname(linkFile), answer.workflows)
+  if (Array.isArray(answer.skills)) writeSkillIndex(path.dirname(linkFile), answer.skills)
   // Plano aprovado virou funcionalidade: passa a ser a atual desta pasta.
   if (answer.currentFeatureId) setCurrentFeature(path.dirname(linkFile), answer.currentFeatureId, payload.session_id)
   if (event === 'SessionStart') {
@@ -620,10 +659,6 @@ async function hook(agent) {
     const root = path.dirname(linkFile)
     // Regras ligadas a arquivos: cópia local para o guard entregar antes de cada edição (ele não usa a rede).
     if (Array.isArray(answer.anchoredRules)) writeRules(root, answer.anchoredRules)
-    // Workflows ativos: o hook do pedido e o guard avisam quando o assunto ou o arquivo bate (sem rede).
-    if (Array.isArray(answer.workflows)) writeWorkflows(root, answer.workflows)
-    // Skills ligadas com os assuntos: o hook do pedido avisa quando o pedido bate com uma delas.
-    if (Array.isArray(answer.skills)) writeSkillIndex(root, answer.skills)
     // Todas as regras e decisões: o hook do pedido entrega as do assunto; as que o início já levou não se repetem.
     if (Array.isArray(answer.memoryIndex)) {
       writeMemoryIndex(root, answer.memoryIndex)
@@ -3146,6 +3181,16 @@ function workflowsFileOnce(root, sid, rel) {
   }
 }
 
+// Skill com o momento "antes de editar" cujos arquivos batem: avisa uma vez por sessão.
+function skillsFileGuard(root, sid, rel) {
+  try {
+    return skillsFileOnce(root, sid, rel)
+  } catch (err) {
+    log(`guard skills: ${err?.message ?? err}`)
+    return null
+  }
+}
+
 // Regra do time com padrão proibido que a mudança traz: avisa a cada edição (não só a primeira).
 function forbiddenCheck(root, rel, content) {
   try {
@@ -3243,6 +3288,7 @@ async function guard() {
     forbiddenCheck(path.dirname(linkFile), rel, content),
     rulesOnce(path.dirname(linkFile), payload.session_id, rel),
     workflowsFileOnce(path.dirname(linkFile), payload.session_id, rel),
+    skillsFileGuard(path.dirname(linkFile), payload.session_id, rel),
     teamOnce(path.dirname(linkFile), payload.session_id, rel),
     payload.tool_name !== 'Write' && dependentsOnce(path.dirname(linkFile), payload.session_id, rel),
   ].filter(Boolean)
