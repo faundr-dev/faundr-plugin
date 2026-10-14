@@ -30,7 +30,8 @@
 //   faundr overview-context                    contexto para o agente escrever a Visão do projeto
 //   faundr overview-save [arquivo]              valida e envia a Visão (padrão: .faundr/painel/overview.json)
 //   faundr architecture-check [--quiet|--pull] confere quais partes da arquitetura já existem e o código fora do plano (sem IA); --pull grava a arquitetura para editar
-//   faundr diagram-save [arquivo] [--feature "<nome>" | --architecture]  envia o diagrama da funcionalidade ou a arquitetura do projeto (padrão: .faundr/painel/diagram.json)
+//   faundr diagram-save [arquivo] [--feature "<nome>" | --architecture] [--no-wait]  envia o diagrama da funcionalidade (abre o canvas e espera o dono aprovar) ou a arquitetura do projeto (padrão: .faundr/painel/diagram.json)
+//   faundr diagram-wait [--feature "<nome>"]   continua esperando o dono aprovar ou pedir mudanças no desenho da funcionalidade
 //   faundr stack-scan [--json]                 detecta a Stack sem IA (onde roda, linguagens, serviços, variáveis) e envia
 //   faundr env-check [--hosting] [--no-send]   variáveis por ambiente: código x exemplo x .env do computador x hospedagem (só nomes)
 //   faundr handover [--out arquivo.md]          pacote de passagem: um documento para um dev assumir o projeto (padrão: .faundr/relatorios/PASSAGEM.md)
@@ -1520,7 +1521,45 @@ async function diagramSave(args) {
     // Confere de novo na hora: a peça nova (ou a pasta acrescentada) já sai do "Fora do plano".
     return architectureCheck([]).catch((err) => console.log(`Não consegui conferir o código agora: ${err.message}`))
   }
-  console.log(`Diagrama salvo em "${data.feature}" (versão ${data.version}). Já aparece no painel, na página da funcionalidade, em Como vai funcionar.`)
+  console.log(`Diagrama salvo em "${data.feature}" (versão ${data.version}).`)
+  // Como um Artifact: abre o canvas para o dono e espera ele aprovar ou pedir mudanças (--no-wait: só salva).
+  const url = `${config.apiUrl}/app/projects/${projectId}?secao=features&item=${data.featureId}&canvas=1`
+  if (args.includes('--no-wait')) return console.log(`Canvas: ${url}`)
+  openBrowser(url)
+  console.log(`Abri o canvas no navegador para o dono revisar: ${url}`)
+  await waitReview(projectId, config, data.featureId)
+}
+
+// Espera a revisão do desenho no canvas (o comando do agente roda no máximo 10 min; diagram-wait continua).
+const REVIEW_WAIT_MS = 9 * 60_000
+
+async function diagramWait(args) {
+  const { root, projectId, config } = linkedProject()
+  const feature = await findFeature(flag(args, '--feature') ?? 'atual', currentFeature(root))
+  await waitReview(projectId, config, feature.id)
+}
+
+async function waitReview(projectId, config, featureId) {
+  console.log('Esperando o dono aprovar ou pedir mudanças no canvas…')
+  const until = Date.now() + REVIEW_WAIT_MS
+  while (Date.now() < until) {
+    const res = await fetch(`${config.apiUrl}/api/cli/diagrams`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${config.token}` },
+      body: JSON.stringify({ projectId, action: 'review', featureId }),
+      signal: AbortSignal.timeout(20_000),
+    }).catch(() => null)
+    const data = res?.ok ? await res.json().catch(() => ({})) : {}
+    const who = data.by ? ` (${data.by})` : ''
+    if (data.status === 'approved')
+      return console.log(`O dono APROVOU o desenho${who}. Pode construir: registre o que faltar no Faundr e comece pelo primeiro passo.`)
+    if (data.status === 'changes') {
+      console.log(`O dono PEDIU MUDANÇAS no desenho${who}: ${data.reason ? `"${data.reason}"` : '(sem motivo escrito; pergunte o que mudar)'}`)
+      return console.log('Ajuste o desenho (e o plano, se mudou algo) e salve de novo com faundr diagram-save: o canvas abre outra vez para ele revisar. Não construa antes do OK.')
+    }
+    await new Promise((r) => setTimeout(r, 3000))
+  }
+  console.log('Sem resposta em 9 minutos. Para continuar esperando, rode faundr diagram-wait; ou pergunte ao dono no terminal se aprova o desenho.')
 }
 
 // Planejado x construído (sem IA): pega a arquitetura do projeto, confere os caminhos de cada peça nos arquivos e
@@ -4121,6 +4160,7 @@ async function cli() {
     else if (command === 'overview-save') await overviewSave(args)
     else if (command === 'diagram-save') await diagramSave(args)
     else if (command === 'architecture-check') await architectureCheck(args)
+    else if (command === 'diagram-wait') await diagramWait(args)
     else if (command === 'handoff') await handoffCommand(args)
     else if (command === 'stack-scan') await stackScan(args)
     else if (command === 'env-check') await envCheck(args)

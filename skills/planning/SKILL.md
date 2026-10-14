@@ -78,7 +78,7 @@ Depois: <próximas etapas, se houver>
 
 Pergunte: **"Algo errado ou faltando? Posso registrar e começar?"** Não comece a construir antes do OK.
 
-Quando a funcionalidade tem um fluxo com 3 ou mais partes (tela, servidor, banco, serviço de fora) ou um caminho de erro que importa, acrescente uma linha: "Se quiser, também desenho como vai funcionar, para ver no painel (gasta mais tokens que o normal)." Não ofereça em tarefa pequena. Se ele corrigir algo, ajuste o resumo e confirme só o que mudou.
+Quando a funcionalidade tem um fluxo com 3 ou mais partes (tela, servidor, banco, serviço de fora) ou um caminho de erro que importa, acrescente uma linha: "Se quiser, também desenho como vai funcionar: abre num canvas no navegador para você aprovar ou pedir mudanças (gasta mais tokens que o normal)." Não ofereça em tarefa pequena. Se ele corrigir algo, ajuste o resumo e confirme só o que mudou.
 
 ## 7. Grave no Faundr (sem criar arquivos)
 
@@ -93,7 +93,7 @@ Nada de arquivos .md de plano: tudo vai para o painel, que o agente relê nas pr
 4. As etapas seguintes, cada uma depois da anterior:
    `faundr feature "<etapa 2>" --after atual --desc "<o que entra>"`, depois `faundr feature "<etapa 3>" --after "<etapa 2>" --desc "…"`.
 5. Mostre o checklist com `faundr board` e diga que ele já está no painel (Funcionalidades), com o critério de pronto.
-6. Se o dono pediu o diagrama, leia `${CLAUDE_PLUGIN_ROOT}/skills/planning/diagrama.md` e siga (escreve o JSON de uma vez, `faundr diagram-save`, no máximo 2 correções). Faça isso antes de construir: o desenho é do plano.
+6. Se o dono pediu o diagrama, leia `${CLAUDE_PLUGIN_ROOT}/skills/planning/diagrama.md` e siga (escreve o JSON de uma vez, `faundr diagram-save`, no máximo 2 correções). Faça isso antes de construir: o desenho é do plano. O comando abre o canvas e espera: **aprovado no canvas = OK para construir**; mudanças pedidas = ajuste e salve de novo.
 7. Então comece pelo primeiro passo.
 
 ## Só o diagrama

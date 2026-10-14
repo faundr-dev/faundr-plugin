@@ -1,6 +1,6 @@
 # Diagrama "como vai funcionar"
 
-Só com o OK do dono: gasta mais tokens que o normal. Vale para o diagrama de uma funcionalidade e para a arquitetura do projeto (camadas e `--architecture` em `projeto.md`). Escreva o JSON **de uma vez**, sem planejar o desenho em texto antes: você não posiciona nada, só diz em que raia e em que coluna cada peça fica; o painel desenha.
+Só com o OK do dono: gasta mais tokens que o normal. O desenho da funcionalidade funciona como um Artifact: abre sozinho num canvas no navegador e o dono aprova ou pede mudanças ali. Vale para o diagrama de uma funcionalidade e para a arquitetura do projeto (camadas e `--architecture` em `projeto.md`). Escreva o JSON **de uma vez**, sem planejar o desenho em texto antes: você não posiciona nada, só diz em que raia e em que coluna cada peça fica; o painel desenha.
 
 ## O que mostrar
 
@@ -54,6 +54,10 @@ Só com o OK do dono: gasta mais tokens que o normal. Vale para o diagrama de um
 ## Enviar
 
 1. Escreva em `.faundr/painel/diagram.json`.
-2. Rode `faundr diagram-save` (para outra funcionalidade que não a atual: `--feature "<nome>"`).
+2. Rode `faundr diagram-save` (para outra funcionalidade que não a atual: `--feature "<nome>"`). Rode com tempo de espera de 10 minutos: ele salva, abre o canvas no navegador do dono e **espera** ele aprovar ou pedir mudanças.
 3. Se voltar uma lista de problemas, corrija **só** os pontos apontados e rode de novo. No máximo 2 correções; se ainda falhar, diga ao dono o que ficou faltando em vez de reescrever tudo.
-4. Diga em uma frase onde ver: página da funcionalidade no painel, em **Como vai funcionar** (a arquitetura fica em **Arquitetura**, no menu do projeto, num canvas onde cada peça abre a explicação).
+4. O que o comando responder decide o próximo passo:
+   - **APROVOU**: é o OK do dono para construir. Não pergunte de novo; diga em uma linha que ele aprovou e comece pelo primeiro passo.
+   - **PEDIU MUDANÇAS**: leia o motivo, ajuste o desenho (e o plano, se mudou algo; registre no Faundr) e salve de novo. Diga em uma linha o que mudou. Não construa antes do OK.
+   - **Sem resposta em 9 minutos**: rode `faundr diagram-wait` uma vez para continuar esperando; se de novo não vier, pergunte no terminal se ele aprova.
+5. A arquitetura (`--architecture`) não passa por aprovação: salva e aparece em **Arquitetura**, no menu do projeto, num canvas onde cada peça abre a explicação.
