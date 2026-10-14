@@ -2,14 +2,17 @@
 // de tipos, testes, lint, scripts) e separa cada erro, com uma impressão digital estável (sem número de
 // linha) para o mesmo erro manter o mesmo E-n entre execuções. Chaves na saída saem mascaradas.
 import path from 'node:path'
+import { LANG_READERS, LANG_TOOL_KIND } from './errors-langs.mjs'
 import { findSecrets, mask } from './security.mjs'
 
+// Prefixo de executável local: ./gradlew, .\mvnw.cmd, vendor/bin/phpunit.
+const LOCAL = String.raw`(?:\.{1,2}[\\/]|vendor[\\/]bin[\\/])?`
 const KINDS = [
-  ['typecheck', /(^|[\s/])(tsc|vue-tsc|svelte-check|mypy|pyright)(\s|$)|\btype-?check\b/],
-  ['lint', /(^|[\s/])(eslint|biome|ruff|stylelint|oxlint)(\s|$)|\bnpm run lint\b|\b(pnpm|yarn|bun)( run)? lint\b|prettier (--check|-c)\b/],
-  ['test', /(^|[\s/])(vitest|jest|mocha|pytest|ava)(\s|$)|playwright test|\bnode --test\b|\b(npm|pnpm|yarn|bun)( run)? test\b|\bnpm t\b/],
-  ['build', /\b(vite|next|nuxt|astro|remix|react-router|tsup|webpack|rollup|parcel) build\b|\b(npm|pnpm|yarn|bun) (run )?build\b|\besbuild\b|\bwrangler deploy --dry-run\b|\b(cargo|go) build\b/],
-  ['run', /(^|[\s/])(node|tsx|ts-node|bun|deno|python3?|py)\s+(\S+\/)?[\w.-]+\.(m?[jt]sx?|c[jt]s|py)\b|\bnpx tsx\b/],
+  ['typecheck', /(^|[\s/])(tsc|vue-tsc|svelte-check|mypy|pyright|phpstan|psalm)(\s|$)|\btype-?check\b|\b(flutter|dart) analyze\b|\bcargo check\b/],
+  ['lint', /(^|[\s/])(eslint|biome|ruff|stylelint|oxlint|golangci-lint|staticcheck)(\s|$)|\bnpm run lint\b|\b(pnpm|yarn|bun)( run)? lint\b|prettier (--check|-c)\b|\bgo vet\b|\bcargo clippy\b|\bng lint\b|\bphp -l\b/],
+  ['test', /(^|[\s/])(vitest|jest|mocha|pytest|ava|phpunit|pest|ctest)(\s|$)|playwright test|\bnode --test\b|\b(npm|pnpm|yarn|bun)( run)? test\b|\bnpm t\b|\b(go|cargo|flutter|dart|dotnet|ng) test\b|\bartisan test\b|\b(mvnw?|gradlew?)(\.cmd|\.bat)?\s.*\b(test|verify|check)\b|\bmake (test|check)\b/],
+  ['build', /\b(vite|next|nuxt|astro|remix|react-router|tsup|webpack|rollup|parcel) build\b|\b(npm|pnpm|yarn|bun) (run )?build\b|\besbuild\b|\bwrangler deploy --dry-run\b|\b(cargo|go|flutter|dotnet|ng) build\b|\bdart compile\b|\b(mvnw?|gradlew?)(\.cmd|\.bat)?\s.*\b(compile|package|install|build|assemble\w*|compile\w+)\b|\bcmake --build\b|(^|[\s/])(make|ninja|javac|kotlinc|rustc|gcc|g\+\+|clang\+\+|clang|cc|c\+\+)(\s|$)|\bdocker (compose |buildx )?build\b|\bpodman build\b/],
+  ['run', /(^|[\s/])(node|tsx|ts-node|bun|deno|python3?|py)\s+(\S+\/)?[\w.-]+\.(m?[jt]sx?|c[jt]s|py)\b|\bnpx tsx\b|\b(go|cargo|dart|dotnet|flutter) run\b|(^|[\s/])php\s+(\S+\/)?[\w.-]+\.php\b|(^|[\s/])java\s+(\S+\/)?[\w.-]+\.java\b/],
 ]
 
 // Comando sem o que não muda o resultado: `cd pasta &&`, variáveis, redirecionamentos e o corte da saída.
@@ -23,7 +26,9 @@ export function normalizeCommand(command) {
 }
 
 // Programas que rodam checagens; o resto (git, grep, ls, for, echo…) não interessa.
-const RUNNERS = /^(npx|pnpx|bunx|npm|pnpm|yarn|bun|deno|node|tsx|ts-node|tsc|vue-tsc|svelte-check|vite|next|nuxt|astro|vitest|jest|mocha|ava|playwright|eslint|biome|ruff|stylelint|oxlint|prettier|mypy|pyright|pytest|python3?|py|uv|poetry|cargo|go|esbuild|tsup|webpack|rollup|parcel|wrangler|remix|react-router)(\s|$)/
+const RUNNERS = new RegExp(
+  String.raw`^${LOCAL}(npx|pnpx|bunx|npm|pnpm|yarn|bun|deno|node|tsx|ts-node|tsc|vue-tsc|svelte-check|vite|next|nuxt|astro|vitest|jest|mocha|ava|playwright|eslint|biome|ruff|stylelint|oxlint|prettier|mypy|pyright|pytest|python3?|py|uv|poetry|cargo|rustc|go|golangci-lint|staticcheck|esbuild|tsup|webpack|rollup|parcel|wrangler|remix|react-router|ng|flutter|dart|mvnw?|gradlew?|dotnet|javac|java|kotlinc|php|composer|phpunit|pest|phpstan|psalm|make|cmake|ctest|ninja|gcc|g\+\+|clang|clang\+\+|cc|c\+\+|docker|podman)(\.cmd|\.bat|\.exe)?(\s|$)`,
+)
 
 /** Que tipo de checagem o comando é (ou null: comando que não interessa, como git, grep, ls). */
 export function classify(command) {
@@ -40,7 +45,7 @@ export function classify(command) {
       .replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, (q) => (/^["'][^\s"']+\.(m?[jt]sx?|c[jt]s|py)["']$/.test(q) ? 'script.' + q.slice(1, -1).split('.').pop() : '""'))
       .replace(/^([A-Z_][A-Z0-9_]*=\S*\s+)+/, '')
     if (!RUNNERS.test(bare)) continue
-    if (/\b(dev|serve|preview|watch|start)\b/.test(bare) && !/\bbuild\b/.test(bare)) continue // servidores ficam rodando
+    if (/\b(dev|serve|preview|watch|start)\b/.test(bare.replace(/--watch=false|--no-watch/g, '')) && !/\bbuild\b/.test(bare)) continue // servidores ficam rodando
     const k = KINDS.find(([, re]) => re.test(bare))?.[0]
     if (!k) continue
     kind ??= k
@@ -298,7 +303,7 @@ function genericError(lines, kind) {
  * @returns {{ tool, code, title, message, file, line, excerpt, fingerprint }[]}
  */
 // Um comando pode misturar checagens (`npm run build` roda o tsc): o tipo do erro vem de quem o escreveu.
-const TOOL_KIND = { tsc: 'typecheck', eslint: 'lint', vitest: 'test', jest: 'test', pytest: 'test', esbuild: 'build', vite: 'build' }
+const TOOL_KIND = { tsc: 'typecheck', eslint: 'lint', vitest: 'test', jest: 'test', pytest: 'test', esbuild: 'build', vite: 'build', ...LANG_TOOL_KIND }
 
 /** A pasta em que o comando roda: a do terminal, mais o `cd <pasta> &&` do começo, se houver. */
 export function commandCwd(command, base) {
@@ -313,13 +318,17 @@ export function parseErrors(output, { kind, root, failed = true, cwd = root } = 
   const lines = text.split('\n')
   // Cada tipo de comando só usa os leitores que fazem sentido para ele: um script que imprime a saída
   // de outro comando (ex.: um log com "error TS2322") não vira erro de tipos.
-  const readers = {
-    typecheck: [tsErrors, pythonErrors],
-    lint: [eslintErrors, tsErrors],
-    test: [testErrors, tsErrors, pythonErrors],
-    build: [tsErrors, esbuildErrors, eslintErrors],
-    run: [pythonErrors],
-  }[kind] ?? [tsErrors, eslintErrors, testErrors, pythonErrors, esbuildErrors]
+  const readers = [
+    ...({
+      typecheck: [tsErrors, pythonErrors],
+      lint: [eslintErrors, tsErrors],
+      test: [testErrors, tsErrors, pythonErrors],
+      build: [tsErrors, esbuildErrors, eslintErrors],
+      run: [pythonErrors],
+    }[kind] ?? [tsErrors, eslintErrors, testErrors, pythonErrors, esbuildErrors]),
+    // As outras linguagens têm formatos que não se confundem com os de JS/TS e Python.
+    ...LANG_READERS,
+  ]
   let found = readers.flatMap((read) => read(lines))
   if (!found.length && kind !== 'lint' && kind !== 'typecheck') found = jsRuntimeErrors(lines)
   // Script comum que falhou sem pilha de erro (ex.: saiu com código 1 de propósito) não vira E-n.

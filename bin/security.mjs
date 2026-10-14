@@ -15,6 +15,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { SECRET_RULES } from '../dist/secret-rules.mjs'
+import { LANG_LOCKFILE, parseLangLockfile, preferLocks } from './lockfiles-langs.mjs'
+import { LANG_TECH, langDeps } from './stack-langs.mjs'
 import { LOCKFILE, parseLockfile } from './lockfiles.mjs'
 import { allDeps, partWith, projectParts } from './parts.mjs'
 import { remoteDatabaseFindings } from './env-target.mjs'
@@ -28,7 +30,7 @@ const hash = (text) => createHash('sha256').update(text).digest('hex').slice(0, 
 
 const SKIP_PATH = /(^|\/)(node_modules|\.git|\.faundr|dist|build|out|\.next|\.nuxt|\.svelte-kit|\.wrangler|\.vercel|\.turbo|coverage|vendor|\.venv|venv|__pycache__|\.claude|\.remember)(\/|$)/
 const BINARY = /\.(png|jpe?g|gif|webp|avif|ico|bmp|tiff?|svg|pdf|zip|gz|tgz|rar|7z|woff2?|ttf|otf|eot|mp[34]|mov|webm|wav|ogg|wasm|exe|dll|so|dylib|bin|lockb|jar|class|pyc|ai|psd|sketch|fig|docx?|xlsx?|pptx?|odp)$/i
-const LOCKFILES = /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lock|deno\.lock|poetry\.lock|Pipfile\.lock|uv\.lock|Cargo\.lock|go\.sum|composer\.lock|Gemfile\.lock)$/
+const LOCKFILES = /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lock|deno\.lock|poetry\.lock|Pipfile\.lock|uv\.lock|Cargo\.lock|go\.sum|composer\.lock|Gemfile\.lock|pubspec\.lock|packages\.lock\.json|gradle\.lockfile|conan\.lock)$/
 
 function git(root, args) {
   const r = spawnSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true })
@@ -452,6 +454,9 @@ function readCache() {
   }
 }
 
+// Ecossistemas que o Faundr lê (lockfiles.mjs e lockfiles-langs.mjs), com o nome que o OSV usa.
+const OSV_ECOSYSTEMS = new Set(['npm', 'PyPI', 'crates.io', 'Go', 'Packagist', 'Pub', 'RubyGems', 'NuGet', 'Maven', 'ConanCenter'])
+
 async function osvDetails(ids, known) {
   const cache = readCache()
   const missing = ids.filter((id) => cache[id]?.modified !== known.get(id))
@@ -470,7 +475,7 @@ async function osvDetails(ids, known) {
           vectors: (v.severity ?? []).map((s) => s.score),
           cwe: v.database_specific?.cwe_ids ?? [],
           affected: (v.affected ?? [])
-            .filter((a) => a.package?.ecosystem === 'npm' || a.package?.ecosystem === 'PyPI')
+            .filter((a) => OSV_ECOSYSTEMS.has(a.package?.ecosystem))
             .map((a) => ({ name: a.package.name, ranges: a.ranges ?? [], versions: a.versions?.length > 200 ? [] : (a.versions ?? []) })),
           url: v.references?.find((r) => r.type === 'ADVISORY')?.url ?? `https://osv.dev/vulnerability/${id}`,
         }
@@ -559,6 +564,15 @@ const MANAGER = {
   poetry: { add: (n, v) => `poetry add ${n}@^${v}`, update: (n) => `poetry update ${n}`, remove: (n) => `poetry remove ${n}`, force: 'como dependência direta no pyproject.toml' },
   uv: { add: (n, v) => `uv add "${n}>=${v}"`, update: (n) => `uv lock --upgrade-package ${n}`, remove: (n) => `uv remove ${n}`, force: 'como dependência direta no pyproject.toml' },
   pipenv: { add: (n, v) => `pipenv install "${n}>=${v}"`, update: (n) => `pipenv update ${n}`, remove: (n) => `pipenv uninstall ${n}`, force: 'no Pipfile' },
+  cargo: { add: (n, v) => `cargo update -p ${n} --precise ${v}`, update: (n) => `cargo update -p ${n}`, remove: (n) => `cargo remove ${n}`, force: 'como dependência direta no Cargo.toml' },
+  go: { add: (n, v) => `go get ${n}@v${v} && go mod tidy`, update: (n) => `go get -u ${n} && go mod tidy`, remove: (n) => `tire o import de ${n} e rode go mod tidy`, force: 'com go get no go.mod' },
+  composer: { add: (n, v) => `composer require ${n}:^${v}`, update: (n) => `composer update ${n} --with-dependencies`, remove: (n) => `composer remove ${n}`, force: 'como dependência direta no composer.json' },
+  pub: { add: (n, v) => `flutter pub add ${n}:^${v}`, update: (n) => `flutter pub upgrade ${n}`, remove: (n) => `flutter pub remove ${n}`, force: 'em dependency_overrides no pubspec.yaml' },
+  bundler: { add: (n, v) => `ponha gem "${n}", ">= ${v}" no Gemfile e rode bundle update ${n}`, update: (n) => `bundle update ${n}`, remove: (n) => `tire a gem ${n} do Gemfile e rode bundle install`, force: 'como gem direta no Gemfile' },
+  dotnet: { add: (n, v) => `dotnet add package ${n} --version ${v}`, update: (n) => `dotnet add package ${n}`, remove: (n) => `dotnet remove package ${n}`, force: 'como PackageReference direta no .csproj' },
+  maven: { add: (n, v) => `troque a versão de ${n} para ${v} no pom.xml`, update: (n) => `atualize a versão de ${n} no pom.xml`, remove: (n) => `tire ${n} do pom.xml`, force: 'em <dependencyManagement> no pom.xml' },
+  gradle: { add: (n, v) => `troque a versão de ${n} para ${v} no build.gradle (ou no libs.versions.toml)`, update: (n) => `atualize a versão de ${n} no build.gradle`, remove: (n) => `tire ${n} do build.gradle`, force: 'com uma constraint no build.gradle' },
+  conan: { add: (n, v) => `troque para ${n}/${v} no conanfile e rode conan lock create`, update: (n) => `atualize ${n} no conanfile`, remove: (n) => `tire ${n} do conanfile`, force: 'como requisito direto no conanfile' },
 }
 
 // Pacotes de todos os lockfiles, com o ecossistema, o gerenciador e o lockfile de onde vieram.
@@ -577,7 +591,7 @@ function lockfileEntries(root, lockfiles) {
     if (!text) continue
     let parsed
     try {
-      parsed = parseLockfile(lf, text, readManifest)
+      parsed = LOCKFILE.test(lf) ? parseLockfile(lf, text, readManifest) : parseLangLockfile(lf, text)
     } catch {
       continue
     }
@@ -672,7 +686,7 @@ function dependencyFinding(e, id, v) {
 }
 
 async function scanDependencies(root, files) {
-  const lockfiles = files.filter((f) => LOCKFILE.test(f))
+  const lockfiles = preferLocks(files.filter((f) => LOCKFILE.test(f) || LANG_LOCKFILE.test(f)))
   const entries = lockfileEntries(root, lockfiles)
   const unique = [...new Map(entries.map((e) => [pkgKey(e), e])).values()]
   if (!unique.length) return { findings: [], packages: 0, lockfiles, snapshot: { packages: [], known: [] } }
@@ -860,6 +874,8 @@ function scanDatabase(root, files) {
 // ---- código (padrões perigosos, sem IA) -----------------------------------------------------
 
 const CODE_FILE = /\.(m?[jt]sx?|cjs|cts|vue|svelte|astro|py)$/i
+// Código das linguagens sem regras de linha (o Claude lê na revisão).
+const OTHER_CODE = /\.(go|rs|java|kts?|php|cs|dart|c|cc|cpp|cxx|h|hpp|rb|swift)$/i
 const SERVER_ROUTE = /(^|\/)(app\/(.*\/)?api\/.*\/?route\.[mc]?[jt]s|pages\/api\/.*\.[mc]?[jt]sx?|src\/routes\/api\/.*\.[mc]?[jt]sx?|supabase\/functions\/[^/]+\/index\.[jt]s|functions\/.*\.[jt]s|server\/.*\.[mc]?[jt]s|api\/.*\.[mc]?[jt]s)$/i
 
 // Regras por linha: o que é quase sempre perigoso quando aparece com dado variável.
@@ -1445,7 +1461,9 @@ const TOPICS = [
 export function projectMap(root) {
   const { files } = projectFiles(root)
   const deps = { ...pythonDeps(root, files), ...allDeps(root) }
-  const stack = STACK_SIGNS.filter(([, test]) => test(deps, files)).map(([name]) => name)
+  const langFrameworks = [...langDeps(root, files).keys()].map((k) => LANG_TECH[k]).filter((t) => t?.[1] === 'framework').map((t) => t[0])
+  const stack = [...STACK_SIGNS.filter(([, test]) => test(deps, files)).map(([name]) => name), ...new Set(langFrameworks)]
+  const other = files.filter((f) => OTHER_CODE.test(f) && !TEST_PATH.test(f))
   const code = files.filter((f) => CODE_FILE.test(f) && !TEST_PATH.test(f) && !/\.d\.ts$/.test(f))
   const pick = (re) => code.filter((f) => re.test(f)).slice(0, 60)
   return {
@@ -1455,7 +1473,9 @@ export function projectMap(root) {
       'Rotas e funções do servidor': code.filter((f) => SERVER_ROUTE.test(f)).slice(0, 80),
       'Server actions / funções de servidor': code.filter((f) => /^\s*['"]use server['"]|createServerFn\(/m.test(readText(root, f) ?? '')).slice(0, 40),
       'Middleware e proteção de rotas': pick(/(^|\/)(middleware|proxy)\.[mc]?[jt]s$|auth[^/]*\.(t|j)sx?$|guard/i),
-      'Migrations e regras do banco': files.filter((f) => /(^|\/)supabase\/.*\.sql$|\.rules$|database\.rules\.json$|prisma\/schema\.prisma$|drizzle\/.*\.(sql|ts)$/i.test(f)).slice(0, 60),
+      'Rotas, controllers e handlers em outras linguagens': other.filter((f) => /(controller|handler|route|router|endpoint|api|server|middleware|auth|main)[^/]*\.\w+$|\/(controllers?|handlers?|routes?|api|endpoints?)\//i.test(f)).slice(0, 80),
+      'Migrations e regras do banco': files.filter((f) => /(^|\/)supabase\/.*\.sql$|\.rules$|database\.rules\.json$|prisma\/schema\.prisma$|drizzle\/.*\.(sql|ts)$|(^|\/)(migrations?|db\/migrate)\/.*\.(sql|php|rb|py|go|cs|java|kt)$/i.test(f)).slice(0, 60),
+      'Contêineres e servidor': files.filter((f) => /(^|\/)(Dockerfile[\w.-]*|(docker-)?compose\.ya?ml|nginx\.conf|Caddyfile)$|(^|\/)(k8s|kubernetes|helm)\/.*\.ya?ml$/i.test(f)).slice(0, 30),
       'Configuração': files.filter((f) => HEADER_FILES.test(f) || /(^|\/)(\.env\.example|firebase\.json)$/.test(f)).slice(0, 30),
     },
   }
@@ -1518,7 +1538,7 @@ export async function scanProject(root, { only = null, deps = true, history = fa
     scopes.push({ source: 'database', files: null })
     stats.tables = db.tables
   }
-  if (deps && (!only || files.some((f) => LOCKFILE.test(f) || /(^|\/)package\.json$/.test(f)))) {
+  if (deps && (!only || files.some((f) => LOCKFILE.test(f) || LANG_LOCKFILE.test(f) || /(^|\/)package\.json$/.test(f)))) {
     try {
       const d = await scanDependencies(root, all)
       findings.push(...d.findings)

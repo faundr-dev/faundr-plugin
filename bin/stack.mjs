@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
+import { LANG_BACK, LANG_CODE_FILE, LANG_ENV_USE, LANG_FRONT, LANG_SVC, LANG_TECH, langBuildTech, langDeps, langRuntime } from './stack-langs.mjs'
 
 const SKIP = /(^|\/)(node_modules|\.git|\.faundr|dist|build|out|vendor|third_party|\.next|\.nuxt|\.svelte-kit|\.wrangler|\.vercel|\.output|coverage|__pycache__|\.venv|venv)(\/|$)/
 const MAX_FILES = 6000
@@ -17,13 +18,14 @@ const LANG = {
   ts: 'TypeScript', tsx: 'TypeScript', mts: 'TypeScript', cts: 'TypeScript',
   js: 'JavaScript', jsx: 'JavaScript', mjs: 'JavaScript', cjs: 'JavaScript',
   py: 'Python', go: 'Go', rs: 'Rust', rb: 'Ruby', php: 'PHP', java: 'Java', kt: 'Kotlin', kts: 'Kotlin',
-  swift: 'Swift', dart: 'Dart', cs: 'C#', c: 'C', h: 'C', cpp: 'C++', cc: 'C++', hpp: 'C++',
+  swift: 'Swift', dart: 'Dart', cs: 'C#', c: 'C', h: 'C', cpp: 'C++', cc: 'C++', cxx: 'C++', hpp: 'C++', hh: 'C++', hxx: 'C++',
   ex: 'Elixir', exs: 'Elixir', scala: 'Scala', lua: 'Lua', r: 'R', jl: 'Julia', zig: 'Zig',
   vue: 'Vue', svelte: 'Svelte', astro: 'Astro',
   css: 'CSS', scss: 'SCSS', sass: 'SCSS', less: 'Less', html: 'HTML', htm: 'HTML',
   sql: 'SQL', sh: 'Shell', bash: 'Shell', ps1: 'PowerShell', graphql: 'GraphQL', gql: 'GraphQL',
   prisma: 'Prisma', sol: 'Solidity',
 }
+const DOCKERFILE = /(^|\/)(Dockerfile(\.[\w-]+)?|[\w.-]+\.dockerfile)$/i
 const GENERATED = /(\.min\.(js|css)$|\.gen\.(ts|js)$|\.d\.ts$|(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$)/
 
 // ---- catálogo de pacotes (npm e Python) ------------------------------------------------------------
@@ -60,6 +62,8 @@ const TECH = {
   sqlalchemy: ['SQLAlchemy', 'dados'], pydantic: ['Pydantic', 'dados'], celery: ['Celery', 'outro'], pandas: ['pandas', 'dados'],
   pytest: ['pytest', 'testes'], ruff: ['Ruff', 'qualidade'],
 }
+// Catálogo das outras linguagens (Rust, Go, PHP, Dart, Java/Kotlin, .NET, C/C++): chaves "cargo:axum", "go:…".
+Object.assign(TECH, LANG_TECH)
 const TECH_PREFIX = [['@radix-ui/', 'Radix UI', 'ui'], ['@remix-run/', 'Remix', 'framework'], ['@tiptap/', 'Tiptap', 'ui']]
 
 const SVC = {
@@ -82,6 +86,7 @@ const SVC = {
   'next-auth': ['Auth.js', 'auth', 'login de usuários'], '@auth/core': ['Auth.js', 'auth', 'login de usuários'],
   'better-auth': ['Better Auth', 'auth', 'login de usuários'], '@auth0/auth0-react': ['Auth0', 'auth', 'login de usuários'],
 }
+Object.assign(SVC, LANG_SVC)
 const SVC_PREFIX = [['@sentry/', 'Sentry', 'monitoramento', 'erros do app publicado']]
 
 // Prefixo da variável → serviço (para dizer de quem é cada chave).
@@ -164,7 +169,7 @@ function countLanguages(root, files) {
   const langs = new Map()
   let counted = 0
   for (const f of files) {
-    const lang = LANG[f.split('.').pop()?.toLowerCase() ?? '']
+    const lang = DOCKERFILE.test(f) ? 'Docker' : LANG[f.split('.').pop()?.toLowerCase() ?? '']
     if (!lang || GENERATED.test(f) || counted >= MAX_FILES) continue
     counted++
     const lines = read(root, f).split('\n').filter((l) => l.trim()).length
@@ -192,6 +197,7 @@ function collectDeps(ctx) {
       if ((TECH[n] || SVC[n]) && !deps.has(n)) deps.set(n, { version: m[2] ?? '', file: f })
     }
   }
+  for (const [n, d] of langDeps(root, ctx.files)) if (!deps.has(n)) deps.set(n, d)
   return deps
 }
 
@@ -223,8 +229,9 @@ function nonNpmTech(ctx) {
     if (v) stack.runtime.push({ name: 'Go', version: v, evidence: [f] })
   }
   if (has(/(^|\/)Gemfile$/).length && /['"]rails['"]/.test(read(root, has(/(^|\/)Gemfile$/)[0]))) stack.tech.push({ name: 'Ruby on Rails', category: 'framework', evidence: [has(/(^|\/)Gemfile$/)[0]] })
-  if (has(/(^|\/)composer\.json$/).length && /laravel\/framework/.test(read(root, has(/(^|\/)composer\.json$/)[0]))) stack.tech.push({ name: 'Laravel', category: 'framework', evidence: [has(/(^|\/)composer\.json$/)[0]] })
-  if (has(/(^|\/)pubspec\.yaml$/).length && /flutter:/.test(read(root, has(/(^|\/)pubspec\.yaml$/)[0]))) stack.tech.push({ name: 'Flutter', category: 'framework', evidence: [has(/(^|\/)pubspec\.yaml$/)[0]] })
+  // Laravel, Flutter, Spring e os outros vêm dos manifestos (stack-langs.mjs); aqui só o que não tem pacote.
+  for (const t of langBuildTech(ctx.files)) if (!stack.tech.some((x) => x.name === t.name)) stack.tech.push(t)
+  for (const r of langRuntime(root, ctx.files)) if (!stack.runtime.some((x) => x.name === r.name)) stack.runtime.push(r)
 }
 
 // Lockfile → gerenciador de pacotes, na ordem em que se procura.
@@ -310,8 +317,8 @@ function backDetail(backFw, fullStack) {
 function appHosting(ctx, providers, dep) {
   const { addHosting } = ctx
   const fullStack = ['next', 'nuxt', '@sveltejs/kit', '@remix-run/node', '@remix-run/cloudflare', 'react-router', '@tanstack/react-start', 'astro'].find((n) => dep(n))
-  const backFw = ['express', 'fastify', 'hono', '@nestjs/core', 'koa', 'django', 'flask', 'fastapi', '@apollo/server'].find((n) => dep(n))
-  const frontFw = fullStack ?? ['react', 'vue', 'svelte', '@angular/core', 'solid-js', 'preact'].find((n) => dep(n))
+  const backFw = ['express', 'fastify', 'hono', '@nestjs/core', 'koa', 'django', 'flask', 'fastapi', '@apollo/server', ...LANG_BACK].find((n) => dep(n))
+  const frontFw = fullStack ?? ['react', 'vue', 'svelte', '@angular/core', 'solid-js', 'preact', ...LANG_FRONT].find((n) => dep(n))
   const main = providers[0]
   if (main && frontFw)
     addHosting('front', main.provider, `telas feitas com ${fwName(frontFw)}${fullStack ? ' (o mesmo serviço também entrega o servidor)' : ''}${main.detail ? ` · ${main.detail}` : ''}`, [main.file, dep(frontFw)?.file], main.url)
@@ -401,7 +408,7 @@ function collectEnv(ctx, codeFiles, envMap, supa) {
     if (!fs.existsSync(path.join(root, f))) continue
     for (const n of envNames(read(root, f))) addEnv(n, f, false)
   }
-  for (const f of codeFiles) for (const m of read(root, f).matchAll(ENV_USE)) addEnv(m[1], f, false)
+  for (const f of codeFiles) for (const m of read(root, f).matchAll(LANG_CODE_FILE.test(f) ? LANG_ENV_USE : ENV_USE)) addEnv(m[1], f, false)
   stack.env = [...envMap.values()]
     .map((e) => ({ ...e, scope: PUBLIC_PREFIX.test(e.name) ? 'publica' : 'servidor', service: ENV_SERVICE.find(([re]) => re.test(e.name))?.[1] }))
     .sort((a, b) => (a.service ?? 'zz').localeCompare(b.service ?? 'zz') || a.name.localeCompare(b.name))
@@ -450,10 +457,10 @@ export function detectStack(root) {
   appHosting(ctx, findProviders(ctx, rootPkg, dep), dep)
 
   // Banco de dados, login e arquivos.
-  const codeFiles = files.filter((f) => /\.(m?[jt]sx?|py|vue|svelte|astro)$/.test(f) && !GENERATED.test(f)).slice(0, MAX_FILES)
+  const codeFiles = files.filter((f) => (/\.(m?[jt]sx?|py|vue|svelte|astro)$/.test(f) || LANG_CODE_FILE.test(f)) && !GENERATED.test(f)).slice(0, MAX_FILES)
   const appFirst = [...codeFiles].sort((a, b) => Number(!/^(src|app|lib|pages|components)\//.test(a)) - Number(!/^(src|app|lib|pages|components)\//.test(b)))
   const grepCode = (re) => appFirst.find((f) => re.test(read(root, f)))
-  const supa = dep('@supabase/supabase-js') ?? dep('supabase') ?? dep('@supabase/ssr')
+  const supa = dep('@supabase/supabase-js') ?? dep('supabase') ?? dep('@supabase/ssr') ?? dep('pub:supabase_flutter') ?? dep('go:github.com/supabase-community/supabase-go')
   if (supa || files.some((f) => f.startsWith('supabase/'))) supabaseHosting(ctx, supa, grepCode)
   otherDatabases(ctx, supa, dep)
   for (const s of stack.services) if (s.category === 'auth') addHosting('auth', s.name, 'login dos usuários', s.evidence)

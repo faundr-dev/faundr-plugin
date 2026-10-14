@@ -125,6 +125,7 @@ import { checkBuilt, newOffPlan, offPlan, readIgnore } from './architecture.mjs'
 import { parseImport, supabaseAdvisors } from './security-import.mjs'
 import { contextLines, findMap, resolvePosition } from './sourcemap.mjs'
 import { detectStack } from './stack.mjs'
+import { gapLines, SOURCE_FILE } from './language-support.mjs'
 import { graphFooter, rememberTranscript, transcriptUsage, transcriptsToSync } from './usage.mjs'
 import { dependentsNote, readGraph } from './dependents.mjs'
 import { onlyUser, readSkillIndex, scanSkills, skillMoment, skillsFileOnce, writeSkillIndex } from './skills.mjs'
@@ -2581,7 +2582,14 @@ async function securityScan(args) {
     return log(
       `security: ${visible.length} achado(s) (${result.findings.length - visible.length} suprimidos) em ${result.stats.files} arquivos, ${result.stats.ms} ms${result.errors.length ? `; ${result.errors.join('; ')}` : ''}`,
     )
-  printSecurityScan(result, sent, visible)
+  printSecurityScan(result, sent, visible, printGaps(root, 'seguranca', '/faundr:security'))
+}
+
+// Linguagens do projeto que a checagem não lê (ou só lê em parte): sem isto, "nenhum problema" engana. Devolve se havia alguma.
+function printGaps(root, feature, command) {
+  const gaps = gapLines(detectStack(root).stack, feature)
+  if (gaps.length) console.log([`Fora da checagem automática (o Claude revisa com ${command}):`, ...gaps].join('\n'))
+  return gaps.length > 0
 }
 
 // Histórico do git: na checagem completa, no máximo uma vez por semana (ou com --history).
@@ -2590,14 +2598,14 @@ function securityHistoryDue(root, args, only) {
   return !only && (args.includes('--history') || !lastHistory || Date.now() - new Date(lastHistory).getTime() > 7 * 86_400_000)
 }
 
-function printSecurityScan(result, sent, visible) {
+function printSecurityScan(result, sent, visible, gaps = false) {
   const { stats } = result
   console.log(
     `Checagem de segurança: ${stats.files} arquivos${stats.commits ? `, ${stats.commits} commits` : ''}${stats.packages ? `, ${stats.packages} pacotes` : ''}${stats.tables ? `, ${stats.tables} tabelas` : ''} em ${(stats.ms / 1000).toFixed(1)} s.`,
   )
   for (const e of result.errors) console.log(`Aviso: ${e}`)
   if (sent) console.log(`Painel: ${sent.added} novo(s), ${sent.fixed} corrigido(s), ${sent.reopened} reaberto(s).`)
-  if (!visible.length) return console.log('Nenhum problema encontrado pela checagem automática.')
+  if (!visible.length) return console.log(gaps ? 'Nenhum problema nas partes que a checagem automática lê.' : 'Nenhum problema encontrado pela checagem automática.')
   const order = ['critical', 'high', 'medium', 'low']
   console.log(`\nProblemas (${visible.length}; ${result.findings.length - visible.length} suprimidos como ruído):`)
   for (const f of visible.sort((a, b) => order.indexOf(a.severity) - order.indexOf(b.severity)))
@@ -2663,7 +2671,9 @@ async function securityContext(args) {
   const map = projectMap(root)
   const catalog = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'skills', 'security', 'catalog')
   const out = ['# Contexto da revisão de segurança', `Modo: ${onlyFiles?.length ? `rápido (só ${onlyFiles.join(', ')})` : 'completo'}`, '']
-  out.push(`## Stack detectada`, map.stack.length ? map.stack.join(', ') : '(não identificada: leia o package.json)', '')
+  out.push(`## Stack detectada`, map.stack.length ? map.stack.join(', ') : '(não identificada: leia os manifestos do projeto)', '')
+  const gaps = gapLines(detectStack(root).stack, 'seguranca')
+  if (gaps.length) out.push('## Linguagens sem regras automáticas completas (a revisão é toda sua nelas)', ...gaps, '- Nelas, procure você mesmo: SQL montado com texto do usuário, comando do sistema com entrada externa, rota sem checar login ou dono do dado, segredo no código, upload sem limite e desserialização insegura.', '')
   out.push('## Temas do catálogo para ler (com a ferramenta Read)')
   for (const t of map.topics) out.push(`- ${path.join(catalog, `${t}.md`)}`)
   out.push('')
@@ -2995,7 +3005,8 @@ async function qualityScan(args) {
   console.log(`Checagem de qualidade: ${result.stats.files} arquivos, ${result.stats.lines} linhas de código em ${(result.stats.ms / 1000).toFixed(1)} s.`)
   for (const e of result.errors.slice(0, 5)) console.log(`Aviso: ${e}`)
   if (sent) console.log(`Painel: ${sent.added} novo(s), ${sent.fixed} corrigido(s), ${sent.reopened} reaberto(s).`)
-  if (!result.findings.length) return console.log('Enxuto. Nenhum problema encontrado pela checagem automática.')
+  const gaps = printGaps(root, 'qualidade', '/faundr:quality --full')
+  if (!result.findings.length) return console.log(gaps ? 'Nenhum problema nas partes que a checagem automática lê.' : 'Enxuto. Nenhum problema encontrado pela checagem automática.')
   const sorted = [...result.findings].sort((a, b) => QUALITY_ORDER.indexOf(a.severity) - QUALITY_ORDER.indexOf(b.severity))
   console.log(`\nProblemas (${sorted.length}):`)
   for (const f of sorted.slice(0, 40)) console.log(`  ${qualityLine(f)}`)
@@ -3062,7 +3073,7 @@ function changedCodeFiles(root, sid) {
   const git = (a) => spawnSync('git', a, { cwd: root, encoding: 'utf8', windowsHide: true }).stdout?.split('\n').filter(Boolean) ?? []
   const fromGit = [...git(['diff', '--name-only', 'HEAD']), ...git(['ls-files', '--others', '--exclude-standard'])]
   const fromSession = sid ? sessionEditedFiles(sid).map((f) => path.relative(root, path.resolve(root, f)).split(path.sep).join('/')) : []
-  return [...new Set([...fromGit, ...fromSession])].filter((f) => !f.startsWith('..') && /\.([cm]?[jt]sx?)$/.test(f) && fs.existsSync(path.join(root, f)))
+  return [...new Set([...fromGit, ...fromSession])].filter((f) => !f.startsWith('..') && SOURCE_FILE.test(f) && fs.existsSync(path.join(root, f)))
 }
 
 // Pacote de contexto da revisão com IA (skill "quality"): o que revisar, o catálogo, as regras do projeto e o que já está aberto.
@@ -3080,6 +3091,9 @@ async function qualityContext(args) {
   const designMd = findDesignMd(root)
   const rules = [...['CLAUDE.md', 'AGENTS.md', '.claude/CLAUDE.md'].filter((f) => fs.existsSync(path.join(root, f))), ...(designMd ? [path.relative(root, designMd).split(path.sep).join('/')] : [])]
   out.push('## Regras do projeto para ler', ...(rules.length ? rules.map((f) => `- ${f}`) : ['- (nenhum CLAUDE.md, AGENTS.md ou design.md)']), '')
+  // Linguagens em que a checagem automática (complexidade, duplicação, código sem uso) não roda: o Claude cobre lendo.
+  const gaps = gapLines(detectStack(root).stack, 'qualidade')
+  if (gaps.length) out.push('## Linguagens sem checagem automática completa (a revisão é toda sua nelas)', ...gaps, '- Nelas, procure você mesmo: funções longas ou com muitos caminhos, aninhamento fundo, código repetido, código sem uso e erros engolidos.', '')
   if (files) {
     out.push(`## Arquivos para revisar (${files.length})`, ...(files.length ? files.map((f) => `- ${f}`) : ['- Nada mudou desde o último commit. Diga isso ao usuário e ofereça a revisão do projeto: /faundr:quality --full']), '')
   }
