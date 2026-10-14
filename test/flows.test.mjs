@@ -66,3 +66,22 @@ test('momentos: o pedido só vale com "prompt", o arquivo só com "edit"', () =>
   assert.equal(skillsForPrompt([{ name: 'c', topics: ['tela'] }], 'a tela').length, 1)
   assert.equal(workflowsForFile([{ id: 'v', paths: ['src/**'] }], 'src/x.tsx').length, 1)
 })
+
+// ---- Passos desligados de dentro das skills do Faundr ---------------------------------------------------------
+
+import { skillStepsNote } from '../bin/flows.mjs'
+
+test('passo desligado numa skill do Faundr: o aviso chega pela ferramenta Skill e pelo /faundr:x digitado', () => {
+  const root = tmpProject()
+  writeSkillIndex(root, [])
+  assert.equal(skillStepsNote(root, 'faundr:design'), null)
+  writeFlows(root, ['skill.design.browser'])
+  assert.match(skillStepsNote(root, 'faundr:design'), /desligou estes passos de \/faundr:design: medir as telas no navegador/)
+  assert.equal(skillStepsNote(root, 'faundr:tests'), null)
+  const guard = fileURLToPath(new URL('../bin/skill-guard.mjs', import.meta.url))
+  const out = spawnSync(process.execPath, [guard], { input: JSON.stringify({ cwd: root, tool_input: { skill: 'faundr:design' } }), encoding: 'utf8' }).stdout
+  assert.match(out, /"additionalContext":"\[Faundr\] Neste projeto/)
+  const hook = fileURLToPath(new URL('../bin/prompt-check.mjs', import.meta.url))
+  const typed = spawnSync(process.execPath, [hook], { input: JSON.stringify({ cwd: root, session_id: 's9', prompt: '/faundr:design' }), encoding: 'utf8' }).stdout
+  assert.match(typed, /medir as telas no navegador/)
+})

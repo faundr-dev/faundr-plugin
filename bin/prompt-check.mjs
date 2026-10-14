@@ -20,7 +20,7 @@ import { readTeam, teamPromptNote } from './team.mjs'
 import { takeInbox } from './inbox.mjs'
 import { workflowsForPrompt, workflowsOnce } from './workflows.mjs'
 import { skillsOnce } from './skills.mjs'
-import { stepOff } from './flows.mjs'
+import { skillStepsNote, stepOff } from './flows.mjs'
 
 function findUp(dir, name) {
   for (let current = path.resolve(dir); ; current = path.dirname(current)) {
@@ -76,6 +76,9 @@ try {
     const on = (key) => !stepOff(root, key)
     if (on('prompt.feature') && featureIntent(payload.prompt)) notes.push(featureNudge(readState(root).status?.feature?.title ?? null))
     if (on('prompt.rule') && ruleIntent(payload.prompt)) notes.push(ruleNudge())
+    // /faundr:x digitado não passa pela ferramenta Skill: os passos desligados dela chegam por aqui.
+    const typed = String(payload.prompt ?? '').trim().match(/^\/(faundr:[\w-]+)/)
+    if (typed) notes.push(skillStepsNote(root, typed[1]))
     try {
       notes.push(workflowsOnce(root, payload.session_id, (list, ids) => workflowsForPrompt(list, payload.prompt, ids), 'Este pedido'))
     } catch {}

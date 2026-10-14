@@ -22,3 +22,29 @@ export function stepOff(root, key) {
     return false
   }
 }
+
+// ---- Passos desligados de dentro das skills do Faundr ----------------------------------------------------------
+// A skill é um texto que o Claude segue: quando ela entra (ferramenta Skill ou /faundr:x digitado), o Faundr avisa
+// quais passos o projeto desligou. Só passos opcionais; nunca segurança, prova ou pergunta ao dono.
+
+/** Chave do passo → [skill, o que pular]. As chaves batem com os desenhos (src/lib/faundr-skill-flows.ts). */
+export const SKILL_STEPS = {
+  'skill.planning.review': ['planning', 'a revisão escondida por subagente em pedido grande'],
+  'skill.planning.diagram': ['planning', 'oferecer e desenhar o diagrama de como a funcionalidade vai funcionar'],
+  'skill.design.browser': ['design', 'medir as telas no navegador (375, 768, 1024 e 1440 px), abrir menus e testar o teclado'],
+  'skill.design.coverage': ['design', 'registrar as notas por tema (faundr design-coverage)'],
+  'skill.design-fix.browser': ['design-fix', 'conferir a correção no navegador'],
+  'skill.security.supabase': ['security', 'buscar os avisos do Supabase (get_advisors e security-import)'],
+  'skill.tests.coverage': ['tests', 'medir a cobertura (faundr tests-run --coverage)'],
+  'skill.launch.db': ['launch', 'oferecer o teste completo do banco'],
+}
+
+/** Aviso dos passos que o projeto desligou nesta skill do Faundr; null quando não há nenhum. */
+export function skillStepsNote(root, name) {
+  const short = String(name ?? '')
+    .replace(/^\//, '')
+    .replace(/^faundr:/, '')
+  const off = Object.entries(SKILL_STEPS).filter(([key, [skill]]) => skill === short && stepOff(root, key))
+  if (!off.length) return null
+  return `[Faundr] Neste projeto, o time desligou estes passos de /faundr:${short}: ${off.map(([, [, what]]) => what).join('; ')}. Pule-os; o resto da skill segue igual.`
+}

@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 // Hook PreToolUse da ferramenta Skill: quando o time marcou uma skill como "Só você no terminal" (painel → Workflows),
 // o Claude não chama ela sozinho. Barra com o motivo e pede para ele lembrar a pessoa em uma linha. Quando a pessoa
-// digita /nome no terminal, a skill roda direto, sem passar por aqui. Não usa a rede: lê a cópia local das skills.
+// digita /nome no terminal, a skill roda direto, sem passar por aqui. Numa skill do Faundr que o projeto deixou com
+// passos desligados, entrega o aviso de quais pular. Não usa a rede: lê as cópias locais das skills e dos interruptores.
 //
 // Regra de ouro dos hooks: nunca quebrar o agente. Qualquer erro → sai em silêncio.
 import fs from 'node:fs'
 import path from 'node:path'
 import { blockedSkill } from './skills.mjs'
+import { skillStepsNote } from './flows.mjs'
 
 function findUp(dir, name) {
   for (let current = path.resolve(dir); ; current = path.dirname(current)) {
@@ -36,4 +38,9 @@ try {
         },
       }),
     )
+  else {
+    // Skill do Faundr com passos desligados neste projeto: o aviso chega junto com ela.
+    const note = root && name ? skillStepsNote(root, name) : null
+    if (note) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: note } }))
+  }
 } catch {}
