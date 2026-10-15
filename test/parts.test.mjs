@@ -105,8 +105,12 @@ test('qualidade: scripts de todas as partes, pacotes por parte e Python no proje
   assert.deepEqual(byRule('demais/dependencia-sem-uso').map((f) => [f.file, f.title]), [['frontend/package.json', 'Pacote que nenhum arquivo usa: left-pad']])
   assert.deepEqual(byRule('falha/catch-vazio').map((f) => f.file), ['backend/app/servico.py'])
   assert.match(byRule('falha/catch-vazio')[0].title, /except: pass/)
-  // Python fica fora do "código sem uso" (o leitor de imports é só do JS/TS).
-  assert.ok(!byRule('morto/arquivo-orfao').some((f) => f.file.endsWith('.py')))
+  // Arquivo Python que ninguém importa nem cita é código sem uso…
+  assert.deepEqual(byRule('morto/arquivo-orfao').map((f) => f.file), ['backend/app/servico.py'])
+  // …mas o que o Procfile roda (uvicorn backend.app.servico:app) é ponto de entrada.
+  write('Procfile', 'web: uvicorn backend.app.servico:app --port $PORT')
+  const after = await runQuality(dir, { history: false, tools: false })
+  assert.ok(!after.findings.some((f) => f.rule_id === 'morto/arquivo-orfao'))
   done()
 })
 

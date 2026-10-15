@@ -18,7 +18,9 @@ import { projectFiles } from './security.mjs'
 import { houseText, TEXT } from './quality-texts.mjs'
 
 const MAX_FILE = 400_000
-const TEST_PATH = /(^|\/)(__tests__|__mocks__|tests?|e2e|spec)(\/|$)|\.(test|spec)\.[cm]?[jt]sx?$|(^|\/)(test_[^/]*|[^/]*_test|conftest)\.py$/
+// Linha só de comentário, por linguagem (não conta como linha de código).
+const COMMENT_LINE = { js: /^\s*(\/\/|\*|\/\*)/, '.py': /^\s*#/, '.php': /^\s*(\/\/|#|\*|\/\*)/ }
+const TEST_PATH = /(^|\/)(__tests__|__mocks__|tests?|e2e|spec|integration_test)(\/|$)|\.(test|spec)\.[cm]?[jt]sx?$|(^|\/)(test_[^/]*|[^/]*_test|conftest)\.py$|_test\.dart$|Test\.php$/
 const GENERATED = /\.(d\.ts|min\.js)$|\.gen\.[jt]sx?$|(^|\/)(dist|build|out|vendor|generated|\.output)\//
 const GENERATED_HEADER = /^(\/\/|\/\*)[^\n]*(@generated|auto-?generated|gerado por|do not edit|não edite)/i
 // Telas: onde console.log é esquecimento (em CLI e servidor ele é a saída normal).
@@ -46,6 +48,7 @@ export const RULES = {
   'demais/codigo-comentado': { kind: 'excess', severity: 'low' },
   'limpeza/console-log': { kind: 'cleanup', severity: 'low' },
   'limpeza/debugger': { kind: 'cleanup', severity: 'medium' },
+  'limpeza/print-esquecido': { kind: 'cleanup', severity: 'low' },
   'limpeza/todo-antigo': { kind: 'cleanup', severity: 'low' },
   'testes/only': { kind: 'tests', severity: 'high' },
   'testes/pulado': { kind: 'tests', severity: 'low' },
@@ -132,7 +135,8 @@ const lineList = (lines) => (lines.length ? ` Linhas: ${lines.slice(0, 12).join(
 /** Arquivos de código que entram na checagem (sem gerados, minificados e pastas de build). */
 export function qualityFiles(root) {
   const { files } = projectFiles(root)
-  return files.filter((f) => qualityGrammar(f) && !GENERATED.test(f))
+  // Templates Blade (.blade.php) são HTML com diretivas, não código PHP para medir.
+  return files.filter((f) => qualityGrammar(f) && !GENERATED.test(f) && !/\.blade\.php$/.test(f))
 }
 
 /**
@@ -182,6 +186,8 @@ async function analyzeFiles(root, files, c, errors) {
     }
     for (const h of result.hits) {
       if (h.rule === 'limpeza/console-log' && (!UI_FILE.test(rel) || SERVER_PATH.test(rel))) continue
+      // Dart: print é esquecimento no app (lib/); em bin/ e tool/ é a saída normal do programa.
+      if (h.rule === 'limpeza/print-esquecido' && rel.endsWith('.dart') && !/(^|\/)lib\//.test(rel)) continue
       add(h.rule, h.line, h.ctx)
     }
     for (const r of house) if (r.files.test(rel)) for (const line of r.lines(text)) add(r.rule, line, r.ctx)
@@ -189,12 +195,11 @@ async function analyzeFiles(root, files, c, errors) {
       out.shortcuts.push({ file: rel, ...s })
       if (!s.trigger) add('limpeza/atalho-sem-prazo', s.line, { text: s.text.slice(0, 80) })
     }
-    const py = rel.endsWith('.py')
-    const codeLines = text.split('\n').filter((l) => l.trim() && !(py ? /^\s*#/ : /^\s*(\/\/|\*|\/\*)/).test(l)).length
+    const commentLine = COMMENT_LINE[rel.slice(rel.lastIndexOf('.'))] ?? COMMENT_LINE.js
+    const codeLines = text.split('\n').filter((l) => l.trim() && !commentLine.test(l)).length
     out.lines += codeLines
     out.texts.set(rel, text)
-    // Código sem uso entre arquivos só sabe ler os imports do JS/TS.
-    if (!py) out.modules.set(rel, result.module)
+    out.modules.set(rel, result.module)
     if (test) {
       // Data e hora reais sem relógio falso: o teste muda de resultado conforme o dia.
       const clock = text.search(/\bnew Date\(\s*\)|\bDate\.now\(\)/)
@@ -284,6 +289,17 @@ const ENTRY = [
   /(^|\/)(bin|scripts)\//,
   /(^|\/)(supabase\/functions|api|netlify\/functions)\//,
   /\.d\.ts$/,
+  // Python: o que o interpretador, o Django ou o servidor carregam pelo nome.
+  /(^|\/)(main|app|manage|wsgi|asgi|setup|conftest|settings|urls|admin|apps|models|signals|tasks|celery|__init__|__main__)\.py$/,
+  /(^|\/)migrations\//,
+  // Dart/Flutter: lib/main.dart, programas em bin/ e tool/, arquivos gerados.
+  /(^|\/)lib\/main(_\w+)?\.dart$/,
+  /(^|\/)tool\//,
+  /\.(g|freezed|gr|config|mocks)\.dart$/,
+  // PHP/Laravel: o que o framework acha por convenção.
+  /(^|\/)(public\/index|artisan|server)\.php$/,
+  /(^|\/)(routes|config|database|bootstrap|resources)\//,
+  /(^|\/)app\/(Providers|Console|Http\/Middleware|Http\/Kernel|Exceptions|Listeners|Policies|Observers|Jobs|Events|Mail|Notifications)\b/,
 ]
 
 // Em cada parte do projeto: o que o package.json declara (main, bin, exports) e os arquivos citados nos scripts
@@ -303,6 +319,11 @@ function entryPoints(root) {
     const wrangler = read(root, path.join(dir, 'wrangler.jsonc')) ?? read(root, path.join(dir, 'wrangler.toml')) ?? ''
     cited.push({ dir, text: `${Object.values(pkg.scripts ?? {}).join(' ')} ${wrangler}` })
   }
+  // Fora do npm, quem roda o programa é um comando escrito nestes arquivos (uvicorn main:app, php artisan…).
+  const launchers = ['Procfile', 'Dockerfile', 'docker-compose.yml', 'compose.yaml', 'Makefile', 'pyproject.toml', 'setup.cfg', 'fly.toml', 'render.yaml', 'app.yaml', 'composer.json', 'pubspec.yaml']
+  const launchText = launchers.map((f) => read(root, f) ?? '').join('\n')
+  // "uvicorn app.main:app" cita app/main.py.
+  cited.push({ dir: '', text: `${launchText} ${launchText.replace(/\b([\w]+(?:\.[\w]+)+):\w+/g, (_, mod) => `${mod.replace(/\./g, '/')}.py`)}` })
   // Caminho relativo à parte (null se o arquivo não é dela); a raiz contém tudo.
   const inPart = (rel, dir) => {
     if (!dir) return rel
@@ -491,7 +512,7 @@ function instructionRules(root, doc, scripts, c) {
 
 // TODO/FIXME antigos: data pela autoria da linha no git (git blame), só nas linhas marcadas.
 function oldTodos(root, c) {
-  const grep = spawnSync('git', ['grep', '-n', '-I', '-E', '(//|/\\*|\\*|#)\\s*(TODO|FIXME|HACK|XXX)\\b', '--', '*.ts', '*.tsx', '*.js', '*.jsx', '*.mjs', '*.cjs', '*.py'], {
+  const grep = spawnSync('git', ['grep', '-n', '-I', '-E', '(//|/\\*|\\*|#)\\s*(TODO|FIXME|HACK|XXX)\\b', '--', '*.ts', '*.tsx', '*.js', '*.jsx', '*.mjs', '*.cjs', '*.py', '*.dart', '*.php'], {
     cwd: root,
     encoding: 'utf8',
     windowsHide: true,

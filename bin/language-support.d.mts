@@ -1,6 +1,6 @@
 // Tipos de language-support.mjs, para o painel (src/) importar a mesma tabela.
 
-export type SupportFeature = 'mapa' | 'qualidade' | 'seguranca' | 'dependencias' | 'segredos' | 'erros' | 'testes' | 'design' | 'stack'
+export type SupportFeature = 'mapa' | 'qualidade' | 'seguranca' | 'dependencias' | 'segredos' | 'erros' | 'producao' | 'testes' | 'design' | 'stack'
 export type SupportStatus = 'completo' | 'parcial' | 'claude' | 'nao' | 'na'
 
 export type LanguageSupport = {

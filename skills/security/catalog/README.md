@@ -14,5 +14,8 @@ Um arquivo por tema. Leia só os que se aplicam à stack e ao código do projeto
 | `logica-de-negocio.md` | há pagamento, planos, créditos, cupons, estoque ou fluxos em etapas |
 | `dados-e-exposicao.md` | sempre, numa passada rápida (respostas, erros, logs, cookies, headers, arquivos públicos) |
 | `ia-e-llm.md` | o app chama um LLM, tem chat, agente, ferramentas ou busca vetorial |
+| `php-laravel.md` | o projeto tem código PHP (com ou sem Laravel) |
+| `python-web.md` | o projeto usa Django, Flask ou FastAPI |
+| `flutter.md` | o projeto é um app Flutter ou tem código Dart |
 
 Destilado das skills de conhecimento do Strix (usestrix/strix, Apache-2.0) e adaptado para revisão estática de código.

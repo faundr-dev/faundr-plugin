@@ -16,6 +16,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { SECRET_RULES } from '../dist/secret-rules.mjs'
 import { LANG_LOCKFILE, parseLangLockfile, preferLocks } from './lockfiles-langs.mjs'
+import { LANG_LINE_RULES } from './security-langs.mjs'
 import { LANG_TECH, langDeps } from './stack-langs.mjs'
 import { LOCKFILE, parseLockfile } from './lockfiles.mjs'
 import { allDeps, partWith, projectParts } from './parts.mjs'
@@ -873,9 +874,9 @@ function scanDatabase(root, files) {
 
 // ---- código (padrões perigosos, sem IA) -----------------------------------------------------
 
-const CODE_FILE = /\.(m?[jt]sx?|cjs|cts|vue|svelte|astro|py)$/i
+const CODE_FILE = /\.(m?[jt]sx?|cjs|cts|vue|svelte|astro|py|php|dart)$/i
 // Código das linguagens sem regras de linha (o Claude lê na revisão).
-const OTHER_CODE = /\.(go|rs|java|kts?|php|cs|dart|c|cc|cpp|cxx|h|hpp|rb|swift)$/i
+const OTHER_CODE = /\.(go|rs|java|kts?|cs|c|cc|cpp|cxx|h|hpp|rb|swift)$/i
 const SERVER_ROUTE = /(^|\/)(app\/(.*\/)?api\/.*\/?route\.[mc]?[jt]s|pages\/api\/.*\.[mc]?[jt]sx?|src\/routes\/api\/.*\.[mc]?[jt]sx?|supabase\/functions\/[^/]+\/index\.[jt]s|functions\/.*\.[jt]s|server\/.*\.[mc]?[jt]s|api\/.*\.[mc]?[jt]s)$/i
 
 // Regras por linha: o que é quase sempre perigoso quando aparece com dado variável.
@@ -946,6 +947,8 @@ const LINE_RULES = [
   },
   {
     id: 'jwt-decode-without-verify',
+    // Só JS/TS: no Python, o jwt.decode do PyJWT confere a assinatura (a regra de lá é python-jwt-without-verify).
+    files: /\.(m?[jt]sx?|c[jt]s|vue|svelte|astro)$/i,
     re: /\bjwt\.decode\s*\(|\bjwtDecode\s*\(|\bdecodeJwt\s*\(/,
     fileOk: /jwt\.verify|jwtVerify|verifyIdToken|getUser\(|getClaims\(/,
     severity: 'medium',
@@ -997,6 +1000,8 @@ const LINE_RULES = [
     fix: 'Use json para dados de fora; para YAML, yaml.safe_load().',
   },
 ]
+// As regras de PHP, Dart e Python moram em security-langs.mjs.
+const ALL_LINE_RULES = [...LINE_RULES, ...LANG_LINE_RULES]
 
 // Webhooks do Stripe: assinatura não conferida, conferida com o corpo já convertido, pagamento sem idempotência.
 function webhookRules(rel, text, isRoute) {
@@ -1108,8 +1113,8 @@ function scanCode(root, files) {
         offset += line.length + 1
         continue
       }
-      for (const r of LINE_RULES) {
-        if (!r.re.test(line) || r.ok?.test(line) || r.fileOk?.test(text)) continue
+      for (const r of ALL_LINE_RULES) {
+        if ((r.files && !r.files.test(rel)) || !r.re.test(line) || r.ok?.test(line) || r.fileOk?.test(text)) continue
         out.push(codeFinding(rel, r.id, r, i + 1, trimmed))
       }
       offset += line.length + 1
@@ -1455,6 +1460,9 @@ const TOPICS = [
   ['nextjs', (s) => s.includes('Next.js')],
   ['firebase', (s) => s.includes('Firebase')],
   ['ia-e-llm', (s) => s.includes('IA / LLM')],
+  ['php-laravel', (s) => s.includes('PHP') || s.includes('Laravel') || s.includes('Symfony')],
+  ['python-web', (s) => s.includes('Django') || s.includes('Flask') || s.includes('FastAPI')],
+  ['flutter', (s) => s.includes('Flutter') || s.includes('Dart')],
 ]
 
 /** O que a revisão com IA precisa saber para começar: stack, onde estão as portas de entrada e que temas ler. */
@@ -1462,7 +1470,9 @@ export function projectMap(root) {
   const { files } = projectFiles(root)
   const deps = { ...pythonDeps(root, files), ...allDeps(root) }
   const langFrameworks = [...langDeps(root, files).keys()].map((k) => LANG_TECH[k]).filter((t) => t?.[1] === 'framework').map((t) => t[0])
-  const stack = [...STACK_SIGNS.filter(([, test]) => test(deps, files)).map(([name]) => name), ...new Set(langFrameworks)]
+  // Linguagem sem framework conhecido também puxa o tema dela (PHP puro, Dart).
+  const langs = [['PHP', /\.php$/], ['Dart', /\.dart$/]].filter(([, re]) => files.some((f) => re.test(f))).map(([name]) => name)
+  const stack = [...new Set([...STACK_SIGNS.filter(([, test]) => test(deps, files)).map(([name]) => name), ...langFrameworks, ...langs])]
   const other = files.filter((f) => OTHER_CODE.test(f) && !TEST_PATH.test(f))
   const code = files.filter((f) => CODE_FILE.test(f) && !TEST_PATH.test(f) && !/\.d\.ts$/.test(f))
   const pick = (re) => code.filter((f) => re.test(f)).slice(0, 60)

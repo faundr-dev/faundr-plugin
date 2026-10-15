@@ -6,6 +6,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { flutterColorTokens } from './design-flutter.mjs'
 import { inNodeModules, isClaudePlugin } from './parts.mjs'
 
 const SKIP = /(^|\/)(node_modules|\.git|\.faundr|dist|build|out|coverage|\.claude|\.remember|\.wrangler|\.next|\.nuxt|\.svelte-kit|\.tanstack|\.vercel|\.output)(\/|$)/
@@ -283,6 +284,8 @@ export function extractTokens(root, designMdPath) {
   const ctx = { projectVars, varSource, value, secs: sections(md), designMdPath }
 
   const colors = colorTokens(ctx)
+  // App Flutter: as cores do tema (lib/**/theme|colors.dart) entram na paleta como as variáveis do CSS.
+  for (const c of flutterColorTokens(root)) if (!colors.has(c.name)) colors.set(c.name, { ...c, group: 'Projeto' })
   const fonts = fontTokens(ctx)
   const sizes = sizeTokens(ctx)
   const radii = scaleTokens(ctx, 'radius', 'rounded', '0.25rem').sort((a, b) => px(a.value) - px(b.value))

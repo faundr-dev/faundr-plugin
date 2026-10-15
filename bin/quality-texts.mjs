@@ -2,6 +2,11 @@
 // quality-rules.mjs para o arquivo das regras não crescer demais. Cada função recebe o contexto do achado (c),
 // quantas vezes ele aparece no arquivo (n) e a lista de ocorrências (all).
 
+// O que escreve no console em cada linguagem (Dart e PHP marcam ctx.lang; Python marca ctx.py).
+const LOG_CALLS = { dart: 'print/debugPrint', php: 'echo, error_log ou var_dump' }
+const logCalls = (c) => LOG_CALLS[c.lang] ?? 'console.log/console.error'
+const DEBUG_STOP = { dart: 'debugger()', php: 'dd()' }
+
 export const TEXT = {
   'desempenho/consulta-sem-limite': (c, n, all) => [
     n > 1 ? `${n} listas buscadas sem limite` : `Lista buscada sem limite (${c.table})`,
@@ -29,13 +34,13 @@ export const TEXT = {
   ],
   'falha/catch-so-loga': (c, n) => [
     n > 1 ? `${n} erros que só vão para o console` : 'Erro que só vai para o console',
-    c.py ? 'O except só chama print() e o código segue em frente.' : 'O catch só chama console.log/console.error e o código segue em frente.',
+    c.py ? 'O except só chama print() e o código segue em frente.' : `O catch só chama ${logCalls(c)} e o código segue em frente.`,
     c.py ? 'O print some no meio da saída do servidor: quem chamou recebe um resultado como se tivesse dado certo.' : 'No site publicado ninguém olha o console: a pessoa vê a tela parada ou um dado errado, sem aviso.',
     'Mostre um aviso para a pessoa, devolva o erro para quem chamou, ou registre num serviço de erros (o Faundr recebe pelo SDK do Sentry).',
   ],
   'falha/catch-devolve-nulo': (c, n) => [
     n > 1 ? `${n} erros trocados por valor vazio` : 'Erro trocado por valor vazio',
-    c.py ? 'O except devolve None, [], {} ou False sem registrar o erro.' : 'O catch devolve null, undefined, [] ou {} sem registrar o erro.',
+    c.py ? 'O except devolve None, [], {} ou False sem registrar o erro.' : `O catch devolve ${c.lang ? 'null, false ou uma lista vazia' : 'null, undefined, [] ou {}'} sem registrar o erro.`,
     'Quem chamou não consegue diferenciar "não tem dados" de "deu erro": a tela mostra vazio quando, na verdade, falhou.',
     'Registre o erro antes de devolver o valor vazio, ou devolva o erro para quem chamou decidir.',
   ],
@@ -119,7 +124,7 @@ export const TEXT = {
   ],
   'demais/codigo-comentado': (c, n) => [
     n > 1 ? `${n} blocos de código comentado` : 'Bloco de código comentado',
-    `Trechos de código desligados com // (o primeiro tem ${c.lines} linhas).`,
+    `Trechos de código desligados com ${c.py ? '#' : '//'} (o primeiro tem ${c.lines} linhas).`,
     'Código comentado envelhece: ninguém sabe se ainda vale, e o git já guarda o histórico.',
     'Apague. Se precisar de volta, está no histórico do git.',
   ],
@@ -129,9 +134,21 @@ export const TEXT = {
     'Suja o console de quem usa o site e pode mostrar dados que não deveriam aparecer.',
     'Apague os que eram para teste. Para erros de verdade, use um aviso na tela ou o serviço de erros.',
   ],
+  'limpeza/print-esquecido': (c, n) => [
+    `${n} ${c.call ?? 'print'} esquecido${n > 1 ? 's' : ''}`,
+    c.lang === 'php' ? `${c.call ?? 'var_dump()'} escreve a variável direto na página.` : `${c.call ?? 'print'} escreve no console do app.`,
+    c.lang === 'php' ? 'Mostra dados internos para quem usa o site e quebra o HTML ou o JSON da resposta.' : 'No app publicado ninguém vê, mas pode vazar dados no log do aparelho e deixa o app mais lento.',
+    c.lang === 'php' ? 'Apague. Para registrar algo, use o log do framework (Log::info no Laravel).' : 'Apague os que eram para teste. Para registrar algo de verdade, use o pacote logging ou o serviço de erros.',
+  ],
   'limpeza/debugger': (c, n) => [
-    `${n} ${c.py ? 'breakpoint()' : 'debugger'} esquecido${n > 1 ? 's' : ''}`,
-    c.py ? `${c.call ?? 'breakpoint()'} para o programa esperando alguém digitar no terminal.` : 'A instrução debugger para o código quando o DevTools está aberto.',
+    `${n} ${c.py ? 'breakpoint()' : (DEBUG_STOP[c.lang] ?? 'debugger')} esquecido${n > 1 ? 's' : ''}`,
+    c.py
+      ? `${c.call ?? 'breakpoint()'} para o programa esperando alguém digitar no terminal.`
+      : c.lang === 'php'
+        ? `${c.call ?? 'dd()'} mostra a variável e para o pedido na hora: quem usa o site vê a tela de depuração.`
+        : c.lang === 'dart'
+          ? 'debugger() para o app quando ele roda com o depurador ligado.'
+          : 'A instrução debugger para o código quando o DevTools está aberto.',
     c.py ? 'É sobra de depuração; no servidor, o pedido fica travado esperando.' : 'É sobra de depuração; não deveria ir para o site publicado.',
     'Apague a linha.',
   ],
@@ -157,7 +174,7 @@ export const TEXT = {
     n > 1 ? `${n} testes que não conferem nada` : `Teste que não confere nada: ${c.name}`,
     `Testes sem expect/assert: rodam o código mas nunca checam o resultado, então passam sempre. ${(all ?? [c]).slice(0, 6).map((x) => `"${x.name}" (linha ${x.line})`).join(', ')}. Confira se a conferência não está numa função auxiliar.`,
     'Teste que passa sempre dá falsa segurança: o código pode estar errado e ninguém fica sabendo.',
-    'Acrescente a conferência do resultado esperado (expect(...).toBe(...)), com o valor escrito à mão, não calculado como o código calcula.',
+    `Acrescente a conferência do resultado esperado (${{ php: '$this->assertSame(...)', dart: 'expect(valor, equals(...))' }[c.lang] ?? 'expect(...).toBe(...)'}), com o valor escrito à mão, não calculado como o código calcula.`,
   ],
   'testes/espera-fixa': (c, n) => [
     `${n} espera${n > 1 ? 's' : ''} com tempo fixo no teste`,

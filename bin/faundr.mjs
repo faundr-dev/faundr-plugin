@@ -77,7 +77,7 @@
 //   faundr quality-rule "<nome>" --pattern …   cria uma regra da casa em .faundr-regras/ (padrão + mensagem)
 //   faundr quality-ladder on|off               liga/desliga o lembrete de qualidade no início das sessões
 //   faundr tests-scan                          inventário dos testes sem rodar nada (executores, arquivos, resultado no disco)
-//   faundr tests-run [--changed] [--coverage] [--files a,b] [--exclude a,b] [--runner vitest|jest|playwright|node|pytest] [--python <caminho>] [--confirm-db]  roda os testes (só quando pedido)
+//   faundr tests-run [--changed] [--coverage] [--files a,b] [--exclude a,b] [--runner vitest|jest|playwright|node|pytest|flutter|dart|phpunit|pest] [--python <caminho>] [--confirm-db]  roda os testes (só quando pedido)
 //   faundr tests-show                          última rodada, testes falhando e instáveis
 //   faundr tests-context [--fix]               contexto para o agente escrever ou consertar testes (skills "tests" e "tests-fix")
 //   faundr tests-map "<funcionalidade>" …      mapa testes × funcionalidades (--status, --tests, --critical)
@@ -3248,10 +3248,15 @@ function coverageReady(runner, info) {
     console.log('  Cobertura: o Playwright (testes no navegador) não mede cobertura; rodando sem.')
     return false
   }
-  if (runner === 'pytest') {
-    console.log('  Cobertura: o Faundr ainda não lê a cobertura do pytest; rodando sem.')
+  if (runner === 'pytest' && !info?.coverage) {
+    console.log('  Cobertura: falta o pytest-cov no projeto. Peça ao usuário para aprovar: pip install pytest-cov (e ponha no requirements). Rodando sem cobertura.')
     return false
   }
+  if (runner === 'dart') {
+    console.log('  Cobertura: o dart test não gera o formato que o Faundr lê sem ferramenta extra; rodando sem.')
+    return false
+  }
+  if (runner === 'phpunit' || runner === 'pest') console.log('  Cobertura: o PHP precisa do Xdebug ou do PCOV ligado; sem eles, os testes rodam e a cobertura não aparece.')
   if (runner === 'vitest' && !info?.coverage) {
     console.log('  Cobertura: falta a ferramenta no projeto. Peça ao usuário para aprovar: npm install -D @vitest/coverage-v8 (depois rode de novo com --coverage). Rodando sem cobertura.')
     return false
@@ -3291,7 +3296,14 @@ async function testsScan(args) {
 }
 
 const runnerLabel = (r) => `${r.runner}${r.dir ? ` em ${r.dir}/` : ''}`
-const notInstalled = (r) => (r.runner === 'pytest' ? 'Python não encontrado: rode com --python <caminho do python>' : `não instalado: rode npm install${r.dir ? ` em ${r.dir}/` : ''}`)
+const NOT_INSTALLED = {
+  pytest: () => 'Python não encontrado: rode com --python <caminho do python>',
+  flutter: () => 'o Flutter não está no PATH deste computador',
+  dart: () => 'o Dart não está no PATH deste computador',
+  phpunit: (r) => `rode composer install${r.dir ? ` em ${r.dir}/` : ''} (e confira se o php está no PATH)`,
+  pest: (r) => `rode composer install${r.dir ? ` em ${r.dir}/` : ''} (e confira se o php está no PATH)`,
+}
+const notInstalled = (r) => NOT_INSTALLED[r.runner]?.(r) ?? `não instalado: rode npm install${r.dir ? ` em ${r.dir}/` : ''}`
 const listArg = (args, name) => flag(args, name)?.split(',').map((f) => f.trim().replace(/\\/g, '/').replace(/^\.\//, '')).filter(Boolean) ?? null
 
 // Roda os testes quando pedido (nunca sozinho). Banco de produção à vista: só com --confirm-db.
@@ -3308,7 +3320,7 @@ async function testsRun(args) {
   const { runners } = detectRunners(root, { python: readState(root).python })
   const wanted = flag(args, '--runner')
   const chosen = pickRunners(runners, wanted)
-  if (!chosen.length) throw new Error(wanted ? `${wanted} não foi encontrado neste projeto.` : 'Nenhum executor de testes suportado (Vitest, Jest, Playwright, node --test ou pytest) neste projeto, nem nas subpastas.')
+  if (!chosen.length) throw new Error(wanted ? `${wanted} não foi encontrado neste projeto.` : 'Nenhum executor de testes suportado (Vitest, Jest, Playwright, node --test, pytest, flutter test, dart test, PHPUnit ou Pest) neste projeto, nem nas subpastas.')
   const exclude = listArg(args, '--exclude') ?? []
   const signals = productionDbSignals(root, undefined, { exclude })
   if (signals.length && !args.includes('--confirm-db')) return refuseProductionDb(signals)
@@ -3356,8 +3368,8 @@ const SCOPE_NOTE = { changed: () => ' (só o que mudou)', files: (files) => ` ($
 async function runOneRunner(root, info, run, runTests) {
   const { runner, dir } = info
   const { files, changed, exclude, minutes } = run
-  if ((runner === 'node' || runner === 'pytest') && changed) {
-    console.log(`${runner === 'node' ? 'node --test' : 'pytest'} não sabe rodar só o que mudou: rodando todos os testes dele.`)
+  if (!['vitest', 'jest', 'playwright'].includes(runner) && changed) {
+    console.log(`${runner === 'node' ? 'node --test' : runner} não sabe rodar só o que mudou: rodando todos os testes dele.`)
   }
   const scope = testScope(changed, files)
   console.log(`Rodando ${runnerLabel(info)}${SCOPE_NOTE[scope](files)}…`)
@@ -3399,7 +3411,7 @@ async function testsContext(args) {
   const guide = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'skills', 'tests', 'guia.md')
   const { runners, others } = detectRunners(root, { python: readState(root).python })
   const out = ['# Contexto dos testes', `Guia (leia antes, com a ferramenta Read): ${guide}`, '']
-  out.push('## Executores', ...(runners.length ? runners.map((r) => `- ${runnerLabel(r)}${r.script ? ` (npm run ${r.script})` : ''}${r.installed ? '' : ` — ${notInstalled(r)}`}${r.runner === 'vitest' && !r.coverage ? ' — sem a ferramenta de cobertura (@vitest/coverage-v8)' : ''}`) : ['- nenhum (Vitest, Jest, Playwright, node --test ou pytest)']))
+  out.push('## Executores', ...(runners.length ? runners.map((r) => `- ${runnerLabel(r)}${r.script ? ` (npm run ${r.script})` : ''}${r.installed ? '' : ` — ${notInstalled(r)}`}${r.runner === 'vitest' && !r.coverage ? ' — sem a ferramenta de cobertura (@vitest/coverage-v8)' : ''}`) : ['- nenhum (Vitest, Jest, Playwright, node --test, pytest, flutter test, dart test, PHPUnit ou Pest)']))
   if (others.length) out.push(`- também no projeto, não lidos pelo Faundr: ${others.join(', ')}`)
   for (const s of productionDbSignals(root)) out.push(`- ATENÇÃO, banco de produção: ${s}`)
   out.push('')

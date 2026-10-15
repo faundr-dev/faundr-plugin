@@ -11,6 +11,7 @@ import { COVERAGE_DIR, coverageArgs } from './coverage.mjs'
 import { subDirs } from './parts.mjs'
 import { relPath } from './paths.mjs'
 import { findSecrets, mask, projectFiles } from './security.mjs'
+import { countLangCases, DART_TEST_FILE, langRunnersIn, PHP_TEST_FILE, runLangTests } from './tests-langs.mjs'
 
 export const TEST_FILE = /(^|\/)(__tests__|tests?|e2e|spec)\/.*\.[cm]?[jt]sx?$|\.(test|spec)\.[cm]?[jt]sx?$/
 export const PY_TEST_FILE = /(^|\/)(test_[^/]*|[^/]*_test)\.py$/
@@ -49,8 +50,14 @@ const readJson = (root, rel) => {
   }
 }
 
-// Subpastas com package.json ou configuração do pytest: cada parte do projeto pode ter o seu executor.
-const projectDirs = (root) => subDirs(root, (d) => fs.existsSync(path.join(root, d, 'package.json')) || PYTEST_CONFIG(root, d))
+// Subpastas com package.json, configuração do pytest, pubspec.yaml ou composer.json: cada parte pode ter o seu executor.
+const projectDirs = (root) =>
+  subDirs(root, (d) => ['package.json', 'pubspec.yaml', 'composer.json'].some((f) => fs.existsSync(path.join(root, d, f))) || PYTEST_CONFIG(root, d))
+// Executores que o Faundr roda fora do Node e do Python (tests-langs.mjs).
+export const LANG_RUNNERS = ['flutter', 'dart', 'phpunit', 'pest']
+// pytest-cov declarado no projeto: dá para medir a cobertura do pytest.
+const hasPytestCov = (root, dir) =>
+  ['requirements.txt', 'requirements-dev.txt', 'requirements_dev.txt', 'pyproject.toml', 'Pipfile', 'setup.cfg'].some((f) => /pytest-cov/.test(read(root, path.join(dir, f)) ?? ''))
 
 // Executores de JavaScript numa pasta (raiz = ''): pelo package.json, pelos arquivos de configuração e pelos scripts.
 function jsRunnersIn(root, dir) {
@@ -102,9 +109,10 @@ export function detectRunners(root, { files = null, python = null } = {}) {
     // Uma configuração na raiz (ou nenhuma) roda tudo a partir da raiz.
     for (const dir of pyDirs.includes('') || !pyDirs.length ? [''] : pyDirs) {
       const py = findPython(root, dir, python)
-      runners.push({ runner: 'pytest', dir, config: pyDirs.includes(dir) ? 'pytest' : null, script: null, installed: !!py, python: py, coverage: false })
+      runners.push({ runner: 'pytest', dir, config: pyDirs.includes(dir) ? 'pytest' : null, script: null, installed: !!py, python: py, coverage: hasPytestCov(root, dir) })
     }
   }
+  for (const dir of ['', ...dirs]) runners.push(...langRunnersIn(root, dir))
   const others = Object.entries(OTHERS)
     .filter(([name]) => allDeps[name])
     .map(([, label]) => label)
@@ -142,12 +150,18 @@ const CASE_CALL = /\b(?:it|test)(?:\.(only|skip|todo|fixme|fail|concurrent|each\
 
 /** Inventário: arquivos de teste, estimativa de testes, quais são de ponta a ponta (navegador). */
 export function inventory(root, files = projectFiles(root).files) {
-  const testFiles = files.filter((f) => (TEST_FILE.test(f) || PY_TEST_FILE.test(f)) && !NOT_PROJECT.test(f))
+  const testFiles = files.filter((f) => (TEST_FILE.test(f) || PY_TEST_FILE.test(f) || DART_TEST_FILE.test(f) || PHP_TEST_FILE.test(f)) && !NOT_PROJECT.test(f) && !/(^|\/)vendor\//.test(f))
   let cases = 0
   let skipped = 0
   let e2eFiles = 0
   for (const rel of testFiles) {
     const text = read(root, rel) ?? ''
+    const other = countLangCases(rel, text)
+    if (other) {
+      cases += other.cases
+      skipped += other.skipped
+      continue
+    }
     if (rel.endsWith('.py')) {
       cases += [...text.matchAll(/^\s*(?:async\s+)?def\s+test\w*\s*\(/gm)].length
       skipped += [...text.matchAll(/^\s*@pytest\.mark\.(?:skip|xfail)\b/gm)].length
@@ -272,6 +286,12 @@ export function runTests(root, runner, { dir = '', python = null, changed = fals
     fs.mkdirSync(path.join(root, COVERAGE_DIR), { recursive: true })
   }
   const local = files?.length ? insideDir(dir, files) : null
+  if (LANG_RUNNERS.includes(runner)) {
+    const xmlOut = out.replace(/\.json$/, '.xml')
+    const r = runLangTests(root, runner, { dir, files: local, out: xmlOut, timeout, coverageArgs: covArgs })
+    if (r.junit) return { runner, durationMs: r.durationMs, cases: fromJUnit(r.junit, root), error: null }
+    return { ...r, cases: r.cases ? r.cases.map((c) => ({ ...c, message: c.message ? clean(c.message) : null })) : r.cases }
+  }
   const args = commandFor(runner, out, { changed, files: local, nodeArgs, exclude: insideDir(dir, exclude) })
   const full = withCoverageArgs(runner, args, covArgs, local)
   const r = spawnSync(runner === 'pytest' ? python : process.execPath, [...(bin ? [bin] : []), ...full], {
@@ -418,7 +438,8 @@ export function fromJUnit(xml, root) {
       const tag = m[2]
       const body = m[4] ?? ''
       const skipped = body.match(/<skipped\b([^>]*)/)
-      const failure = body.match(/<failure\b([^>]*)>([\s\S]*?)<\/failure>|<failure\b([^>]*)\/>/)
+      // PHPUnit/Pest escrevem <error> quando o teste quebra com exceção (não numa asserção).
+      const failure = body.match(/<(?:failure|error)\b([^>]*)>([\s\S]*?)<\/(?:failure|error)>|<(?:failure|error)\b([^>]*)\/>/)
       const file = attr(tag, 'file')
       out.push({
         file: file ? rel(root, file) : null,

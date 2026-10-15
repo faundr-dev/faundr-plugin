@@ -22,6 +22,10 @@ export function coverageArgs(runner, root, sub = '') {
     return ['--coverage.enabled', '--coverage.reporter=json', `--coverage.reportsDirectory=${dir}`, '--coverage.reportOnFailure', ...(src ? ['--coverage.include=src/**'] : [])]
   if (runner === 'jest') return ['--coverage', '--coverageReporters=json', `--coverageDirectory=${dir}`, ...(src ? ['--collectCoverageFrom=src/**/*.{js,jsx,ts,tsx,mjs}'] : [])]
   if (runner === 'node') return ['--experimental-test-coverage', '--test-reporter=lcov', `--test-reporter-destination=${dir}/lcov.info`]
+  // pytest com pytest-cov, flutter test e PHPUnit/Pest (que precisam do Xdebug ou do PCOV ligado no PHP).
+  if (runner === 'pytest') return ['--cov=.', `--cov-report=lcov:${dir}/lcov.info`]
+  if (runner === 'flutter') return ['--coverage', `--coverage-path=${dir}/lcov.info`]
+  if (runner === 'phpunit' || runner === 'pest') return ['--coverage-clover', `${dir}/clover.xml`]
   return null
 }
 
@@ -32,6 +36,8 @@ export function readCoverage(root) {
   if (fs.existsSync(istanbul)) return fromIstanbul(JSON.parse(fs.readFileSync(istanbul, 'utf8')), root)
   const lcov = path.join(dir, 'lcov.info')
   if (fs.existsSync(lcov)) return fromLcov(fs.readFileSync(lcov, 'utf8'), root)
+  const clover = path.join(dir, 'clover.xml')
+  if (fs.existsSync(clover)) return fromClover(fs.readFileSync(clover, 'utf8'), root)
   return null
 }
 
@@ -174,4 +180,17 @@ export function lostCoverage(root, summary, changed) {
   return summary.files
     .filter((f) => !changed.has(f.file) && prev[f.file] !== undefined && f.covered < prev[f.file])
     .map((f) => ({ file: f.file, before: prev[f.file], now: f.covered }))
+}
+
+/** Clover (PHPUnit/Pest): <file name="..."><line num="12" type="stmt" count="1"/>; count 0 = sem teste. */
+export function fromClover(xml, root) {
+  const files = new Map()
+  for (const m of xml.matchAll(/<file\b[^>]*\bname="([^"]+)"[^>]*>([\s\S]*?)<\/file>/g)) {
+    const file = relative(root, m[1])
+    if (file.startsWith('..') || NOT_CODE.test(file)) continue
+    const lines = new Map()
+    for (const l of m[2].matchAll(/<line\b[^>]*\bnum="(\d+)"[^>]*\btype="(stmt|cond)"[^>]*\bcount="(\d+)"/g)) lines.set(Number(l[1]), Number(l[3]) > 0 ? 'c' : 'u')
+    files.set(file, lines)
+  }
+  return files
 }

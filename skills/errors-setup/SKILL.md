@@ -1,7 +1,7 @@
 ---
 description: Liga o app publicado ao Faundr para os erros que acontecem com os usuários aparecerem na seção Erros (E-n). Instala o SDK oficial do Sentry (gratuito, MIT) apontando para o Faundr, sem conta no Sentry, sem enviar desempenho nem gravação de tela, e confere com um erro de teste. Use quando o usuário pedir para acompanhar os erros do app publicado ou quando a seção Erros sugerir.
 disable-model-invocation: true
-allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *) Bash(npm install *) Bash(pnpm add *) Bash(yarn add *) Bash(bun add *) Read Grep Glob Edit Write
+allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *) Bash(npm install *) Bash(pnpm add *) Bash(yarn add *) Bash(bun add *) Bash(pip install *) Bash(uv add *) Bash(poetry add *) Bash(flutter pub add *) Bash(dart pub add *) Bash(composer require *) Read Grep Glob Edit Write
 ---
 
 ## Endereço de recebimento deste projeto
@@ -34,6 +34,12 @@ Leia o `package.json` (e os arquivos de configuração) e escolha **um** pacote:
 | Worker da Cloudflare | `@sentry/cloudflare` | `withSentry(() => ({ dsn, ... }), handler)` no `export default` |
 | Node (Express, Fastify, scripts) | `@sentry/node` | um `instrument.mjs` importado antes de tudo |
 | Expo / React Native | `@sentry/react-native` | `App.tsx` |
+| Angular | `@sentry/angular` | `main.ts`, antes do `bootstrapApplication`, e o `ErrorHandler` do Sentry nos providers |
+| Python (FastAPI, Django, Flask, scripts) | `sentry-sdk` (no requirements/pyproject) | `sentry_sdk.init(...)` no começo do `main.py`/`app.py`, ou no `settings.py` do Django; as integrações de FastAPI, Django e Flask ligam sozinhas |
+| Flutter | `sentry_flutter` (`flutter pub add sentry_flutter`) | `main()`: `await SentryFlutter.init((o) {…}, appRunner: () => runApp(const App()))` |
+| Dart no servidor | `sentry` (`dart pub add sentry`) | `main()`: `await Sentry.init((o) {…}, appRunner: …)` |
+| Laravel | `sentry/sentry-laravel` (`composer require sentry/sentry-laravel`) | `SENTRY_LARAVEL_DSN` no `.env` e, no Laravel 11+, `Integration::handles($exceptions)` em `bootstrap/app.php` |
+| PHP sem framework | `sentry/sentry` (`composer require sentry/sentry`) | `\Sentry\init([...])` no ponto de entrada (`public/index.php`) |
 
 Se o app tem navegador e servidor, ligue os dois (é o mesmo DSN).
 
@@ -55,9 +61,39 @@ Sentry.init({
 
 No React, se o app tiver um error boundary, envolva com `Sentry.ErrorBoundary` ou chame `Sentry.captureException(error)` dentro dele; senão, erros de renderização não chegam.
 
+As mesmas regras nas outras linguagens (só erros, sem dado pessoal, só em produção, versão = commit):
+
+```python
+# Python: sentry-sdk
+import os, sentry_sdk
+if os.environ.get("ENV") == "production":
+    sentry_sdk.init(dsn="<DSN acima>", environment="production", release=os.environ.get("COMMIT_SHA"),
+                    send_default_pii=False, traces_sample_rate=0)
+```
+
+```dart
+// Flutter: sentry_flutter (kReleaseMode = build de produção)
+await SentryFlutter.init((o) {
+  o.dsn = kReleaseMode ? '<DSN acima>' : '';
+  o.environment = 'production';
+  o.release = const String.fromEnvironment('COMMIT_SHA'); // flutter build … --dart-define=COMMIT_SHA=$(git rev-parse --short HEAD)
+  o.sendDefaultPii = false;
+  o.tracesSampleRate = 0;
+}, appRunner: () => runApp(const App()));
+```
+
+```php
+// Laravel: config/sentry.php já lê o .env; deixe assim no servidor de produção
+// SENTRY_LARAVEL_DSN=<DSN acima>
+// SENTRY_ENVIRONMENT=production
+// SENTRY_RELEASE=<hash do commit>
+// SENTRY_SEND_DEFAULT_PII=false
+// SENTRY_TRACES_SAMPLE_RATE=0
+```
+
 ## 3. Confira com um erro de teste
 
-1. Publique (ou rode o build de produção localmente com `enabled: true` só para o teste) e dispare um erro de propósito: um botão temporário que faz `throw new Error('Teste do Faundr')`, ou `Sentry.captureException(new Error('Teste do Faundr'))`. **Não teste pelo console do navegador**: erros digitados lá não são capturados.
+1. Publique (ou rode o build de produção localmente com `enabled: true` só para o teste) e dispare um erro de propósito: um botão temporário que faz `throw new Error('Teste do Faundr')`, ou `Sentry.captureException(new Error('Teste do Faundr'))`. **Não teste pelo console do navegador**: erros digitados lá não são capturados. Nas outras linguagens: `sentry_sdk.capture_exception(Exception("Teste do Faundr"))` (Python), `Sentry.captureException(Exception('Teste do Faundr'))` (Flutter/Dart), `\Sentry\captureException(new \Exception('Teste do Faundr'))` (PHP) ou `php artisan sentry:test` (Laravel).
 2. Rode `faundr errors` e veja se apareceu um E-n "[app publicado]". Pode levar alguns segundos.
 3. Tire o botão de teste e arquive o E-n do teste: `faundr error-archive E-<n>`.
 

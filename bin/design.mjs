@@ -13,7 +13,10 @@ import { extractTokens } from './design-tokens.mjs'
 import { detectThemes, runRules } from './design-rules.mjs'
 
 const SKIP = /(^|\/)(node_modules|\.git|\.faundr|dist|build|out|coverage|\.claude|\.remember|\.wrangler|\.next|\.nuxt|\.svelte-kit|\.tanstack|\.vercel|\.output)(\/|$)/
-const UI_EXT = /\.(tsx|jsx|vue|svelte|astro)$/
+// Templates Blade (Laravel) são HTML com classes: as mesmas regras da web valem.
+const UI_EXT = /\.(tsx|jsx|vue|svelte|astro)$|\.blade\.php$/
+// Flutter: as telas são os .dart de lib/ (menos os gerados).
+const isFlutterScreen = (rel) => /(^|\/)lib\/.*\.dart$/.test(rel) && !/\.(g|freezed|gr|mocks)\.dart$/.test(rel)
 const GENERATED = /\.gen\.|\.d\.ts$|\.test\.|\.spec\.|\.stories\./
 const DESIGN_NAMES = /^design\.md$/i
 const DESIGN_DIRS = ['', 'docs', 'doc', 'design', '.faundr', '.claude', 'src']
@@ -59,7 +62,7 @@ export function uiFiles(root) {
       const rel = path.relative(root, abs).split(path.sep).join('/')
       if (SKIP.test(rel) || (e.isDirectory() && isClaudePlugin(abs)) || ignored.some((i) => rel === i || rel.startsWith(i.replace(/\/?$/, '/')))) continue
       if (e.isDirectory()) walk(abs)
-      else if (UI_EXT.test(e.name) && !GENERATED.test(e.name)) out.push(rel)
+      else if ((UI_EXT.test(e.name) || isFlutterScreen(rel)) && !GENERATED.test(e.name)) out.push(rel)
     }
   }
   walk(root)
@@ -351,4 +354,4 @@ export function measurePlan(scopeTheme, detected, widths) {
 }
 
 /** O arquivo é de tela? (para a auditoria do fim da resposta) */
-export const isUiFile = (rel) => UI_EXT.test(rel) || /\.(css|scss)$/.test(rel)
+export const isUiFile = (rel) => UI_EXT.test(rel) || /\.(css|scss)$/.test(rel) || isFlutterScreen(rel)

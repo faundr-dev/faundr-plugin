@@ -11,6 +11,7 @@ export const SUPPORT_FEATURES = [
   { key: 'dependencias', label: 'Bibliotecas com falha conhecida', short: 'Bibliotecas' },
   { key: 'segredos', label: 'Senhas e chaves expostas', short: 'Senhas e chaves' },
   { key: 'erros', label: 'Erros dos comandos', short: 'Erros' },
+  { key: 'producao', label: 'Erros no app publicado', short: 'App no ar' },
   { key: 'testes', label: 'Testes', short: 'Testes' },
   { key: 'design', label: 'Design', short: 'Design' },
   { key: 'stack', label: 'Stack', short: 'Stack' },
@@ -40,7 +41,7 @@ export const LANGUAGE_SUPPORT = [
     match: { languages: ['TypeScript', 'JavaScript'] },
     features: {
       mapa: ['completo'], qualidade: ['completo'], seguranca: ['completo'], dependencias: ['completo'], segredos: SECRETS,
-      erros: ['completo'], testes: ['completo'], design: ['completo'], stack: ['completo'],
+      erros: ['completo'], producao: ['completo'], testes: ['completo'], design: ['completo'], stack: ['completo'],
     },
   },
   {
@@ -48,7 +49,7 @@ export const LANGUAGE_SUPPORT = [
     match: { tech: ['React Native', 'Expo'] },
     features: {
       mapa: ['completo'], qualidade: ['completo'], seguranca: ['completo'], dependencias: ['completo'], segredos: SECRETS,
-      erros: ['completo'], testes: ['completo'], design: ['parcial', 'os estilos em StyleSheet ainda não são lidos'], stack: ['completo'],
+      erros: ['completo'], producao: ['completo'], testes: ['completo'], design: ['parcial', 'os estilos em StyleSheet ainda não são lidos'], stack: ['completo'],
     },
   },
   {
@@ -56,7 +57,7 @@ export const LANGUAGE_SUPPORT = [
     match: { languages: ['Vue'], tech: ['Vue', 'Nuxt'] },
     features: {
       mapa: ['parcial', 'os arquivos .vue ainda não entram; .ts e .js sim'], qualidade: ['parcial', 'os arquivos .vue ainda não entram; .ts e .js sim'],
-      seguranca: ['completo'], dependencias: ['completo'], segredos: SECRETS, erros: ['completo'], testes: ['completo'], design: ['completo'], stack: ['completo'],
+      seguranca: ['completo'], dependencias: ['completo'], segredos: SECRETS, erros: ['completo'], producao: ['completo'], testes: ['completo'], design: ['completo'], stack: ['completo'],
     },
   },
   {
@@ -65,7 +66,7 @@ export const LANGUAGE_SUPPORT = [
     features: {
       mapa: ['parcial', 'os templates .html ainda não entram'], qualidade: ['parcial', 'os templates .html ainda não entram'],
       seguranca: ['parcial', 'os templates .html ainda não entram'], dependencias: ['completo'], segredos: SECRETS,
-      erros: ['completo'], testes: ['parcial', 'Jest e Vitest sim; Karma (ng test) ainda não'],
+      erros: ['completo'], producao: ['completo'], testes: ['parcial', 'Jest e Vitest sim; Karma (ng test) ainda não'],
       design: CLAUDE_DESIGN, stack: ['completo'],
     },
   },
@@ -74,15 +75,15 @@ export const LANGUAGE_SUPPORT = [
     match: { languages: ['Svelte', 'Astro'] },
     features: {
       mapa: ['parcial', 'os arquivos .svelte e .astro ainda não entram'], qualidade: ['parcial', 'os arquivos .svelte e .astro ainda não entram'],
-      seguranca: ['completo'], dependencias: ['completo'], segredos: SECRETS, erros: ['completo'], testes: ['completo'], design: ['completo'], stack: ['completo'],
+      seguranca: ['completo'], dependencias: ['completo'], segredos: SECRETS, erros: ['completo'], producao: ['completo'], testes: ['completo'], design: ['completo'], stack: ['completo'],
     },
   },
   {
     id: 'python', name: 'Python', examples: 'Django, Flask, FastAPI',
     match: { languages: ['Python'] },
     features: {
-      mapa: ['completo'], qualidade: ['parcial', 'ainda não acha código sem uso'], seguranca: ['parcial', 'poucas regras por enquanto'],
-      dependencias: ['completo'], segredos: SECRETS, erros: ['completo'], testes: ['parcial', 'roda o pytest, mas ainda sem cobertura'],
+      mapa: ['completo'], qualidade: ['completo'], seguranca: ['completo'],
+      dependencias: ['completo'], segredos: SECRETS, erros: ['completo'], producao: ['completo'], testes: ['completo'],
       design: NA, stack: ['completo'],
     },
   },
@@ -90,16 +91,16 @@ export const LANGUAGE_SUPPORT = [
     id: 'flutter', name: 'Flutter e Dart',
     match: { languages: ['Dart'], tech: ['Flutter'] },
     features: {
-      mapa: ['parcial', 'mostra classes e funções, mas não quem chama quem'], qualidade: CLAUDE, seguranca: CLAUDE_SEC,
-      dependencias: ['completo'], segredos: SECRETS, erros: ['completo'], testes: ['nao'], design: CLAUDE_DESIGN, stack: ['completo'],
+      mapa: ['completo'], qualidade: ['completo'], seguranca: ['completo'],
+      dependencias: ['completo'], segredos: SECRETS, erros: ['completo'], producao: ['completo'], testes: ['completo'], design: ['completo'], stack: ['completo'],
     },
   },
   {
     id: 'php', name: 'PHP', examples: 'Laravel',
     match: { languages: ['PHP'] },
     features: {
-      mapa: ['parcial', 'sem ligação entre arquivos'], qualidade: CLAUDE, seguranca: CLAUDE_SEC, dependencias: ['completo'], segredos: SECRETS,
-      erros: ['completo'], testes: ['nao'], design: CLAUDE_DESIGN, stack: ['completo'],
+      mapa: ['completo'], qualidade: ['completo'], seguranca: ['completo'], dependencias: ['completo'], segredos: SECRETS,
+      erros: ['completo'], producao: ['completo'], testes: ['completo'], design: ['completo'], stack: ['completo'],
     },
   },
   {
@@ -107,7 +108,7 @@ export const LANGUAGE_SUPPORT = [
     match: { languages: ['Go'] },
     features: {
       mapa: ['parcial', 'sem ligação entre arquivos'], qualidade: CLAUDE, seguranca: CLAUDE_SEC, dependencias: ['completo'], segredos: SECRETS,
-      erros: ['completo'], testes: ['nao'], design: NA, stack: ['completo'],
+      erros: ['completo'], producao: ['nao'], testes: ['nao'], design: NA, stack: ['completo'],
     },
   },
   {
@@ -115,7 +116,7 @@ export const LANGUAGE_SUPPORT = [
     match: { languages: ['Java'] },
     features: {
       mapa: ['parcial', 'sem ligação entre arquivos'], qualidade: CLAUDE, seguranca: CLAUDE_SEC, dependencias: ['completo'], segredos: SECRETS,
-      erros: ['completo'], testes: ['nao'], design: NA, stack: ['completo'],
+      erros: ['completo'], producao: ['nao'], testes: ['nao'], design: NA, stack: ['completo'],
     },
   },
   {
@@ -123,7 +124,7 @@ export const LANGUAGE_SUPPORT = [
     match: { languages: ['Kotlin'] },
     features: {
       mapa: ['parcial', 'sem ligação entre arquivos'], qualidade: CLAUDE, seguranca: CLAUDE_SEC, dependencias: ['completo'], segredos: SECRETS,
-      erros: ['completo'], testes: ['nao'], design: CLAUDE_DESIGN, stack: ['completo'],
+      erros: ['completo'], producao: ['nao'], testes: ['nao'], design: CLAUDE_DESIGN, stack: ['completo'],
     },
   },
   {
@@ -131,7 +132,7 @@ export const LANGUAGE_SUPPORT = [
     match: { languages: ['C#'] },
     features: {
       mapa: ['parcial', 'sem ligação entre arquivos'], qualidade: CLAUDE, seguranca: CLAUDE_SEC, dependencias: ['completo'], segredos: SECRETS,
-      erros: ['completo'], testes: ['nao'], design: NA, stack: ['completo'],
+      erros: ['completo'], producao: ['nao'], testes: ['nao'], design: NA, stack: ['completo'],
     },
   },
   {
@@ -139,7 +140,7 @@ export const LANGUAGE_SUPPORT = [
     match: { languages: ['Rust'] },
     features: {
       mapa: ['parcial', 'sem ligação entre arquivos'], qualidade: CLAUDE, seguranca: CLAUDE_SEC, dependencias: ['completo'], segredos: SECRETS,
-      erros: ['completo'], testes: ['nao'], design: NA, stack: ['completo'],
+      erros: ['completo'], producao: ['nao'], testes: ['nao'], design: NA, stack: ['completo'],
     },
   },
   {
@@ -147,7 +148,7 @@ export const LANGUAGE_SUPPORT = [
     match: { languages: ['C'] },
     features: {
       mapa: ['parcial', 'só os #include com caminho relativo'], qualidade: CLAUDE, seguranca: CLAUDE_SEC, dependencias: ['parcial', 'só com Conan (conan.lock); vcpkg ainda não'], segredos: SECRETS,
-      erros: ['completo'], testes: ['nao'], design: NA, stack: ['completo'],
+      erros: ['completo'], producao: ['nao'], testes: ['nao'], design: NA, stack: ['completo'],
     },
   },
   {
@@ -155,7 +156,7 @@ export const LANGUAGE_SUPPORT = [
     match: { languages: ['C++'] },
     features: {
       mapa: ['parcial', 'só os #include com caminho relativo'], qualidade: CLAUDE, seguranca: CLAUDE_SEC, dependencias: ['parcial', 'só com Conan (conan.lock); vcpkg ainda não'], segredos: SECRETS,
-      erros: ['completo'], testes: ['nao'], design: NA, stack: ['completo'],
+      erros: ['completo'], producao: ['nao'], testes: ['nao'], design: NA, stack: ['completo'],
     },
   },
   {
@@ -163,7 +164,7 @@ export const LANGUAGE_SUPPORT = [
     match: { languages: ['Docker'] },
     features: {
       mapa: NA, qualidade: CLAUDE, seguranca: ['nao'], dependencias: ['nao', 'as imagens base ainda não são verificadas'], segredos: SECRETS,
-      erros: ['completo'], testes: NA, design: NA, stack: ['completo'],
+      erros: ['completo'], producao: NA, testes: NA, design: NA, stack: ['completo'],
     },
   },
   {
@@ -171,7 +172,7 @@ export const LANGUAGE_SUPPORT = [
     match: { languages: ['HTML'] },
     features: {
       mapa: NA, qualidade: CLAUDE, seguranca: ['parcial', 'só os cabeçalhos de segurança do index.html'], dependencias: NA, segredos: SECRETS,
-      erros: NA, testes: NA, design: ['parcial', 'só o index.html; as outras páginas ainda não'], stack: ['completo'],
+      erros: NA, producao: ['nao'], testes: NA, design: ['parcial', 'só o index.html; as outras páginas ainda não'], stack: ['completo'],
     },
   },
   {
@@ -179,14 +180,14 @@ export const LANGUAGE_SUPPORT = [
     match: { languages: ['CSS', 'SCSS', 'Less'] },
     features: {
       mapa: NA, qualidade: CLAUDE, seguranca: NA, dependencias: NA, segredos: SECRETS,
-      erros: ['completo'], testes: NA, design: ['completo'], stack: ['completo'],
+      erros: ['completo'], producao: NA, testes: NA, design: ['completo'], stack: ['completo'],
     },
   },
   {
     id: 'tailwind', name: 'Tailwind',
     match: { tech: ['Tailwind CSS'] },
     features: {
-      mapa: NA, qualidade: NA, seguranca: NA, dependencias: NA, segredos: NA, erros: NA, testes: NA, design: ['completo'], stack: ['completo'],
+      mapa: NA, qualidade: NA, seguranca: NA, dependencias: NA, segredos: NA, erros: NA, producao: NA, testes: NA, design: ['completo'], stack: ['completo'],
     },
   },
 ]

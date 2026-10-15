@@ -8,6 +8,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { FLUTTER_RULES, FLUTTER_TEXT, flutterFileRules } from './design-flutter.mjs'
 import { allDeps, isClaudePlugin } from './parts.mjs'
 
 const SKIP = /(^|\/)(node_modules|\.git|\.faundr|dist|build|out|coverage|\.claude|\.remember|\.wrangler|\.next|\.nuxt|\.svelte-kit|\.tanstack|\.vercel|\.output)(\/|$)/
@@ -62,6 +63,9 @@ export const RULES = {
   'design/tema-nao-segue-sistema': { kind: 'off_spec', severity: 'low' },
 }
 
+// Telas Flutter: regras e textos em design-flutter.mjs.
+Object.assign(RULES, FLUTTER_RULES)
+
 // ---------- leitura do projeto ----------
 
 function walk(root) {
@@ -107,6 +111,8 @@ const HEAD_FILES = [
   /^src\/layouts\/[^/]+\.astro$/,
   /^nuxt\.config\.(ts|js)$/,
   /^app\.vue$/,
+  /^resources\/views\/(layouts\/)?[\w-]+\.blade\.php$/, // Laravel
+  /^web\/index\.html$/, // Flutter Web
 ]
 
 function loadProject(root, uiExt) {
@@ -114,6 +120,8 @@ function loadProject(root, uiExt) {
   const ui = all.filter((f) => uiExt.test(f) && !NOT_APP.test(f))
   const css = all.filter((f) => /\.(css|scss)$/.test(f) && !NOT_APP.test(f))
   const head = all.filter((f) => HEAD_FILES.some((re) => re.test(f)))
+  // Telas Flutter: o código do app fica em lib/ (sem os arquivos gerados).
+  const dart = all.filter((f) => /(^|\/)lib\/.*\.dart$/.test(f) && !NOT_APP.test(f) && !/\.(g|freezed|gr|mocks)\.dart$/.test(f))
   // Quem troca o tema costuma morar num arquivo de lógica (theme.ts, useColorMode…), fora das telas.
   const themeCode = all.filter((f) => /\.(m?[jt]sx?)$/.test(f) && /theme|color-?mode|dark-?mode|appearance/i.test(f) && !NOT_APP.test(f) && !uiExt.test(f))
   // Dependências da raiz e das partes (um Next em frontend/ também conta).
@@ -123,6 +131,7 @@ function loadProject(root, uiExt) {
     ui: ui.map((rel) => ({ rel, text: read(root, rel) })),
     css: css.map((rel) => ({ rel, text: read(root, rel) })),
     head: head.map((rel) => ({ rel, text: read(root, rel) })),
+    dart: dart.map((rel) => ({ rel, text: read(root, rel) })),
     themeCode: themeCode.slice(0, 20).map((rel) => ({ rel, text: read(root, rel) })),
     deps,
   }
@@ -318,6 +327,7 @@ const TEXT = {
   'identidade/theme-color-unico': () => ['Uma cor de barra do navegador para os dois temas', 'O theme-color pinta a barra do navegador no celular. Com uma cor só, no outro tema a barra fica destoando da página. Use duas tags theme-color com media="(prefers-color-scheme: light)" e "(prefers-color-scheme: dark)", ou troque a cor junto com o tema.'],
   'design/emoji-como-icone': (c, n) => [`Emoji usado como ícone ou enfeite (${c.token})${n > 1 ? `, ${n} lugares` : ''}`, 'Emoji muda de cara em cada sistema e não segue o traço dos ícones do app. Use a biblioteca de ícones do projeto.'],
 }
+Object.assign(TEXT, FLUTTER_TEXT)
 
 const lineList = (lines) => (lines.length ? ` Linhas: ${lines.slice(0, 12).join(', ')}${lines.length > 12 ? '…' : ''}.` : '')
 
@@ -467,6 +477,14 @@ function uiFileRules({ rel, text }, c, designText, stats) {
     practiceTagRules(tag)
   }
   text.split('\n').forEach((l, i) => textLineRules(l, i + 1, add))
+}
+
+// Um arquivo de tela do Flutter: as regras de design-flutter.mjs e as de texto (dado de enchimento, emoji).
+function dartFileRules({ rel, text }, c, stats) {
+  const ign = ignoreSet(text)
+  const add = (rule, line, ctx) => (ign.ignored(rule, line) ? stats.ignored++ : c.add(rule, rel, line, ctx))
+  flutterFileRules({ rel, text }, add)
+  text.split('\n').forEach((l, i) => textLineRules(l, i + 1, (rule, at, ctx) => add(rule, at.line, ctx)))
 }
 
 // ---------- regras de CSS ----------
@@ -633,6 +651,7 @@ export function runRules(root, { uiExt, designMdPath, designMd, tokens }) {
 
   for (const f of p.ui) uiFileRules(f, c, designText, stats)
   for (const f of p.css) cssFileRules(f, c, stats)
+  for (const f of p.dart) dartFileRules(f, c, stats)
 
   const headText = p.head.map((h) => h.text).join('\n')
   const code = [...p.ui, ...p.css].map((f) => f.text).join('\n')
