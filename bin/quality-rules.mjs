@@ -20,8 +20,9 @@ import { houseText, TEXT } from './quality-texts.mjs'
 const MAX_FILE = 400_000
 // Linha só de comentário, por linguagem (não conta como linha de código).
 const COMMENT_LINE = { js: /^\s*(\/\/|\*|\/\*)/, '.py': /^\s*#/, '.php': /^\s*(\/\/|#|\*|\/\*)/ }
-const TEST_PATH = /(^|\/)(__tests__|__mocks__|tests?|e2e|spec|integration_test)(\/|$)|\.(test|spec)\.[cm]?[jt]sx?$|(^|\/)(test_[^/]*|[^/]*_test|conftest)\.py$|_test\.dart$|Test\.php$/
-const GENERATED = /\.(d\.ts|min\.js)$|\.gen\.[jt]sx?$|(^|\/)(dist|build|out|vendor|generated|\.output)\//
+const TEST_PATH = /(^|\/)(__tests__|__mocks__|tests?|e2e|spec|integration_test)(\/|$)|\.(test|spec)\.[cm]?[jt]sx?$|(^|\/)(test_[^/]*|[^/]*_test|conftest)\.py$|_test\.dart$|Test\.php$|_test\.go$|Tests?\.(java|kt|cs)$|(^|\/)[^/]+\.Tests?\//
+// Gerados: também .pb.go, *_gen.go, .Designer.cs/.g.cs e a saída do build do .NET (bin/ e obj/ só com .cs).
+const GENERATED = /\.(d\.ts|min\.js)$|\.gen\.[jt]sx?$|(^|\/)(dist|build|out|vendor|generated|\.output)\/|\.pb\.go$|_gen\.go$|\.(Designer|g|g\.i)\.cs$|(^|\/)(bin|obj)\/.*\.cs$/
 const GENERATED_HEADER = /^(\/\/|\/\*)[^\n]*(@generated|auto-?generated|gerado por|do not edit|não edite)/i
 // Telas: onde console.log é esquecimento (em CLI e servidor ele é a saída normal).
 const UI_FILE = /\.(tsx|jsx)$/
@@ -512,7 +513,7 @@ function instructionRules(root, doc, scripts, c) {
 
 // TODO/FIXME antigos: data pela autoria da linha no git (git blame), só nas linhas marcadas.
 function oldTodos(root, c) {
-  const grep = spawnSync('git', ['grep', '-n', '-I', '-E', '(//|/\\*|\\*|#)\\s*(TODO|FIXME|HACK|XXX)\\b', '--', '*.ts', '*.tsx', '*.js', '*.jsx', '*.mjs', '*.cjs', '*.py', '*.dart', '*.php'], {
+  const grep = spawnSync('git', ['grep', '-n', '-I', '-E', '(//|/\\*|\\*|#)\\s*(TODO|FIXME|HACK|XXX)\\b', '--', '*.ts', '*.tsx', '*.js', '*.jsx', '*.mjs', '*.cjs', '*.py', '*.dart', '*.php', '*.go', '*.java', '*.kt', '*.cs'], {
     cwd: root,
     encoding: 'utf8',
     windowsHide: true,

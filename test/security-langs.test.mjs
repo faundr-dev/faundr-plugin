@@ -94,3 +94,100 @@ test('Python: SQL com f-string, os.system, exec, debug ligado, JWT sem conferir,
   ])
   assert.deepEqual(found('app/bom.py'), [])
 })
+
+test('Go: SQL com Sprintf e +, sh -c, TLS sem conferir, template.HTML, hash fraco e CORS *', async () => {
+  const found = await scan({
+    'internal/ruim.go': [
+      'package app',
+      'rows, err := db.Query(fmt.Sprintf("SELECT * FROM users WHERE id = %s", id))',
+      'db.Exec("DELETE FROM pedidos WHERE dono = " + dono)',
+      'out, _ := exec.Command("sh", "-c", "convert "+arquivo).Output()',
+      'tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}',
+      'pagina := template.HTML(comentario)',
+      'h := md5.Sum([]byte(senha))',
+      'c := cors.New(cors.Options{AllowedOrigins: []string{"*"}})',
+    ].join('\n'),
+    'internal/bom.go': [
+      'package app',
+      'rows, err := db.Query("SELECT * FROM users WHERE id = $1", id)',
+      'db.Where("dono = ?", dono).Find(&pedidos)',
+      'out, _ := exec.Command("convert", arquivo, saida).Output()',
+      'h, _ := bcrypt.GenerateFromPassword([]byte(senha), 12)',
+      'pagina := template.HTML("<b>fixo</b>")',
+    ].join('\n'),
+    'internal/ruim_test.go': 'package app\nvar tr = &tls.Config{InsecureSkipVerify: true}\n',
+  })
+  assert.deepEqual(found('internal/ruim.go'), [
+    'go-command-injection', 'go-cors-any-origin', 'go-sql-injection', 'go-template-unescaped', 'go-tls-verification-disabled', 'go-weak-password-hash',
+  ])
+  assert.deepEqual(found('internal/bom.go'), [])
+  assert.deepEqual(found('internal/ruim_test.go'), [], 'arquivo de teste fica de fora')
+})
+
+test('Java/Kotlin: SQL montado, Runtime.exec, ObjectInputStream, XXE, TLS, senha sem hash, JWT sem assinatura, CSRF e CORS', async () => {
+  const found = await scan({
+    'src/main/java/com/acme/Ruim.java': [
+      'ResultSet rs = st.executeQuery("SELECT * FROM users WHERE id = " + id);',
+      'Runtime.getRuntime().exec("convert " + arquivo);',
+      'ObjectInputStream in = new ObjectInputStream(req.getInputStream());',
+      'DocumentBuilderFactory f = DocumentBuilderFactory.newInstance();',
+      'HttpClients.custom().setSSLHostnameVerifier(NoopHostnameVerifier.INSTANCE);',
+      'return NoOpPasswordEncoder.getInstance();',
+      'Claims c = Jwts.parser().setSigningKey(k).parseClaimsJwt(token).getBody();',
+      'http.csrf().disable();',
+      '@CrossOrigin(origins = "*")',
+    ].join('\n'),
+    'src/main/kotlin/Ruim.kt': [
+      'val rs = jdbc.queryForList("select * from pedidos where dono = $dono")',
+      'val b = OkHttpClient.Builder().hostnameVerifier { _, _ -> true }',
+    ].join('\n'),
+    'src/main/java/com/acme/Bom.java': [
+      'PreparedStatement ps = con.prepareStatement("SELECT * FROM users WHERE id = ?");',
+      'new ProcessBuilder("convert", arquivo, saida).start();',
+      'DocumentBuilderFactory f = DocumentBuilderFactory.newInstance();',
+      'f.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);',
+      'return new BCryptPasswordEncoder();',
+      'Claims c = Jwts.parser().verifyWith(k).build().parseSignedClaims(token).getPayload();',
+      '@CrossOrigin(origins = "https://loja.com")',
+    ].join('\n'),
+    'src/main/java/com/acme/Api.java': ['http.csrf(AbstractHttpConfigurer::disable);', 'http.sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS));'].join('\n'),
+  })
+  assert.deepEqual(found('src/main/java/com/acme/Ruim.java'), [
+    'jvm-command-injection', 'jvm-cors-any-origin', 'jvm-jwt-without-verify', 'jvm-sql-injection', 'jvm-tls-verification-disabled', 'jvm-unsafe-deserialization',
+    'jvm-weak-password-hash', 'jvm-xxe', 'spring-csrf-disabled',
+  ])
+  assert.deepEqual(found('src/main/kotlin/Ruim.kt'), ['jvm-sql-injection', 'jvm-tls-verification-disabled'])
+  assert.deepEqual(found('src/main/java/com/acme/Bom.java'), [])
+  assert.deepEqual(found('src/main/java/com/acme/Api.java'), [], 'API sem sessão pode desligar o CSRF')
+})
+
+test('C#: SQL com FromSqlRaw e +, cmd /c, BinaryFormatter, TLS, Html.Raw, hash fraco, JWT sem validar e CORS', async () => {
+  const found = await scan({
+    'Loja/Ruim.cs': [
+      'var users = db.Users.FromSqlRaw($"SELECT * FROM Users WHERE Name = {nome}").ToList();',
+      'var cmd = new SqlCommand("DELETE FROM Pedidos WHERE Dono = " + dono, con);',
+      'Process.Start("cmd.exe", "/c convert " + arquivo);',
+      'var f = new BinaryFormatter();',
+      'handler.ServerCertificateCustomValidationCallback = (m, c, ch, e) => true;',
+      'var h = MD5.HashData(Encoding.UTF8.GetBytes(senha));',
+      'ValidateIssuerSigningKey = false,',
+      'policy.AllowAnyOrigin().AllowAnyHeader();',
+    ].join('\n'),
+    'Loja/Views/Home/Index.cshtml': '<div>@Html.Raw(Model.Comentario)</div>\n',
+    'Loja/Bom.cs': [
+      'var users = db.Users.FromSqlInterpolated($"SELECT * FROM Users WHERE Name = {nome}").ToList();',
+      'var cmd = new SqlCommand("DELETE FROM Pedidos WHERE Dono = @dono", con);',
+      'var p = new ProcessStartInfo("convert"); p.ArgumentList.Add(arquivo);',
+      'ValidateIssuerSigningKey = true,',
+      'policy.WithOrigins("https://loja.com");',
+    ].join('\n'),
+    'Loja/Views/Home/Bom.cshtml': '<div>@Model.Comentario</div>\n@Html.Raw("<br>")\n',
+  })
+  assert.deepEqual(found('Loja/Ruim.cs'), [
+    'cs-command-injection', 'cs-cors-any-origin', 'cs-jwt-without-validation', 'cs-sql-injection', 'cs-tls-verification-disabled', 'cs-unsafe-deserialization',
+    'cs-weak-password-hash',
+  ])
+  assert.deepEqual(found('Loja/Views/Home/Index.cshtml'), ['cs-raw-html'])
+  assert.deepEqual(found('Loja/Bom.cs'), [])
+  assert.deepEqual(found('Loja/Views/Home/Bom.cshtml'), [])
+})

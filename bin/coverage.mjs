@@ -10,7 +10,16 @@ import { relPath } from './paths.mjs'
 
 export const COVERAGE_DIR = path.join(relPath('tests'), 'coverage')
 const PREV_FILE = path.join(relPath('tests'), 'coverage-prev.json')
-const NOT_CODE = /(^|\/)(node_modules|dist|build|coverage|\.faundr)\/|\.(test|spec)\.[cm]?[jt]sx?$|\.d\.ts$/
+const JACOCO = 'org.jacoco:jacoco-maven-plugin:0.8.13'
+const readText = (file) => {
+  try {
+    return fs.readFileSync(file, 'utf8')
+  } catch {
+    // Arquivo que não existe: vazio.
+    return ''
+  }
+}
+const NOT_CODE =/(^|\/)(node_modules|dist|build|coverage|\.faundr)\/|\.(test|spec)\.[cm]?[jt]sx?$|\.d\.ts$/
 
 /** Argumentos extras para ligar a cobertura sem mexer na configuração do projeto (null = não dá). */
 export function coverageArgs(runner, root, sub = '') {
@@ -26,6 +35,13 @@ export function coverageArgs(runner, root, sub = '') {
   if (runner === 'pytest') return ['--cov=.', `--cov-report=lcov:${dir}/lcov.info`]
   if (runner === 'flutter') return ['--coverage', `--coverage-path=${dir}/lcov.info`]
   if (runner === 'phpunit' || runner === 'pest') return ['--coverage-clover', `${dir}/clover.xml`]
+  if (runner === 'go') return [`-coverprofile=${path.resolve(root, COVERAGE_DIR, 'cover.out')}`]
+  // dotnet: precisa do coverlet.collector no projeto de teste; o Cobertura vai para a pasta do Faundr depois.
+  if (runner === 'dotnet') return ['--collect', 'XPlat Code Coverage']
+  // Maven: o JaCoCo pelo nome completo do plugin, sem mexer no pom.xml (antes e depois do test).
+  if (runner === 'maven') return [`${JACOCO}:prepare-agent`, `${JACOCO}:report`]
+  // Gradle: só se o projeto já aplica o plugin jacoco (o Faundr não muda o build.gradle).
+  if (runner === 'gradle') return /\bjacoco\b/.test(['build.gradle', 'build.gradle.kts'].map((f) => readText(path.join(root, sub, f))).join('\n')) ? ['jacocoTestReport'] : null
   return null
 }
 
@@ -38,6 +54,12 @@ export function readCoverage(root) {
   if (fs.existsSync(lcov)) return fromLcov(fs.readFileSync(lcov, 'utf8'), root)
   const clover = path.join(dir, 'clover.xml')
   if (fs.existsSync(clover)) return fromClover(fs.readFileSync(clover, 'utf8'), root)
+  const goProfile = path.join(dir, 'cover.out')
+  if (fs.existsSync(goProfile)) return fromGoCover(fs.readFileSync(goProfile, 'utf8'), root, readJson(path.join(dir, 'go-module.json')))
+  const cobertura = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => /^cobertura-\d+\.xml$/.test(f)) : []
+  if (cobertura.length) return fromCobertura(cobertura.map((f) => fs.readFileSync(path.join(dir, f), 'utf8')).join('\n'), root)
+  const jacoco = readJson(path.join(dir, 'jacoco.json'))
+  if (jacoco?.length) return fromJacoco(jacoco.map((r) => ({ xml: readText(path.join(dir, r.file)), module: r.module })), root)
   return null
 }
 
@@ -191,6 +213,101 @@ export function fromClover(xml, root) {
     const lines = new Map()
     for (const l of m[2].matchAll(/<line\b[^>]*\bnum="(\d+)"[^>]*\btype="(stmt|cond)"[^>]*\bcount="(\d+)"/g)) lines.set(Number(l[1]), Number(l[3]) > 0 ? 'c' : 'u')
     files.set(file, lines)
+  }
+  return files
+}
+
+const readJson = (file) => {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'))
+  } catch {
+    // Sem o arquivo do módulo: os caminhos do perfil ficam sem tradução.
+    return null
+  }
+}
+
+/**
+ * Perfil do `go test -coverprofile`: "módulo/pasta/arquivo.go:10.30,12.2 1 1" (trecho, comandos, vezes). O caminho
+ * do pacote vira o arquivo do projeto pelo módulo do go.mod (go-module.json, escrito quando os testes rodam).
+ */
+export function fromGoCover(text, root, mod = null) {
+  const files = new Map()
+  for (const raw of text.split('\n')) {
+    const m = raw.trim().match(/^(.+\.go):(\d+)\.\d+,(\d+)\.\d+ \d+ (\d+)$/)
+    if (!m) continue
+    let file = m[1]
+    if (mod?.module && file.startsWith(`${mod.module}/`)) file = path.posix.join(mod.dir || '', file.slice(mod.module.length + 1))
+    file = relative(root, file)
+    if (file.startsWith('..') || NOT_CODE.test(file)) continue
+    const lines = files.get(file) ?? new Map()
+    for (let l = Number(m[2]); l <= Number(m[3]); l++) {
+      if (Number(m[4]) > 0) lines.set(l, 'c')
+      else if (!lines.has(l)) lines.set(l, 'u')
+    }
+    files.set(file, lines)
+  }
+  return files
+}
+
+/**
+ * JaCoCo (Java/Kotlin): <package name="com/acme"><sourcefile name="Pedido.java"><line nr mi ci mb cb/>. mi/ci =
+ * instruções perdidas/cobertas, mb/cb = ramos. O arquivo fica em <módulo>/src/main/java (ou kotlin)/<pacote>/<nome>.
+ */
+export function fromJacoco(reports, root) {
+  const files = new Map()
+  for (const { xml, module = '' } of reports) {
+    // Cada <sourcefile> com o pacote em volta: [pacote, nome, conteúdo].
+    const sources = [...xml.matchAll(/<package\b[^>]*\bname="([^"]*)"[^>]*>([\s\S]*?)<\/package>/g)].flatMap((p) =>
+      [...p[2].matchAll(/<sourcefile\b[^>]*\bname="([^"]+)"[^>]*>([\s\S]*?)<\/sourcefile>/g)].map((s) => [p[1], s[1], s[2]]),
+    )
+    for (const [pkg, name, body] of sources) {
+      const file = jacocoFile(root, module, path.posix.join(pkg, name))
+      if (!NOT_CODE.test(file)) files.set(file, jacocoLines(body))
+    }
+  }
+  return files
+}
+
+// <módulo>/src/main/java (ou kotlin, ou src)/<pacote>/<arquivo>: o que existir no projeto.
+const jacocoFile = (root, module, tail) =>
+  ['src/main/java', 'src/main/kotlin', 'src'].map((base) => path.posix.join(module, base, tail)).find((f) => fs.existsSync(path.join(root, f))) ??
+  path.posix.join(module, 'src/main/java', tail)
+
+/** Sem instrução coberta (ci = 0): sem teste; coberta mas com ramo perdido (mb > 0): parcial. */
+function jacocoLines(body) {
+  const lines = new Map()
+  for (const l of body.matchAll(/<line\b[^>]*\bnr="(\d+)"[^>]*\bmi="(\d+)"[^>]*\bci="(\d+)"[^>]*\bmb="(\d+)"[^>]*\bcb="(\d+)"/g)) {
+    const [, nr, , ci, mb] = l.map(Number)
+    if (ci === 0) lines.set(nr, 'u')
+    else lines.set(nr, mb > 0 ? 'p' : 'c')
+  }
+  return lines
+}
+
+/**
+ * Cobertura (coverlet, no dotnet test): <source> com a pasta base e <class filename> com <line number hits
+ * branch condition-coverage>. Ramo com parte não executada vira linha parcial.
+ */
+export function fromCobertura(xml, root) {
+  const files = new Map()
+  // Cada relatório tem as próprias <sources>; os caminhos das classes são relativos a elas.
+  for (const report of xml.split(/(?=<\?xml|<coverage\b)/)) {
+    const sources = [...report.matchAll(/<source>([^<]*)<\/source>/g)].map((m) => m[1].trim())
+    for (const m of report.matchAll(/<class\b[^>]*\bfilename="([^"]+)"[^>]*>([\s\S]*?)<\/class>/g)) {
+      const name = m[1].replace(/\\/g, '/')
+      const abs = path.isAbsolute(name) ? name : (sources.map((s) => path.join(s, name)).find((p) => fs.existsSync(p)) ?? path.join(sources[0] ?? root, name))
+      const file = relative(root, abs)
+      if (file.startsWith('..') || NOT_CODE.test(file) || /(^|\/)(obj|bin)\//.test(file)) continue
+      const lines = files.get(file) ?? new Map()
+      for (const l of m[2].matchAll(/<line\b[^>]*\bnumber="(\d+)"[^>]*\bhits="(\d+)"([^>]*)/g)) {
+        const n = Number(l[1])
+        const partial = /condition-coverage="(?!100%)/.test(l[3])
+        let state = 'u'
+        if (Number(l[2]) > 0) state = partial ? 'p' : 'c'
+        if (lines.get(n) !== 'c') lines.set(n, state)
+      }
+      files.set(file, lines)
+    }
   }
   return files
 }

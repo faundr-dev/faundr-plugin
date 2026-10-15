@@ -40,6 +40,11 @@ Leia o `package.json` (e os arquivos de configuração) e escolha **um** pacote:
 | Dart no servidor | `sentry` (`dart pub add sentry`) | `main()`: `await Sentry.init((o) {…}, appRunner: …)` |
 | Laravel | `sentry/sentry-laravel` (`composer require sentry/sentry-laravel`) | `SENTRY_LARAVEL_DSN` no `.env` e, no Laravel 11+, `Integration::handles($exceptions)` em `bootstrap/app.php` |
 | PHP sem framework | `sentry/sentry` (`composer require sentry/sentry`) | `\Sentry\init([...])` no ponto de entrada (`public/index.php`) |
+| Go (net/http, Gin, Echo, Fiber) | `github.com/getsentry/sentry-go` (`go get github.com/getsentry/sentry-go`) e o pacote do framework (`sentry-go/gin`, `/echo`, `/fiber`, `/http`) | `sentry.Init(...)` no começo do `main()`, `defer sentry.Flush(2 * time.Second)` e o middleware do framework (com `Repanic: true`) |
+| Spring Boot (Java/Kotlin) | `io.sentry:sentry-spring-boot-starter-jakarta` (Boot 3) no `pom.xml`/`build.gradle` | só configuração: `sentry.dsn` e as demais chaves no `application.properties`/`.yml`; o starter captura os erros dos controladores |
+| Android (Kotlin/Java) | plugin Gradle `io.sentry.android.gradle` | `io.sentry.dsn` no `AndroidManifest.xml` (`<meta-data>`); o plugin liga sozinho |
+| ASP.NET Core (C#) | `Sentry.AspNetCore` (`dotnet add package Sentry.AspNetCore`) | `builder.WebHost.UseSentry(o => {…})` no `Program.cs` |
+| .NET sem ASP.NET (console, worker) | `Sentry` (`dotnet add package Sentry`) | `using var _ = SentrySdk.Init(o => {…})` no começo do `Main` |
 
 Se o app tem navegador e servidor, ligue os dois (é o mesmo DSN).
 
@@ -91,9 +96,43 @@ await SentryFlutter.init((o) {
 // SENTRY_TRACES_SAMPLE_RATE=0
 ```
 
+```go
+// Go: sentry-go (APP_ENV e COMMIT_SHA vêm do ambiente do servidor)
+if os.Getenv("APP_ENV") == "production" {
+	if err := sentry.Init(sentry.ClientOptions{Dsn: "<DSN acima>", Environment: "production", Release: os.Getenv("COMMIT_SHA"), SendDefaultPII: false, TracesSampleRate: 0}); err != nil {
+		log.Printf("sentry: %v", err)
+	}
+	defer sentry.Flush(2 * time.Second)
+}
+r.Use(sentrygin.New(sentrygin.Options{Repanic: true})) // Gin; no net/http: sentryhttp.New(...).Handle(mux)
+```
+
+```properties
+# Spring Boot: application-prod.properties (só no perfil de produção)
+sentry.dsn=<DSN acima>
+sentry.environment=production
+sentry.release=${COMMIT_SHA:}
+sentry.send-default-pii=false
+sentry.traces-sample-rate=0
+sentry.in-app-includes=com.suaempresa
+```
+
+```csharp
+// ASP.NET Core: Program.cs
+if (builder.Environment.IsProduction())
+    builder.WebHost.UseSentry(o =>
+    {
+        o.Dsn = "<DSN acima>";
+        o.Environment = "production";
+        o.Release = Environment.GetEnvironmentVariable("COMMIT_SHA");
+        o.SendDefaultPii = false;
+        o.TracesSampleRate = 0;
+    });
+```
+
 ## 3. Confira com um erro de teste
 
-1. Publique (ou rode o build de produção localmente com `enabled: true` só para o teste) e dispare um erro de propósito: um botão temporário que faz `throw new Error('Teste do Faundr')`, ou `Sentry.captureException(new Error('Teste do Faundr'))`. **Não teste pelo console do navegador**: erros digitados lá não são capturados. Nas outras linguagens: `sentry_sdk.capture_exception(Exception("Teste do Faundr"))` (Python), `Sentry.captureException(Exception('Teste do Faundr'))` (Flutter/Dart), `\Sentry\captureException(new \Exception('Teste do Faundr'))` (PHP) ou `php artisan sentry:test` (Laravel).
+1. Publique (ou rode o build de produção localmente com `enabled: true` só para o teste) e dispare um erro de propósito: um botão temporário que faz `throw new Error('Teste do Faundr')`, ou `Sentry.captureException(new Error('Teste do Faundr'))`. **Não teste pelo console do navegador**: erros digitados lá não são capturados. Nas outras linguagens: `sentry_sdk.capture_exception(Exception("Teste do Faundr"))` (Python), `Sentry.captureException(Exception('Teste do Faundr'))` (Flutter/Dart), `\Sentry\captureException(new \Exception('Teste do Faundr'))` (PHP) ou `php artisan sentry:test` (Laravel), `sentry.CaptureException(errors.New("Teste do Faundr"))` (Go), `Sentry.captureException(RuntimeException("Teste do Faundr"))` (Java/Kotlin) ou `SentrySdk.CaptureException(new Exception("Teste do Faundr"))` (C#).
 2. Rode `faundr errors` e veja se apareceu um E-n "[app publicado]". Pode levar alguns segundos.
 3. Tire o botão de teste e arquive o E-n do teste: `faundr error-archive E-<n>`.
 

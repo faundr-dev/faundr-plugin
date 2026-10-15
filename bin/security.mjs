@@ -230,7 +230,7 @@ export function findSecrets(text, rel = '') {
   return out
 }
 
-const TEST_PATH = /(^|\/)(__tests__|__mocks__|tests?|spec|specs|fixtures?|mocks?|e2e|cypress|playwright|stories)(\/|$)|\.(test|spec|stories)\.[a-z]+$/i
+const TEST_PATH = /(^|\/)(__tests__|__mocks__|tests?|spec|specs|fixtures?|mocks?|e2e|cypress|playwright|stories)(\/|$)|\.(test|spec|stories)\.[a-z]+$|_test\.go$|Tests?\.(java|kt|cs)$|(^|\/)[^/]+\.Tests?\//i
 const EXAMPLE_PATH = /\.(example|sample|template|dist|defaults?)(\.[a-z]+)?$|(^|\/)examples?(\/|$)/i
 const DOC_PATH = /\.(md|mdx|txt|rst|adoc)$/i
 const ENV_FILE = /(^|\/)\.env(\.[\w.-]+)?$/i
@@ -874,13 +874,16 @@ function scanDatabase(root, files) {
 
 // ---- código (padrões perigosos, sem IA) -----------------------------------------------------
 
-const CODE_FILE = /\.(m?[jt]sx?|cjs|cts|vue|svelte|astro|py|php|dart)$/i
+const CODE_FILE = /\.(m?[jt]sx?|cjs|cts|vue|svelte|astro|py|php|dart|go|java|kt|kts|cs|cshtml|razor)$/i
 // Código das linguagens sem regras de linha (o Claude lê na revisão).
 const OTHER_CODE = /\.(go|rs|java|kts?|cs|c|cc|cpp|cxx|h|hpp|rb|swift)$/i
 const SERVER_ROUTE = /(^|\/)(app\/(.*\/)?api\/.*\/?route\.[mc]?[jt]s|pages\/api\/.*\.[mc]?[jt]sx?|src\/routes\/api\/.*\.[mc]?[jt]sx?|supabase\/functions\/[^/]+\/index\.[jt]s|functions\/.*\.[jt]s|server\/.*\.[mc]?[jt]s|api\/.*\.[mc]?[jt]s)$/i
 
 // Regras por linha: o que é quase sempre perigoso quando aparece com dado variável.
 // Cada regra: padrão da linha, exceção (se a linha tiver isto, está ok) e o texto do achado.
+// Onde as regras gerais (comando, SQL, eval, CORS) valem: Go, Java/Kotlin e C# têm as próprias em security-langs.mjs.
+const GENERAL_RULE_FILES = /\.(m?[jt]sx?|cjs|cts|vue|svelte|astro|py|php|dart)$/i
+
 const LINE_RULES = [
   {
     id: 'xss-dangerously-set-inner-html',
@@ -906,6 +909,7 @@ const LINE_RULES = [
   },
   {
     id: 'code-eval',
+    files: GENERAL_RULE_FILES,
     re: /(?<![\w.])(eval|new\s+Function)\s*\(\s*(?!['"`][^'"`$]*['"`]\s*\))/,
     severity: 'high',
     cwe: 'CWE-95',
@@ -916,6 +920,7 @@ const LINE_RULES = [
   },
   {
     id: 'command-injection',
+    files: GENERAL_RULE_FILES,
     re: /\b(exec|execSync|spawn|spawnSync)\s*\(\s*(`[^`]*\$\{|['"][^'"]*['"]\s*\+|[a-zA-Z_$][\w$.]*\s*\+)/,
     ok: /shell\s*:\s*false/,
     severity: 'high',
@@ -927,6 +932,7 @@ const LINE_RULES = [
   },
   {
     id: 'sql-injection',
+    files: GENERAL_RULE_FILES,
     re: /\b(query|execute|raw|whereRaw|orderByRaw|\$queryRawUnsafe|\$executeRawUnsafe|unsafe)\s*\(\s*`[^`]*\b(select|insert|update|delete|where|order by)\b[^`]*\$\{/i,
     severity: 'high',
     cwe: 'CWE-89',
@@ -937,6 +943,7 @@ const LINE_RULES = [
   },
   {
     id: 'cors-any-origin',
+    files: GENERAL_RULE_FILES,
     re: /Access-Control-Allow-Origin['"]?\s*[,:]\s*['"]\*['"]|\borigin\s*:\s*['"]\*['"]|\borigin\s*:\s*true\b/,
     severity: 'medium',
     cwe: 'CWE-942',

@@ -1586,8 +1586,8 @@ var require_graphology_communities_louvain = __commonJS({
           resolution: options.resolution
         };
       }
-      var fn6 = type === "undirected" ? undirectedLouvain : directedLouvain;
-      var results = fn6(detailed, graph, options);
+      var fn8 = type === "undirected" ? undirectedLouvain : directedLouvain;
+      var results = fn8(detailed, graph, options);
       var index = results.index;
       if (!detailed) {
         if (assign2) {
@@ -1613,11 +1613,11 @@ var require_graphology_communities_louvain = __commonJS({
       output.communities = index.collect();
       return output;
     }
-    var fn5 = louvain2.bind(null, false, false);
-    fn5.assign = louvain2.bind(null, true, false);
-    fn5.detailed = louvain2.bind(null, false, true);
-    fn5.defaults = DEFAULTS2;
-    module2.exports = fn5;
+    var fn7 = louvain2.bind(null, false, false);
+    fn7.assign = louvain2.bind(null, true, false);
+    fn7.detailed = louvain2.bind(null, false, true);
+    fn7.defaults = DEFAULTS2;
+    module2.exports = fn7;
   }
 });
 
@@ -4006,15 +4006,15 @@ function createEdgeIterator(graph, type) {
   };
 }
 function forEachEdgeForNode(breakable, multi, type, direction, nodeData, callback) {
-  const fn5 = multi ? forEachMulti : forEachSimple;
+  const fn7 = multi ? forEachMulti : forEachSimple;
   let found;
   if (type !== "undirected") {
     if (direction !== "out") {
-      found = fn5(breakable, nodeData.in, callback);
+      found = fn7(breakable, nodeData.in, callback);
       if (breakable && found) return found;
     }
     if (direction !== "in") {
-      found = fn5(
+      found = fn7(
         breakable,
         nodeData.out,
         callback,
@@ -4024,7 +4024,7 @@ function forEachEdgeForNode(breakable, multi, type, direction, nodeData, callbac
     }
   }
   if (type !== "directed") {
-    found = fn5(breakable, nodeData.undirected, callback);
+    found = fn7(breakable, nodeData.undirected, callback);
     if (breakable && found) return found;
   }
   return;
@@ -4053,21 +4053,21 @@ function createEdgeIteratorForNode(type, direction, nodeData) {
   return iterator;
 }
 function forEachEdgeForPath(breakable, type, multi, direction, sourceData, target, callback) {
-  const fn5 = multi ? forEachForKeyMulti : forEachForKeySimple;
+  const fn7 = multi ? forEachForKeyMulti : forEachForKeySimple;
   let found;
   if (type !== "undirected") {
     if (typeof sourceData.in !== "undefined" && direction !== "out") {
-      found = fn5(breakable, sourceData.in, target, callback);
+      found = fn7(breakable, sourceData.in, target, callback);
       if (breakable && found) return found;
     }
     if (typeof sourceData.out !== "undefined" && direction !== "in" && (direction || sourceData.key !== target)) {
-      found = fn5(breakable, sourceData.out, target, callback);
+      found = fn7(breakable, sourceData.out, target, callback);
       if (breakable && found) return found;
     }
   }
   if (type !== "directed") {
     if (typeof sourceData.undirected !== "undefined") {
-      found = fn5(breakable, sourceData.undirected, target, callback);
+      found = fn7(breakable, sourceData.undirected, target, callback);
       if (breakable && found) return found;
     }
   }
@@ -6921,10 +6921,10 @@ if (typeof Symbol !== "undefined")
 EDGE_ADD_METHODS.forEach((method) => {
   ["add", "merge", "update"].forEach((verb) => {
     const name2 = method.name(verb);
-    const fn5 = verb === "add" ? addEdge : mergeEdge;
+    const fn7 = verb === "add" ? addEdge : mergeEdge;
     if (method.generateKey) {
       Graph.prototype[name2] = function(source, target, attributes) {
-        return fn5(
+        return fn7(
           this,
           name2,
           true,
@@ -6938,7 +6938,7 @@ EDGE_ADD_METHODS.forEach((method) => {
       };
     } else {
       Graph.prototype[name2] = function(edge2, source, target, attributes) {
-        return fn5(
+        return fn7(
           this,
           name2,
           false,
@@ -7531,7 +7531,8 @@ var BUILTIN_GLOBALS = /* @__PURE__ */ new Set([
 
 // engine/src/resolve.ts
 var JS_EXT = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
-var TYPED_IMPORT_EXT = /\.(php|dart)$/;
+var TYPED_IMPORT_EXT = /\.(php|dart|java|kt|kts|cs)$/;
+var SAME_PACKAGE_EXT = /\.(java|kt|kts|cs)$/;
 function familyOf(rel) {
   const ext = path3.posix.extname(rel).toLowerCase();
   if ([".md", ".mdx", ".qmd"].includes(ext)) return "markdown";
@@ -7711,7 +7712,8 @@ function resolveMemberCall(c, extractions, ctx, methodEdges, containsTargets) {
   if (defs.length !== 1) return;
   const def = defs[0];
   const imported = ctx.importsTo.get(fileNodeId(c.sourceFile)) ?? /* @__PURE__ */ new Set();
-  const originOk = def.source_file === c.sourceFile || imported.has(def.id) || imported.has(fileNodeId(def.source_file));
+  const samePackage = SAME_PACKAGE_EXT.test(c.sourceFile) && path3.posix.dirname(def.source_file) === path3.posix.dirname(c.sourceFile);
+  const originOk = def.source_file === c.sourceFile || samePackage || imported.has(def.id) || imported.has(fileNodeId(def.source_file));
   if (!originOk) return;
   const methodId = makeId(def.id, c.callee);
   if (!ctx.byId.has(methodId) || !methodEdges.has(`${def.id}->${methodId}`)) return;
@@ -7935,7 +7937,7 @@ function disambiguateFileLabels(g) {
 }
 
 // engine/src/extract-code.ts
-import path8 from "node:path";
+import path9 from "node:path";
 
 // engine/src/parser.ts
 import fs2 from "node:fs";
@@ -9162,19 +9164,19 @@ var QueryError = class _QueryError extends Error {
     }
   }
 };
-function parseAnyPredicate(steps, index, operator, textPredicates) {
+function parseAnyPredicate(steps, index, operator2, textPredicates) {
   if (steps.length !== 3) {
     throw new Error(
-      `Wrong number of arguments to \`#${operator}\` predicate. Expected 2, got ${steps.length - 1}`
+      `Wrong number of arguments to \`#${operator2}\` predicate. Expected 2, got ${steps.length - 1}`
     );
   }
   if (!isCaptureStep(steps[1])) {
     throw new Error(
-      `First argument of \`#${operator}\` predicate must be a capture. Got "${steps[1].value}"`
+      `First argument of \`#${operator2}\` predicate must be a capture. Got "${steps[1].value}"`
     );
   }
-  const isPositive = operator === "eq?" || operator === "any-eq?";
-  const matchAll = !operator.startsWith("any-");
+  const isPositive = operator2 === "eq?" || operator2 === "any-eq?";
+  const matchAll = !operator2.startsWith("any-");
   if (isCaptureStep(steps[2])) {
     const captureName1 = steps[1].name;
     const captureName2 = steps[2].name;
@@ -9206,24 +9208,24 @@ function parseAnyPredicate(steps, index, operator, textPredicates) {
   }
 }
 __name(parseAnyPredicate, "parseAnyPredicate");
-function parseMatchPredicate(steps, index, operator, textPredicates) {
+function parseMatchPredicate(steps, index, operator2, textPredicates) {
   if (steps.length !== 3) {
     throw new Error(
-      `Wrong number of arguments to \`#${operator}\` predicate. Expected 2, got ${steps.length - 1}.`
+      `Wrong number of arguments to \`#${operator2}\` predicate. Expected 2, got ${steps.length - 1}.`
     );
   }
   if (steps[1].type !== "capture") {
     throw new Error(
-      `First argument of \`#${operator}\` predicate must be a capture. Got "${steps[1].value}".`
+      `First argument of \`#${operator2}\` predicate must be a capture. Got "${steps[1].value}".`
     );
   }
   if (steps[2].type !== "string") {
     throw new Error(
-      `Second argument of \`#${operator}\` predicate must be a string. Got @${steps[2].name}.`
+      `Second argument of \`#${operator2}\` predicate must be a string. Got @${steps[2].name}.`
     );
   }
-  const isPositive = operator === "match?" || operator === "any-match?";
-  const matchAll = !operator.startsWith("any-");
+  const isPositive = operator2 === "match?" || operator2 === "any-match?";
+  const matchAll = !operator2.startsWith("any-");
   const captureName = steps[1].name;
   const regex = new RegExp(steps[2].value);
   textPredicates[index].push((captures) => {
@@ -9239,23 +9241,23 @@ function parseMatchPredicate(steps, index, operator, textPredicates) {
   });
 }
 __name(parseMatchPredicate, "parseMatchPredicate");
-function parseAnyOfPredicate(steps, index, operator, textPredicates) {
+function parseAnyOfPredicate(steps, index, operator2, textPredicates) {
   if (steps.length < 2) {
     throw new Error(
-      `Wrong number of arguments to \`#${operator}\` predicate. Expected at least 1. Got ${steps.length - 1}.`
+      `Wrong number of arguments to \`#${operator2}\` predicate. Expected at least 1. Got ${steps.length - 1}.`
     );
   }
   if (steps[1].type !== "capture") {
     throw new Error(
-      `First argument of \`#${operator}\` predicate must be a capture. Got "${steps[1].value}".`
+      `First argument of \`#${operator2}\` predicate must be a capture. Got "${steps[1].value}".`
     );
   }
-  const isPositive = operator === "any-of?";
+  const isPositive = operator2 === "any-of?";
   const captureName = steps[1].name;
   const stringSteps = steps.slice(2);
   if (!stringSteps.every(isStringStep)) {
     throw new Error(
-      `Arguments to \`#${operator}\` predicate must be strings.".`
+      `Arguments to \`#${operator2}\` predicate must be strings.".`
     );
   }
   const values = stringSteps.map((s) => s.value);
@@ -9269,18 +9271,18 @@ function parseAnyOfPredicate(steps, index, operator, textPredicates) {
   });
 }
 __name(parseAnyOfPredicate, "parseAnyOfPredicate");
-function parseIsPredicate(steps, index, operator, assertedProperties, refutedProperties) {
+function parseIsPredicate(steps, index, operator2, assertedProperties, refutedProperties) {
   if (steps.length < 2 || steps.length > 3) {
     throw new Error(
-      `Wrong number of arguments to \`#${operator}\` predicate. Expected 1 or 2. Got ${steps.length - 1}.`
+      `Wrong number of arguments to \`#${operator2}\` predicate. Expected 1 or 2. Got ${steps.length - 1}.`
     );
   }
   if (!steps.every(isStringStep)) {
     throw new Error(
-      `Arguments to \`#${operator}\` predicate must be strings.".`
+      `Arguments to \`#${operator2}\` predicate must be strings.".`
     );
   }
-  const properties = operator === "is?" ? assertedProperties : refutedProperties;
+  const properties = operator2 === "is?" ? assertedProperties : refutedProperties;
   if (!properties[index]) properties[index] = {};
   properties[index][steps[1].value] = steps[2]?.value ?? null;
 }
@@ -9306,33 +9308,33 @@ function parsePattern(index, stepType, stepValueId, captureNames, stringValues, 
     if (steps[0].type !== "string") {
       throw new Error("Predicates must begin with a literal value");
     }
-    const operator = steps[0].value;
-    switch (operator) {
+    const operator2 = steps[0].value;
+    switch (operator2) {
       case "any-not-eq?":
       case "not-eq?":
       case "any-eq?":
       case "eq?":
-        parseAnyPredicate(steps, index, operator, textPredicates);
+        parseAnyPredicate(steps, index, operator2, textPredicates);
         break;
       case "any-not-match?":
       case "not-match?":
       case "any-match?":
       case "match?":
-        parseMatchPredicate(steps, index, operator, textPredicates);
+        parseMatchPredicate(steps, index, operator2, textPredicates);
         break;
       case "not-any-of?":
       case "any-of?":
-        parseAnyOfPredicate(steps, index, operator, textPredicates);
+        parseAnyOfPredicate(steps, index, operator2, textPredicates);
         break;
       case "is?":
       case "is-not?":
-        parseIsPredicate(steps, index, operator, assertedProperties, refutedProperties);
+        parseIsPredicate(steps, index, operator2, assertedProperties, refutedProperties);
         break;
       case "set!":
         parseSetDirective(steps, index, setProperties);
         break;
       default:
-        predicates[index].push({ operator, operands: steps.slice(1) });
+        predicates[index].push({ operator: operator2, operands: steps.slice(1) });
     }
     steps.length = 0;
   }
@@ -11920,13 +11922,177 @@ async function parse(grammar, source) {
 }
 
 // engine/src/resolve-paths.ts
+import fs4 from "node:fs";
+import path8 from "node:path";
+
+// engine/src/files.ts
+var import_ignore = __toESM(require_ignore(), 1);
 import fs3 from "node:fs";
 import path7 from "node:path";
+var SKIP_DIRS = /* @__PURE__ */ new Set([
+  "venv",
+  ".venv",
+  "node_modules",
+  "__pycache__",
+  ".git",
+  "dist",
+  "build",
+  "target",
+  "site-packages",
+  "lib64",
+  ".pytest_cache",
+  ".mypy_cache",
+  ".ruff_cache",
+  ".tox",
+  ".nox",
+  ".eggs",
+  "graphify-out",
+  "lcov-report",
+  "visual-tests",
+  "visual-test",
+  "__snapshots__",
+  "storybook-static",
+  "dist-protected",
+  ".next",
+  ".nuxt",
+  ".turbo",
+  ".angular",
+  ".idea",
+  ".cache",
+  ".parcel-cache",
+  ".svelte-kit",
+  ".terraform",
+  ".serverless",
+  ".graphify",
+  ".obsidian",
+  ".smart-env",
+  ".worktrees",
+  ".faundr",
+  ".wrangler",
+  ".output",
+  ".vinxi",
+  ".tanstack",
+  ".nitro"
+]);
+var SKIP_FILES = /* @__PURE__ */ new Set([
+  "package-lock.json",
+  "yarn.lock",
+  "pnpm-lock.yaml",
+  "Cargo.lock",
+  "poetry.lock",
+  "Gemfile.lock",
+  "composer.lock",
+  "go.sum",
+  "go.work.sum",
+  "bun.lockb"
+]);
+var GENERATED_NAME = /\.min\.(c|m)?js$|\.min\.css$|[.-]bundle\.(c|m)?js$|\.chunk\.(c|m)?js$/i;
+var GENERATED_CHECK_BYTES = 64 * 1024;
+var MAX_FILES = 5e3;
+var IGNORE_FILES = [".gitignore", ".faundrignore"];
+var MARKDOWN_EXT = /* @__PURE__ */ new Set([".md", ".mdx", ".qmd"]);
+var MAX_FILE_BYTES = 2 * 1024 * 1024;
+function isSkippedDir(name2, rel) {
+  return SKIP_DIRS.has(name2) || name2.endsWith(".egg-info") || name2.endsWith("_venv") || rel === ".claude/worktrees";
+}
+function looksGenerated(abs, size) {
+  if (size < GENERATED_CHECK_BYTES) return false;
+  const fd = fs3.openSync(abs, "r");
+  try {
+    const buf = Buffer.alloc(GENERATED_CHECK_BYTES);
+    const text = buf.subarray(0, fs3.readSync(fd, buf, 0, GENERATED_CHECK_BYTES, 0)).toString("utf8");
+    return text.length / (text.split("\n").length || 1) > 1e3;
+  } finally {
+    fs3.closeSync(fd);
+  }
+}
+function isSensitive(rel) {
+  const parts2 = rel.split("/");
+  const name2 = parts2[parts2.length - 1];
+  if (parts2.some((p) => [".ssh", ".gnupg", ".aws", ".gcloud"].includes(p))) return true;
+  if (/^\.env(\..+)?$/.test(name2) && !/\.(example|sample|template|dist)$/.test(name2)) return true;
+  if (/^\.dev\.vars/.test(name2) && !name2.endsWith(".example")) return true;
+  if (/\.(pem|key|p12|pfx|cert|crt|der|p8)$/i.test(name2)) return true;
+  if (/^id_(rsa|dsa|ecdsa|ed25519)/.test(name2)) return true;
+  return [".netrc", ".npmrc", ".pypirc", ".git-credentials", ".boto", ".pgpass", ".htpasswd"].includes(name2);
+}
+function loadRules(dirAbs, dirRel) {
+  const ig = (0, import_ignore.default)();
+  let any = false;
+  for (const f of IGNORE_FILES) {
+    try {
+      ig.add(fs3.readFileSync(path7.join(dirAbs, f), "utf8"));
+      any = true;
+    } catch {
+    }
+  }
+  return any ? { anchor: dirRel, ig } : null;
+}
+function ignored(rel, isDir, rules) {
+  let result = false;
+  for (const { anchor, ig } of rules) {
+    const sub = anchor ? rel.slice(anchor.length + 1) : rel;
+    if (!sub) continue;
+    const r = ig.test(isDir ? `${sub}/` : sub);
+    if (r.ignored) result = true;
+    else if (r.unignored) result = false;
+  }
+  return result;
+}
+function sortedEntries(dirAbs) {
+  try {
+    return fs3.readdirSync(dirAbs, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+  } catch {
+    return [];
+  }
+}
+function tooBigOrGenerated(abs, ext) {
+  try {
+    const { size } = fs3.statSync(abs);
+    if (size > MAX_FILE_BYTES) return true;
+    return !MARKDOWN_EXT.has(ext) && ext !== ".json" && looksGenerated(abs, size);
+  } catch {
+    return true;
+  }
+}
+function sourceFileOf(e, rel, abs, rules) {
+  if (!e.isFile() || SKIP_FILES.has(e.name) || GENERATED_NAME.test(e.name) || isSensitive(rel) || ignored(rel, false, rules)) return null;
+  const ext = path7.extname(e.name).toLowerCase();
+  if (tooBigOrGenerated(abs, ext)) return null;
+  if (MARKDOWN_EXT.has(ext)) return { rel, abs, kind: "markdown" };
+  if (ext === ".json") return { rel, abs, kind: "json" };
+  const lang = languageForFile(e.name);
+  return lang ? { rel, abs, kind: "code", grammar: lang.grammar } : null;
+}
+function collectFiles(root) {
+  const out2 = [];
+  function walk(dirAbs, dirRel, inherited) {
+    const own = loadRules(dirAbs, dirRel);
+    const rules = own ? [...inherited, own] : inherited;
+    for (const e of sortedEntries(dirAbs)) {
+      const rel = dirRel ? `${dirRel}/${e.name}` : e.name;
+      const abs = path7.join(dirAbs, e.name);
+      if (e.isDirectory()) {
+        if (!isSkippedDir(e.name, rel) && !ignored(rel, true, rules)) walk(abs, rel, rules);
+        continue;
+      }
+      const file = sourceFileOf(e, rel, abs, rules);
+      if (file) out2.push(file);
+    }
+  }
+  walk(root, "", []);
+  if (out2.length <= MAX_FILES) return Object.assign(out2, { dropped: 0 });
+  const order = { code: 0, markdown: 1, json: 2 };
+  const kept = [...out2].sort((a, b) => order[a.kind] - order[b.kind]).slice(0, MAX_FILES);
+  return Object.assign(kept, { dropped: out2.length - MAX_FILES });
+}
+
+// engine/src/resolve-paths.ts
 var JS_EXTS = [".ts", ".tsx", ".mts", ".cts", ".svelte", ".js", ".jsx", ".mjs", ".cjs"];
 var JS_INDEX = ["index.ts", "index.tsx", "index.svelte", "index.js", "index.jsx", "index.mjs"];
 function readJsonc(file) {
   try {
-    const text = fs3.readFileSync(file, "utf8");
+    const text = fs4.readFileSync(file, "utf8");
     const clean = text.replace(/"(?:\\.|[^"\\])*"|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (m) => m.startsWith('"') ? m : "").replace(/,(\s*[}\]])/g, "$1");
     return JSON.parse(clean);
   } catch {
@@ -11942,7 +12108,7 @@ function parsePatterns(map, base) {
       {
         prefix: star === -1 ? pattern : pattern.slice(0, star),
         suffix: star === -1 ? "" : pattern.slice(star + 1),
-        targets: targets.map((t) => path7.posix.join(base, t)),
+        targets: targets.map((t) => path8.posix.join(base, t)),
         exact: star === -1
       }
     ];
@@ -11951,22 +12117,22 @@ function parsePatterns(map, base) {
 var PathResolver = class {
   constructor(root) {
     this.root = root;
-    const tsconfig = ["tsconfig.json", "jsconfig.json"].map((f) => path7.join(root, f)).find((f) => fs3.existsSync(f));
+    const tsconfig = ["tsconfig.json", "jsconfig.json"].map((f) => path8.join(root, f)).find((f) => fs4.existsSync(f));
     this.hasTsconfig = !!tsconfig;
     if (tsconfig) {
       let cfg = readJsonc(tsconfig);
       if (typeof cfg?.extends === "string" && cfg.extends.startsWith(".")) {
-        const parent = readJsonc(path7.resolve(path7.dirname(tsconfig), cfg.extends));
+        const parent = readJsonc(path8.resolve(path8.dirname(tsconfig), cfg.extends));
         cfg = { ...parent, ...cfg, compilerOptions: { ...parent?.compilerOptions, ...cfg.compilerOptions } };
       }
       const baseUrl = cfg?.compilerOptions?.baseUrl ?? ".";
-      this.aliases = parsePatterns(cfg?.compilerOptions?.paths, path7.posix.normalize(baseUrl));
+      this.aliases = parsePatterns(cfg?.compilerOptions?.paths, path8.posix.normalize(baseUrl));
     }
-    const pkg = readJsonc(path7.join(root, "package.json"));
+    const pkg = readJsonc(path8.join(root, "package.json"));
     this.pkgImports = parsePatterns(pkg?.imports, ".");
-    const composer = readJsonc(path7.join(root, "composer.json"));
+    const composer = readJsonc(path8.join(root, "composer.json"));
     this.psr4 = Object.entries({ ...composer?.["autoload-dev"]?.["psr-4"], ...composer?.autoload?.["psr-4"] }).flatMap(([prefix, dirs]) => (Array.isArray(dirs) ? dirs : [dirs]).filter((d) => typeof d === "string").map((d) => ({ prefix, dir: d }))).sort((a, b) => b.prefix.length - a.prefix.length);
-    this.dartPackage = readText(path7.join(root, "pubspec.yaml")).match(/^name:\s*([\w-]+)/m)?.[1] ?? null;
+    this.dartPackage = readText(path8.join(root, "pubspec.yaml")).match(/^name:\s*([\w-]+)/m)?.[1] ?? null;
   }
   root;
   aliases = [];
@@ -11974,10 +12140,19 @@ var PathResolver = class {
   hasTsconfig;
   psr4 = [];
   dartPackage = null;
+  files = null;
+  goModule;
+  // Java/Kotlin (package) e C# (namespace): pacote → arquivos que o declaram e os tipos/funções de topo de cada um.
+  packages = /* @__PURE__ */ new Map();
+  /** Os arquivos do projeto (lidos uma vez, só quando um import de Go, Java, Kotlin ou C# precisa). */
+  sourceFiles() {
+    this.files ??= collectFiles(this.root).filter((f) => f.kind === "code").map((f) => f.rel);
+    return this.files;
+  }
   exists(rel) {
     if (rel.startsWith("..")) return null;
     try {
-      const st = fs3.statSync(path7.join(this.root, rel));
+      const st = fs4.statSync(path8.join(this.root, rel));
       if (st.isFile()) return "file";
       return st.isDirectory() ? "dir" : null;
     } catch {
@@ -11986,7 +12161,7 @@ var PathResolver = class {
   }
   /** Tenta um caminho relativo à raiz com as extensões e index do JS/TS. */
   tryJs(rel) {
-    rel = path7.posix.normalize(rel);
+    rel = path8.posix.normalize(rel);
     const kind = this.exists(rel);
     if (kind === "file") return rel;
     const swapped = rel.replace(/\.js$/, ".ts").replace(/\.jsx$/, ".tsx").replace(/\.mjs$/, ".mts");
@@ -12010,7 +12185,7 @@ var PathResolver = class {
   }
   /** Retorna o arquivo (relativo à raiz) ou null se for pacote externo. */
   resolveJs(raw, fromRel) {
-    if (raw.startsWith(".")) return this.tryJs(path7.posix.join(path7.posix.dirname(fromRel), raw));
+    if (raw.startsWith(".")) return this.tryJs(path8.posix.join(path8.posix.dirname(fromRel), raw));
     const viaTs = this.viaAliases(raw, this.aliases);
     if (viaTs) return viaTs;
     if (raw.startsWith("#")) {
@@ -12023,25 +12198,25 @@ var PathResolver = class {
   /** Python: `from ..a.b import x` (level = nº de pontos) ou `import a.b`. */
   resolvePython(module2, level, fromRel) {
     const probe = (baseRel) => {
-      const rel = path7.posix.normalize(baseRel);
+      const rel = path8.posix.normalize(baseRel);
       if (this.exists(`${rel}/__init__.py`) === "file") return `${rel}/__init__.py`;
       if (this.exists(`${rel}.py`) === "file") return `${rel}.py`;
       return null;
     };
     const modPath = module2.replace(/\./g, "/");
     if (level > 0) {
-      let base = path7.posix.dirname(fromRel);
-      for (let i2 = 1; i2 < level; i2++) base = path7.posix.dirname(base);
-      return modPath ? probe(path7.posix.join(base, modPath)) : probe(base);
+      let base = path8.posix.dirname(fromRel);
+      for (let i2 = 1; i2 < level; i2++) base = path8.posix.dirname(base);
+      return modPath ? probe(path8.posix.join(base, modPath)) : probe(base);
     }
-    for (const prefix of ["", "src/", path7.posix.dirname(fromRel) + "/"]) {
+    for (const prefix of ["", "src/", path8.posix.dirname(fromRel) + "/"]) {
       const hit = probe(prefix + modPath);
       if (hit) return hit;
     }
     return null;
   }
   resolveRelativeFile(raw, fromRel) {
-    const rel = path7.posix.normalize(path7.posix.join(path7.posix.dirname(fromRel), raw));
+    const rel = path8.posix.normalize(path8.posix.join(path8.posix.dirname(fromRel), raw));
     return this.exists(rel) === "file" ? rel : null;
   }
   /** PHP: classe com namespace (`App\Models\User`) → arquivo pelo PSR-4 do composer.json. */
@@ -12049,8 +12224,8 @@ var PathResolver = class {
     const name2 = fqcn.replace(/^\\/, "");
     for (const { prefix, dir: dir2 } of this.psr4) {
       if (!name2.startsWith(prefix)) continue;
-      const rel = path7.posix.join(dir2, `${name2.slice(prefix.length).replace(/\\/g, "/")}.php`);
-      if (this.exists(path7.posix.normalize(rel)) === "file") return path7.posix.normalize(rel);
+      const rel = path8.posix.join(dir2, `${name2.slice(prefix.length).replace(/\\/g, "/")}.php`);
+      if (this.exists(path8.posix.normalize(rel)) === "file") return path8.posix.normalize(rel);
     }
     return null;
   }
@@ -12061,10 +12236,58 @@ var PathResolver = class {
     if (/^dart:/.test(uri)) return null;
     return this.resolveRelativeFile(uri, fromRel);
   }
+  /** Go: import do próprio módulo (go.mod) → os arquivos .go do pacote, sem os de teste. */
+  resolveGo(importPath) {
+    this.goModule ??= readText(path8.join(this.root, "go.mod")).match(/^module\s+(\S+)/m)?.[1] ?? null;
+    const mod = this.goModule;
+    if (!mod || importPath !== mod && !importPath.startsWith(`${mod}/`)) return [];
+    const dir2 = importPath.slice(mod.length + 1);
+    return this.sourceFiles().filter((f) => path8.posix.dirname(f) === (dir2 || ".") && f.endsWith(".go") && !f.endsWith("_test.go"));
+  }
+  /**
+   * Java/Kotlin: `a.b.C`, `a.b.C.Inner`, `a.b.funcao` (Kotlin), `static a.b.C.m` e `a.b.*` → os arquivos
+   * que declaram o pacote e o nome. Pelo `package` do arquivo, não pela pasta (no Kotlin elas não precisam bater).
+   */
+  resolveJvm(fq) {
+    return this.byPackage("jvm", fq.replace(/^static\s+/, ""));
+  }
+  /** C#: `using A.B;` → os arquivos do namespace; `using static A.B.C;` e `using X = A.B.C;` → o arquivo da classe. */
+  resolveCsharp(ns) {
+    const files = this.packageIndex("cs").get(ns);
+    if (files) return files.slice(0, MAX_PACKAGE_FILES).map((f) => f.rel);
+    return this.byPackage("cs", ns);
+  }
+  byPackage(kind, fq) {
+    const index = this.packageIndex(kind);
+    if (fq.endsWith(".*")) return (index.get(fq.slice(0, -2)) ?? []).slice(0, MAX_PACKAGE_FILES).map((f) => f.rel);
+    const parts2 = fq.split(".");
+    for (let i2 = parts2.length - 1; i2 > 0; i2--) {
+      const files = index.get(parts2.slice(0, i2).join("."));
+      const hit = files?.filter((f) => f.names.has(parts2[i2])).map((f) => f.rel);
+      if (hit?.length) return hit;
+    }
+    return [];
+  }
+  packageIndex(kind) {
+    const cached = this.packages.get(kind);
+    if (cached) return cached;
+    const index = /* @__PURE__ */ new Map();
+    const ext = kind === "jvm" ? /\.(java|kt|kts)$/ : /\.cs$/;
+    for (const rel of this.sourceFiles().filter((f) => ext.test(f))) {
+      const text = readText(path8.join(this.root, rel));
+      const names = /* @__PURE__ */ new Set([path8.posix.basename(rel).replace(/\.\w+$/, ""), ...[...text.matchAll(DECLARED)].map((m) => m[1] ?? m[2])]);
+      const pkgs = kind === "jvm" ? [text.match(/^\s*package\s+([\w.]+)/m)?.[1] ?? ""] : [...text.matchAll(/^\s*namespace\s+([\w.]+)/gm)].map((m) => m[1]);
+      for (const pkg of pkgs) index.set(pkg, [...index.get(pkg) ?? [], { rel, names }]);
+    }
+    this.packages.set(kind, index);
+    return index;
+  }
 };
+var MAX_PACKAGE_FILES = 30;
+var DECLARED = /\b(?:class|interface|enum|record|struct|object|@interface|typealias)\s+(\w+)|^(?:(?:public|private|internal|inline|suspend)\s+)*fun\s+(?:<[^>]*>\s*)?(?:[\w.]+\.)?(\w+)/gm;
 function readText(file) {
   try {
-    return fs3.readFileSync(file, "utf8");
+    return fs4.readFileSync(file, "utf8");
   } catch {
     return "";
   }
@@ -12082,6 +12305,7 @@ var RATIONALE = /^(?:\/\/|#)\s*(NOTE|IMPORTANT|HACK|WHY|RATIONALE|TODO|FIXME)\s*
 var KEEP_PARENT = /* @__PURE__ */ new Set(["decorated_definition", "ERROR", "enum_body_declarations"]);
 var IDENTIFIER_CALLEES = /* @__PURE__ */ new Set(["identifier", "type_identifier", "simple_identifier", "name"]);
 var line = (n) => n.startPosition.row + 1;
+var TYPED_IMPORTS = /* @__PURE__ */ new Set(["java", "kotlin", "csharp"]);
 function span(n, body2) {
   const text = n.text;
   const at = body2 ? text.indexOf(body2.text) : -1;
@@ -12134,12 +12358,15 @@ var CodeExtractor = class {
   labelToNid = /* @__PURE__ */ new Map();
   callPairs = /* @__PURE__ */ new Set();
   indirectPairs = /* @__PURE__ */ new Set();
+  // Go: nomes locais dos pacotes do próprio módulo (`store "x/internal/db"` → store).
+  goPackages = /* @__PURE__ */ new Set();
   run(root) {
-    this.addNode(this.fileNid, path8.posix.basename(this.rel), 1);
+    this.addNode(this.fileNid, path9.posix.basename(this.rel), 1);
     this.walk(root, null);
     this.rationales(root);
     this.walkAllCalls();
     if (this.cfg.js) this.out.typeTable = this.typeTable(root);
+    if (TYPED_IMPORTS.has(this.cfg.importStyle)) this.out.typeTable = this.declaredTypes(root);
     this.markCallables();
     this.out.edges = this.localEdges();
     return this.out;
@@ -12282,6 +12509,36 @@ var CodeExtractor = class {
     const targetRel = this.resolver.resolveDart(uri, this.rel);
     this.addEdge(this.fileNid, targetRel ? fileNodeId(targetRel) : makeId("ref", uri.replace(/^package:([\w-]+).*$/, "$1")), "imports_from", n, { context: "import" });
   }
+  /** Go: import do próprio módulo (go.mod) → os arquivos do pacote; de fora → ref. */
+  importGo(n) {
+    for (const spec of n.descendantsOfType("import_spec")) {
+      const raw = spec.childForFieldName("path")?.text.replace(/["`]/g, "");
+      if (!raw) continue;
+      const targets = this.resolver.resolveGo(raw);
+      if (!targets.length) {
+        this.addEdge(this.fileNid, makeId("ref", raw), "imports", spec, { context: "import" });
+        continue;
+      }
+      this.goPackages.add(spec.childForFieldName("name")?.text ?? raw.split("/").pop());
+      for (const t of targets) this.addEdge(this.fileNid, fileNodeId(t), "imports", spec, { context: "import" });
+    }
+  }
+  /** Java/Kotlin (`import a.b.C`, `import a.b.f as g`, `import a.b.*`) e C# (`using A.B;`) → os arquivos pelo package/namespace. */
+  importTyped(n) {
+    const m = n.text.match(/^(?:global\s+)?(?:import|using)\s+(static\s+)?(?:(\w+)\s*=\s*)?([\w.]+(?:\.\*)?)(?:\s+as\s+(\w+))?/);
+    if (!m) return;
+    const [, , aliasEq, fq, aliasAs] = m;
+    const targets = this.cfg.importStyle === "csharp" ? this.resolver.resolveCsharp(fq) : this.resolver.resolveJvm(fq);
+    if (!targets.length) {
+      this.addEdge(this.fileNid, makeId("ref", fq), "imports", n, { context: "import" });
+      return;
+    }
+    const imported = fq.split(".").pop();
+    for (const t of targets) {
+      this.addEdge(this.fileNid, fileNodeId(t), "imports", n, { context: "import" });
+      if (imported !== "*") this.out.importBindings.push({ local: aliasEq ?? aliasAs ?? imported, imported, targetRel: t });
+    }
+  }
   // Demais linguagens: o import vira referência a um módulo externo (stub criado no build).
   importOther(n) {
     const { rel, fileNid } = this;
@@ -12292,12 +12549,6 @@ var CodeExtractor = class {
       raw = p.text.replace(/^[<"]|[>"]$/g, "");
       const local = p.type === "string_literal" ? this.resolver.resolveRelativeFile(raw, rel) : null;
       this.addEdge(fileNid, local ? fileNodeId(local) : makeId("ref", raw), "imports", n, { context: "import" });
-      return;
-    }
-    if (this.cfg.importStyle === "go") {
-      for (const s of n.descendantsOfType("interpreted_string_literal")) {
-        this.addEdge(fileNid, makeId("ref", s.text.replace(/"/g, "")), "imports", s, { context: "import" });
-      }
       return;
     }
     raw = n.text.replace(/^(import|using|use|namespace)\s+(static\s+)?/, "").replace(/[;{].*$/s, "").replace(/\s+as\s+\w+$/, "").trim();
@@ -12410,6 +12661,14 @@ var CodeExtractor = class {
       this.importDart(n);
       return true;
     }
+    if (this.cfg.importStyle === "go") {
+      this.importGo(n);
+      return true;
+    }
+    if (TYPED_IMPORTS.has(this.cfg.importStyle)) {
+      this.importTyped(n);
+      return true;
+    }
     if (this.cfg.importStyle !== "js") {
       this.importOther(n);
       return true;
@@ -12481,7 +12740,7 @@ var CodeExtractor = class {
   calleeNode(n) {
     const cfg = this.cfg;
     if (n.type === "new_expression") return n.childForFieldName("constructor");
-    if (cfg.name === "java" && n.type === "object_creation_expression") return n.childForFieldName("type");
+    if ((cfg.name === "java" || cfg.name === "csharp") && n.type === "object_creation_expression") return n.childForFieldName("type");
     if (cfg.callFunctionField) return n.childForFieldName(cfg.callFunctionField);
     return n.namedChildren[0];
   }
@@ -12493,28 +12752,33 @@ var CodeExtractor = class {
     }
     if (this.cfg.name === "dart") return dartCallee(n);
     if (this.cfg.name === "php") return phpCallee(n);
-    const fn5 = this.calleeNode(n);
-    if (!fn5) return null;
+    const c = this.genericCallee(n);
+    if (c?.member && c.receiver && this.goPackages.has(c.receiver)) return { name: c.name, member: false };
+    return c;
+  }
+  genericCallee(n) {
+    const fn7 = this.calleeNode(n);
+    if (!fn7) return null;
     if (this.cfg.name === "java" && n.type === "method_invocation") {
       const obj = n.childForFieldName("object");
-      return { name: fn5.text, member: !!obj, receiver: obj?.text };
+      return { name: fn7.text, member: !!obj, receiver: obj?.text };
     }
-    if (IDENTIFIER_CALLEES.has(fn5.type)) return { name: fn5.text, member: false };
-    if (this.cfg.accessorTypes.has(fn5.type)) return this.accessorCallee(fn5);
+    if (IDENTIFIER_CALLEES.has(fn7.type)) return { name: fn7.text, member: false };
+    if (this.cfg.accessorTypes.has(fn7.type)) return this.accessorCallee(fn7);
     return null;
   }
   /** `obj.metodo()`, `this.campo.metodo()`, `Tipo::new()`. */
-  accessorCallee(fn5) {
+  accessorCallee(fn7) {
     const cfg = this.cfg;
-    const prop = cfg.accessorField ? fn5.childForFieldName(cfg.accessorField) : fn5.namedChildren[fn5.namedChildCount - 1];
-    const obj = cfg.accessorObjectField ? fn5.childForFieldName(cfg.accessorObjectField) : fn5.namedChildren[0];
-    const name2 = (prop ?? fn5.namedChildren[fn5.namedChildCount - 1])?.text.replace(/^\./, "");
+    const prop = cfg.accessorField ? fn7.childForFieldName(cfg.accessorField) : fn7.namedChildren[fn7.namedChildCount - 1];
+    const obj = cfg.accessorObjectField ? fn7.childForFieldName(cfg.accessorObjectField) : fn7.namedChildren[0];
+    const name2 = (prop ?? fn7.namedChildren[fn7.namedChildCount - 1])?.text.replace(/^\./, "");
     if (!name2) return null;
     if (obj?.type === "member_expression" && obj.childForFieldName("object")?.type === "this") {
       return { name: name2, member: true, receiver: obj.childForFieldName("property")?.text, thisField: true };
     }
-    if (fn5.type === "scoped_identifier" || fn5.type === "qualified_identifier") {
-      const path17 = fn5.childForFieldName("path") ?? fn5.childForFieldName("scope");
+    if (fn7.type === "scoped_identifier" || fn7.type === "qualified_identifier") {
+      const path17 = fn7.childForFieldName("path") ?? fn7.childForFieldName("scope");
       return { name: name2, member: true, receiver: path17?.text };
     }
     return { name: name2, member: true, receiver: obj?.type === "identifier" || obj?.type === "this" || obj?.type === "self" ? obj.text : obj?.text.slice(0, 40) };
@@ -12618,6 +12882,37 @@ var CodeExtractor = class {
     }
     return table;
   }
+  /** Java, Kotlin e C#: `User u`, `u: Repo`, `var x = new User()`, `val y = Repo()` → tipo do receptor para `u.metodo()`. */
+  declaredTypes(root) {
+    const table = {};
+    const set = (name2, type) => {
+      const t = type?.replace(/<[\s\S]*$/, "").replace(/\?$/, "").split(".").pop();
+      if (name2 && t && /^[A-Z]\w*$/.test(t)) table[name2] ??= t;
+    };
+    const created = (v) => {
+      if (v?.type === "object_creation_expression") return v.childForFieldName("type")?.text;
+      const callee2 = v?.type === "call_expression" ? v.namedChildren[0] : null;
+      return callee2?.type === "simple_identifier" ? callee2.text : void 0;
+    };
+    for (const d of root.descendantsOfType(["formal_parameter", "parameter", "local_variable_declaration", "field_declaration", "variable_declaration"])) {
+      if (this.cfg.name === "kotlin") {
+        const ty2 = d.namedChildren.find((c) => c.type === "user_type" || c.type === "nullable_type")?.text;
+        set(d.namedChildren.find((c) => c.type === "simple_identifier")?.text, ty2 ?? (d.type === "variable_declaration" ? created(d.nextNamedSibling) : void 0));
+        continue;
+      }
+      const ty = d.childForFieldName("type");
+      if (d.type === "formal_parameter" || d.type === "parameter") {
+        set(d.childForFieldName("name")?.text, ty?.text);
+        continue;
+      }
+      for (const v of d.namedChildren.filter((c) => c.type === "variable_declarator")) {
+        const name2 = (v.childForFieldName("name") ?? v.namedChildren.find((c) => c.type === "identifier"))?.text;
+        const value = v.childForFieldName("value") ?? v.namedChildren.find((c) => c.type === "equals_value_clause")?.namedChildren[0];
+        set(name2, ty && ty.text !== "var" ? ty.text : created(value));
+      }
+    }
+    return table;
+  }
   markCallables() {
     for (const nd of this.nodes) {
       if (this.callable.has(nd.id)) nd._callable = true;
@@ -12650,8 +12945,8 @@ function dartCallee(n) {
 }
 function phpCallee(n) {
   if (n.type === "function_call_expression") {
-    const fn5 = n.childForFieldName("function");
-    return fn5 && (fn5.type === "name" || fn5.type === "qualified_name") ? { name: fn5.text.split("\\").pop(), member: false } : null;
+    const fn7 = n.childForFieldName("function");
+    return fn7 && (fn7.type === "name" || fn7.type === "qualified_name") ? { name: fn7.text.split("\\").pop(), member: false } : null;
   }
   if (n.type === "object_creation_expression") {
     const cls = n.namedChildren.find((c) => c.type === "name" || c.type === "qualified_name");
@@ -12675,8 +12970,8 @@ function phpUseNames(n) {
 }
 
 // engine/src/extract-docs.ts
-import fs4 from "node:fs";
-import path9 from "node:path";
+import fs5 from "node:fs";
+import path10 from "node:path";
 var INLINE_LINK = /(?<!!)\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+[^)]*)?\)/g;
 var REF_DEF = /^\s{0,3}\[[^\]]+\]:\s*<?([^\s>]+)>?/;
 var WIKILINK = /(?<!!)\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]/g;
@@ -12691,12 +12986,12 @@ function resolveLink(raw, rel, root, wiki, allDocs) {
     target = decodeURIComponent(target);
   } catch {
   }
-  if (!path9.posix.extname(target)) target += ".md";
-  if (!DOC_EXTS.has(path9.posix.extname(target).toLowerCase())) return null;
-  const candidate = path9.posix.normalize(path9.posix.join(path9.posix.dirname(rel), target));
-  if (!candidate.startsWith("..") && fs4.existsSync(path9.join(root, candidate))) return candidate;
+  if (!path10.posix.extname(target)) target += ".md";
+  if (!DOC_EXTS.has(path10.posix.extname(target).toLowerCase())) return null;
+  const candidate = path10.posix.normalize(path10.posix.join(path10.posix.dirname(rel), target));
+  if (!candidate.startsWith("..") && fs5.existsSync(path10.join(root, candidate))) return candidate;
   if (wiki) {
-    const base = path9.posix.basename(target).toLowerCase();
+    const base = path10.posix.basename(target).toLowerCase();
     const hits = allDocs.filter((d) => d.toLowerCase().endsWith(`/${base}`) || d.toLowerCase() === base);
     hits.sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b));
     return hits[0] ?? null;
@@ -12707,7 +13002,7 @@ function extractMarkdown(rel, source, root, allDocs) {
   const stem2 = fileStem(rel);
   const fileNid = fileNodeId(rel);
   const nodes = [
-    { id: fileNid, label: path9.posix.basename(rel), file_type: "document", source_file: rel, source_location: "L1", node_kind: "page" }
+    { id: fileNid, label: path10.posix.basename(rel), file_type: "document", source_file: rel, source_location: "L1", node_kind: "page" }
   ];
   const edges = [];
   const seen = /* @__PURE__ */ new Set([fileNid]);
@@ -12797,7 +13092,7 @@ var CONFIG_KEYS = /* @__PURE__ */ new Set([
 ]);
 var DEP_KEYS = /* @__PURE__ */ new Set(["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"]);
 function extractJson(rel, source) {
-  const name2 = path9.posix.basename(rel);
+  const name2 = path10.posix.basename(rel);
   if (source.length > 1024 * 1024) return null;
   let data;
   try {
@@ -12844,168 +13139,6 @@ function extractJson(rel, source) {
   };
   walk(data, fileNid, null, 0);
   return { nodes, edges, rawCalls: [] };
-}
-
-// engine/src/files.ts
-var import_ignore = __toESM(require_ignore(), 1);
-import fs5 from "node:fs";
-import path10 from "node:path";
-var SKIP_DIRS = /* @__PURE__ */ new Set([
-  "venv",
-  ".venv",
-  "node_modules",
-  "__pycache__",
-  ".git",
-  "dist",
-  "build",
-  "target",
-  "site-packages",
-  "lib64",
-  ".pytest_cache",
-  ".mypy_cache",
-  ".ruff_cache",
-  ".tox",
-  ".nox",
-  ".eggs",
-  "graphify-out",
-  "lcov-report",
-  "visual-tests",
-  "visual-test",
-  "__snapshots__",
-  "storybook-static",
-  "dist-protected",
-  ".next",
-  ".nuxt",
-  ".turbo",
-  ".angular",
-  ".idea",
-  ".cache",
-  ".parcel-cache",
-  ".svelte-kit",
-  ".terraform",
-  ".serverless",
-  ".graphify",
-  ".obsidian",
-  ".smart-env",
-  ".worktrees",
-  ".faundr",
-  ".wrangler",
-  ".output",
-  ".vinxi",
-  ".tanstack",
-  ".nitro"
-]);
-var SKIP_FILES = /* @__PURE__ */ new Set([
-  "package-lock.json",
-  "yarn.lock",
-  "pnpm-lock.yaml",
-  "Cargo.lock",
-  "poetry.lock",
-  "Gemfile.lock",
-  "composer.lock",
-  "go.sum",
-  "go.work.sum",
-  "bun.lockb"
-]);
-var GENERATED_NAME = /\.min\.(c|m)?js$|\.min\.css$|[.-]bundle\.(c|m)?js$|\.chunk\.(c|m)?js$/i;
-var GENERATED_CHECK_BYTES = 64 * 1024;
-var MAX_FILES = 5e3;
-var IGNORE_FILES = [".gitignore", ".faundrignore"];
-var MARKDOWN_EXT = /* @__PURE__ */ new Set([".md", ".mdx", ".qmd"]);
-var MAX_FILE_BYTES = 2 * 1024 * 1024;
-function isSkippedDir(name2, rel) {
-  return SKIP_DIRS.has(name2) || name2.endsWith(".egg-info") || name2.endsWith("_venv") || rel === ".claude/worktrees";
-}
-function looksGenerated(abs, size) {
-  if (size < GENERATED_CHECK_BYTES) return false;
-  const fd = fs5.openSync(abs, "r");
-  try {
-    const buf = Buffer.alloc(GENERATED_CHECK_BYTES);
-    const text = buf.subarray(0, fs5.readSync(fd, buf, 0, GENERATED_CHECK_BYTES, 0)).toString("utf8");
-    return text.length / (text.split("\n").length || 1) > 1e3;
-  } finally {
-    fs5.closeSync(fd);
-  }
-}
-function isSensitive(rel) {
-  const parts2 = rel.split("/");
-  const name2 = parts2[parts2.length - 1];
-  if (parts2.some((p) => [".ssh", ".gnupg", ".aws", ".gcloud"].includes(p))) return true;
-  if (/^\.env(\..+)?$/.test(name2) && !/\.(example|sample|template|dist)$/.test(name2)) return true;
-  if (/^\.dev\.vars/.test(name2) && !name2.endsWith(".example")) return true;
-  if (/\.(pem|key|p12|pfx|cert|crt|der|p8)$/i.test(name2)) return true;
-  if (/^id_(rsa|dsa|ecdsa|ed25519)/.test(name2)) return true;
-  return [".netrc", ".npmrc", ".pypirc", ".git-credentials", ".boto", ".pgpass", ".htpasswd"].includes(name2);
-}
-function loadRules(dirAbs, dirRel) {
-  const ig = (0, import_ignore.default)();
-  let any = false;
-  for (const f of IGNORE_FILES) {
-    try {
-      ig.add(fs5.readFileSync(path10.join(dirAbs, f), "utf8"));
-      any = true;
-    } catch {
-    }
-  }
-  return any ? { anchor: dirRel, ig } : null;
-}
-function ignored(rel, isDir, rules) {
-  let result = false;
-  for (const { anchor, ig } of rules) {
-    const sub = anchor ? rel.slice(anchor.length + 1) : rel;
-    if (!sub) continue;
-    const r = ig.test(isDir ? `${sub}/` : sub);
-    if (r.ignored) result = true;
-    else if (r.unignored) result = false;
-  }
-  return result;
-}
-function sortedEntries(dirAbs) {
-  try {
-    return fs5.readdirSync(dirAbs, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
-  } catch {
-    return [];
-  }
-}
-function tooBigOrGenerated(abs, ext) {
-  try {
-    const { size } = fs5.statSync(abs);
-    if (size > MAX_FILE_BYTES) return true;
-    return !MARKDOWN_EXT.has(ext) && ext !== ".json" && looksGenerated(abs, size);
-  } catch {
-    return true;
-  }
-}
-function sourceFileOf(e, rel, abs, rules) {
-  if (!e.isFile() || SKIP_FILES.has(e.name) || GENERATED_NAME.test(e.name) || isSensitive(rel) || ignored(rel, false, rules)) return null;
-  const ext = path10.extname(e.name).toLowerCase();
-  if (tooBigOrGenerated(abs, ext)) return null;
-  if (MARKDOWN_EXT.has(ext)) return { rel, abs, kind: "markdown" };
-  if (ext === ".json") return { rel, abs, kind: "json" };
-  const lang = languageForFile(e.name);
-  return lang ? { rel, abs, kind: "code", grammar: lang.grammar } : null;
-}
-function collectFiles(root) {
-  const out2 = [];
-  function walk(dirAbs, dirRel, inherited) {
-    const own = loadRules(dirAbs, dirRel);
-    const rules = own ? [...inherited, own] : inherited;
-    for (const e of sortedEntries(dirAbs)) {
-      const rel = dirRel ? `${dirRel}/${e.name}` : e.name;
-      const abs = path10.join(dirAbs, e.name);
-      if (e.isDirectory()) {
-        if (!isSkippedDir(e.name, rel) && !ignored(rel, true, rules)) walk(abs, rel, rules);
-        continue;
-      }
-      const file = sourceFileOf(e, rel, abs, rules);
-      if (file) out2.push(file);
-    }
-  }
-  walk(root, "", []);
-  if (out2.length <= MAX_FILES) return Object.assign(out2, { dropped: 0 });
-  const order = { code: 0, markdown: 1, json: 2 };
-  const kept = [...out2].sort((a, b) => order[a.kind] - order[b.kind]).slice(0, MAX_FILES);
-  return Object.assign(kept, { dropped: out2.length - MAX_FILES });
 }
 
 // engine/src/cache.ts
@@ -13692,8 +13825,212 @@ function testCall(node, add) {
   if (/Future\.delayed\s*\(|\bsleep\s*\(/.test(node.text)) add("testes/espera-fixa", node, { call: "Future.delayed" });
 }
 
+// engine/src/quality-go.ts
+var BRANCHES2 = /* @__PURE__ */ new Set(["if_statement", "for_statement", "expression_case", "type_case", "communication_case"]);
+var NESTING2 = /* @__PURE__ */ new Set(["if_statement", "for_statement", "expression_switch_statement", "type_switch_statement", "select_statement"]);
+var FUNCTIONS2 = /* @__PURE__ */ new Set(["func_literal"]);
+var LOG_ONLY = /^(log\.(Print|Println|Printf)|fmt\.(Print|Println|Printf|Fprint\w*)|slog\.\w+|\w*[lL]og(ger)?\.\w+|println|print)\s*\(/;
+var CHECKS2 = /\b\w+\.(Error|Errorf|Fatal|Fatalf|Fail|FailNow)\s*\(|\b(assert|require)\.\w+\s*\(|\bExpect\s*\(|\bΩ\s*\(/;
+var HELPER = /\w\(\s*t\s*[,)]|,\s*t\s*\)/;
+var ZERO = /^(nil|false|0|""|``|\w+\{\})$/;
+var statements2 = (block) => (block?.namedChildren ?? []).filter((n) => n.type !== "comment");
+var hasComment2 = (block) => (block?.namedChildren ?? []).some((n) => n.type === "comment");
+async function analyzeGo(source, { test = false } = {}) {
+  const tree = await parse("go", source);
+  const hits = [];
+  const functions = [];
+  const add = (rule, node, ctx) => hits.push({ rule, line: node.startPosition.row + 1, ctx: { ...ctx, lang: "go" } });
+  const isMain = tree.rootNode.namedChildren.find((c) => c.type === "package_clause")?.text.trim() === "package main";
+  const visit = (node) => {
+    const t = node.type;
+    if (test) {
+      if (t === "function_declaration" && /^Test[A-Z_]?/.test(node.childForFieldName("name")?.text ?? "")) testFunction(node, add);
+    } else {
+      if (t === "if_statement") errCheck(node, add);
+      else if (t === "expression_statement") statement(node, isMain, add);
+      if (t === "function_declaration" || t === "method_declaration") fn2(node, add, functions);
+    }
+    for (const child of node.namedChildren) visit(child);
+  };
+  visit(tree.rootNode);
+  commentedCode(tree.rootNode, source.split("\n"), hits, { lang: "go" });
+  const module2 = { imports: [], exports: [], commonjs: false, lang: "go" };
+  tree.delete();
+  return { hits, functions, module: module2 };
+}
+function statement(node, isMain, add) {
+  const text = node.text;
+  const builtin = text.match(/^(println|print)\s*\(/);
+  if (builtin) return add("limpeza/print-esquecido", node, { call: `${builtin[1]}()` });
+  const fmt = text.match(/^fmt\.(Print|Println|Printf)\s*\(/);
+  if (fmt && !isMain) return add("limpeza/print-esquecido", node, { call: `fmt.${fmt[1]}()` });
+  if (/^runtime\.Breakpoint\s*\(/.test(text)) add("limpeza/debugger", node, { call: "runtime.Breakpoint()" });
+}
+function errCheck(node, add) {
+  const cond = node.childForFieldName("condition");
+  if (cond?.type !== "binary_expression" || !/^\w*[eE]rr\w*\s*!=\s*nil$/.test(cond.text)) return;
+  const body2 = node.childForFieldName("consequence");
+  const list = statements2(body2);
+  if (!list.length) return hasComment2(body2) ? void 0 : add("falha/catch-vazio", node);
+  if (list.every((s) => s.type === "expression_statement" && LOG_ONLY.test(s.text))) return add("falha/catch-so-loga", node);
+  const ret = list.length === 1 && list[0].type === "return_statement" ? list[0] : null;
+  const values = ret?.namedChildren[0]?.namedChildren ?? [];
+  if (ret && values.length && values.every((v) => ZERO.test(v.text)) && !hasComment2(body2)) add("falha/catch-devolve-nulo", node);
+}
+function fn2(node, add, functions) {
+  const body2 = node.childForFieldName("body");
+  if (!body2) return;
+  const metrics = measureBody(body2, {
+    functions: FUNCTIONS2,
+    branch: (c) => BRANCHES2.has(c.type) || c.type === "binary_expression" && /^(&&|\|\|)$/.test(c.childForFieldName("operator")?.text ?? ""),
+    nests: (c) => NESTING2.has(c.type)
+  });
+  recordFunction(node, node.childForFieldName("name")?.text ?? "(an\xF4nima)", metrics, add, functions);
+}
+function testFunction(node, add) {
+  const name2 = node.childForFieldName("name")?.text ?? "Test";
+  const body2 = node.childForFieldName("body")?.text ?? "";
+  if (/\bt\.Skip(Now|f)?\s*\(/.test(body2)) return add("testes/pulado", node, { call: "t.Skip()" });
+  if (!CHECKS2.test(body2) && !HELPER.test(body2)) add("testes/sem-conferencia", node, { name: name2.slice(0, 80) });
+  if (/\btime\.Sleep\s*\(/.test(body2)) add("testes/espera-fixa", node, { call: "time.Sleep" });
+}
+
+// engine/src/quality-java.ts
+var LOGGER = /^(\w*[lL]og(ger)?|LOG(GER)?|_logger|Log|Timber|Trace|Debug)\.\w+\s*\(/;
+var operator = (n) => n.childForFieldName("operator")?.text ?? n.children.find((c) => !c.isNamed)?.text ?? "";
+var LANGS = {
+  java: {
+    grammar: "java",
+    branches: /* @__PURE__ */ new Set(["if_statement", "for_statement", "enhanced_for_statement", "while_statement", "do_statement", "switch_block_statement_group", "switch_rule", "catch_clause", "ternary_expression"]),
+    logical: (n) => n.type === "binary_expression" && /^(&&|\|\|)$/.test(operator(n)),
+    nesting: /* @__PURE__ */ new Set(["if_statement", "for_statement", "enhanced_for_statement", "while_statement", "do_statement", "switch_expression", "try_statement", "try_with_resources_statement"]),
+    inner: /* @__PURE__ */ new Set(["lambda_expression", "method_declaration", "constructor_declaration", "class_body"]),
+    functions: /* @__PURE__ */ new Set(["method_declaration", "constructor_declaration"]),
+    catch: "catch_clause",
+    ternary: "ternary_expression",
+    print: /^System\.(out|err)\.(print|println|printf)\s*\(/,
+    halt: null,
+    logOnly: /^(System\.(out|err)\.\w+|\w+\.printStackTrace)\s*\(/,
+    emptyReturn: /^return\s*(null|false|0|""|Collections\.empty\w*\(\)|List\.of\(\)|Optional\.empty\(\))?\s*;$/,
+    main: /\bstatic\s+void\s+main\s*\(/,
+    testMark: /@(Test|ParameterizedTest|RepeatedTest)\b/,
+    skipMark: /@(Disabled|Ignore)\b/,
+    checks: /\b(assert\w*|verify\w*|fail|expect\w*)\s*\(|assertThat|\.should\w*\(/,
+    sleep: /\bThread\.sleep\s*\(/
+  },
+  kotlin: {
+    grammar: "kotlin",
+    branches: /* @__PURE__ */ new Set(["if_expression", "for_statement", "while_statement", "do_while_statement", "when_entry", "catch_block", "conjunction_expression", "disjunction_expression", "elvis_expression"]),
+    logical: () => false,
+    nesting: /* @__PURE__ */ new Set(["if_expression", "for_statement", "while_statement", "do_while_statement", "when_expression", "try_expression"]),
+    inner: /* @__PURE__ */ new Set(["lambda_literal", "anonymous_function", "function_declaration", "class_body"]),
+    functions: /* @__PURE__ */ new Set(["function_declaration"]),
+    catch: "catch_block",
+    ternary: null,
+    print: /^(println|print)\s*\(/,
+    halt: null,
+    logOnly: /^(println|print|\w+\.printStackTrace)\s*\(/,
+    emptyReturn: /^(return(@\w+)?\s*)?(null|false|0|""|emptyList\(\)|emptyMap\(\)|listOf\(\))$/,
+    main: /^\s*fun\s+main\s*\(/m,
+    testMark: /@(Test|ParameterizedTest)\b/,
+    skipMark: /@(Disabled|Ignore)\b/,
+    checks: /\b(assert\w*|verify\w*|fail|expect\w*)\s*[({]|\bshould\w*\b|assertThat/,
+    sleep: /\bThread\.sleep\s*\(/
+  },
+  csharp: {
+    grammar: "c_sharp",
+    branches: /* @__PURE__ */ new Set(["if_statement", "for_statement", "for_each_statement", "while_statement", "do_statement", "switch_section", "switch_expression_arm", "catch_clause", "conditional_expression"]),
+    logical: (n) => n.type === "binary_expression" && /^(&&|\|\||\?\?)$/.test(operator(n)),
+    nesting: /* @__PURE__ */ new Set(["if_statement", "for_statement", "for_each_statement", "while_statement", "do_statement", "switch_statement", "try_statement"]),
+    inner: /* @__PURE__ */ new Set(["lambda_expression", "anonymous_method_expression", "local_function_statement", "method_declaration"]),
+    functions: /* @__PURE__ */ new Set(["method_declaration", "constructor_declaration", "local_function_statement"]),
+    catch: "catch_clause",
+    ternary: "conditional_expression",
+    print: /^Console\.(Write|WriteLine)\s*\(/,
+    halt: /^(System\.Diagnostics\.)?Debugger\.(Break|Launch)\s*\(/,
+    logOnly: /^(Console\.\w+|Debug\.\w+|Trace\.\w+)\s*\(/,
+    emptyReturn: /^return\s*(null|false|default|0|""|string\.Empty|Array\.Empty<[^>]*>\(\))?\s*;$/,
+    main: /\bstatic\s+(async\s+)?(void|int|Task(<int>)?)\s+Main\s*\(/,
+    testMark: /\[\s*(Fact|Theory|Test|TestMethod|TestCase)\b/,
+    skipMark: /\[\s*(Fact|Theory)\s*\(\s*Skip\s*=|\[\s*(Ignore|Explicit)\b/,
+    checks: /\bAssert\.\w+\s*\(|\.Should\w*\(|\.Verify\w*\(|\bExpect\s*\(|Assert\w*\s*\(/,
+    sleep: /\b(Thread\.Sleep|Task\.Delay)\s*\(/
+  }
+};
+var COMMENTS = /* @__PURE__ */ new Set(["comment", "line_comment", "block_comment", "multiline_comment"]);
+async function analyzeTyped(lang, source, { test = false } = {}) {
+  const rules = LANGS[lang];
+  const tree = await parse(rules.grammar, source);
+  const hits = [];
+  const functions = [];
+  const add = (rule, node, ctx) => hits.push({ rule, line: node.startPosition.row + 1, ctx: { ...ctx, lang } });
+  const isMain = rules.main.test(source) || tree.rootNode.namedChildren.some((c) => c.type === "global_statement");
+  const visit = (node) => {
+    const t = node.type;
+    if (test) {
+      if (rules.functions.has(t) && rules.testMark.test(annotations(node))) testMethod(node, rules, add);
+    } else {
+      if (t === rules.catch) catchClause(node, rules, add);
+      else if (isStatement(node)) statement2(node, rules, isMain, add);
+      else if (t === rules.ternary && node.parent?.type !== t && node.namedChildren.some((c) => c.type === t)) add("complexidade/ternario-aninhado", node);
+      if (rules.functions.has(t)) fn3(node, rules, add, functions);
+    }
+    for (const child of node.namedChildren) visit(child);
+  };
+  visit(tree.rootNode);
+  commentedCode(tree.rootNode, source.split("\n"), hits, { lang });
+  const module2 = { imports: [], exports: [], commonjs: false, lang };
+  tree.delete();
+  return { hits, functions, module: module2 };
+}
+var isStatement = (n) => n.type === "expression_statement" || n.type === "call_expression" && n.parent?.type === "statements";
+function statement2(node, rules, isMain, add) {
+  const text = node.text;
+  const print = text.match(rules.print);
+  if (print && !isMain) return add("limpeza/print-esquecido", node, { call: `${print[0].replace(/\s*\($/, "")}()` });
+  const halt = rules.halt && text.match(rules.halt);
+  if (halt) add("limpeza/debugger", node, { call: `${halt[0].replace(/\s*\($/, "")}()` });
+}
+function catchBody(node) {
+  const block = node.childForFieldName("body") ?? node.namedChildren.find((c) => c.type === "statements") ?? null;
+  const items = block?.type === "statements" && !block.namedChildCount && block.text.trim() ? [block] : block?.namedChildren ?? [];
+  const comment2 = items.some((c) => COMMENTS.has(c.type)) || node.namedChildren.some((c) => COMMENTS.has(c.type));
+  return { list: items.filter((c) => !COMMENTS.has(c.type)), comment: comment2 };
+}
+function catchClause(node, rules, add) {
+  const { list, comment: comment2 } = catchBody(node);
+  if (!list.length) return comment2 ? void 0 : add("falha/catch-vazio", node);
+  const logs = (s) => rules.logOnly.test(s.text.trim()) || LOGGER.test(s.text.trim());
+  if (list.every((s) => (isStatement(s) || s.type === "call_expression") && logs(s))) return add("falha/catch-so-loga", node);
+  if (list.length === 1 && rules.emptyReturn.test(list[0].text.trim()) && !comment2) add("falha/catch-devolve-nulo", node);
+}
+function nameAndBody(node) {
+  const name2 = node.childForFieldName("name")?.text ?? node.namedChildren.find((c) => c.type === "simple_identifier")?.text ?? "(an\xF4nima)";
+  const body2 = node.childForFieldName("body") ?? node.namedChildren.find((c) => c.type === "function_body") ?? null;
+  return { name: name2, body: body2 };
+}
+function fn3(node, rules, add, functions) {
+  const { name: name2, body: body2 } = nameAndBody(node);
+  if (!body2) return;
+  const metrics = measureBody(body2, { functions: rules.inner, branch: (c) => rules.branches.has(c.type) || rules.logical(c), nests: (c) => rules.nesting.has(c.type) });
+  recordFunction(node, name2, metrics, add, functions);
+}
+function annotations(node) {
+  return node.namedChildren.filter((c) => c.type === "modifiers" || c.type === "attribute_list").map((c) => c.text).join(" ");
+}
+function testMethod(node, rules, add) {
+  const { name: name2, body: body2 } = nameAndBody(node);
+  const marks = annotations(node);
+  const text = body2?.text ?? "";
+  const skip = marks.match(rules.skipMark);
+  if (skip) return add("testes/pulado", node, { call: skip[0].replace(/^\[\s*/, "").replace(/\s*\(.*$|\s*=$/, "") });
+  if (!rules.checks.test(text) && !/expected\s*=/.test(marks)) add("testes/sem-conferencia", node, { name: name2.slice(0, 80) });
+  const sleep = text.match(rules.sleep);
+  if (sleep) add("testes/espera-fixa", node, { call: sleep[1] ?? sleep[0].replace(/\s*\($/, "") });
+}
+
 // engine/src/quality-php.ts
-var BRANCHES2 = /* @__PURE__ */ new Set([
+var BRANCHES3 = /* @__PURE__ */ new Set([
   "if_statement",
   "else_if_clause",
   "for_statement",
@@ -13706,14 +14043,14 @@ var BRANCHES2 = /* @__PURE__ */ new Set([
   "match_conditional_expression"
 ]);
 var LOGICAL = /^(&&|\|\||and|or|\?\?)$/i;
-var NESTING2 = /* @__PURE__ */ new Set(["if_statement", "for_statement", "foreach_statement", "while_statement", "do_statement", "switch_statement", "try_statement", "match_expression"]);
-var FUNCTIONS2 = /* @__PURE__ */ new Set(["anonymous_function_creation_expression", "anonymous_function", "arrow_function", "function_definition", "method_declaration"]);
+var NESTING3 = /* @__PURE__ */ new Set(["if_statement", "for_statement", "foreach_statement", "while_statement", "do_statement", "switch_statement", "try_statement", "match_expression"]);
+var FUNCTIONS3 = /* @__PURE__ */ new Set(["anonymous_function_creation_expression", "anonymous_function", "arrow_function", "function_definition", "method_declaration"]);
 var DUMP = /* @__PURE__ */ new Set(["var_dump", "print_r", "dump", "var_export"]);
 var HALT = /* @__PURE__ */ new Set(["dd", "ddd", "xdebug_break"]);
-var LOG_ONLY = /^(echo\b|print\b|error_log\s*\(|var_dump\s*\(|print_r\s*\(|dump\s*\()/;
-var CHECKS2 = /\$this->(assert|expect)\w*\(|\bexpect\s*\(|\bself::assert\w*\(|->assert\w*\(|\bassert\w*\s*\(/;
-var statements2 = (block) => (block?.namedChildren ?? []).filter((n) => n.type !== "comment");
-var hasComment2 = (block) => (block?.namedChildren ?? []).some((n) => n.type === "comment");
+var LOG_ONLY2 = /^(echo\b|print\b|error_log\s*\(|var_dump\s*\(|print_r\s*\(|dump\s*\()/;
+var CHECKS3 = /\$this->(assert|expect)\w*\(|\bexpect\s*\(|\bself::assert\w*\(|->assert\w*\(|\bassert\w*\s*\(/;
+var statements3 = (block) => (block?.namedChildren ?? []).filter((n) => n.type !== "comment");
+var hasComment3 = (block) => (block?.namedChildren ?? []).some((n) => n.type === "comment");
 var calleeName = (n) => n.type === "function_call_expression" ? n.childForFieldName("function")?.text ?? "" : "";
 var isEmptyReturn2 = (n) => n.type === "return_statement" && /^return\s*(null|false|\[\s*\]|array\(\s*\)|''|""|0)?\s*;$/i.test(n.text);
 async function analyzePhp(source, { test = false } = {}) {
@@ -13724,15 +14061,15 @@ async function analyzePhp(source, { test = false } = {}) {
   const visit = (node) => {
     const t = node.type;
     if (test) {
-      if (t === "method_declaration" && /^test/i.test(node.childForFieldName("name")?.text ?? "")) testMethod(node, add);
+      if (t === "method_declaration" && /^test/i.test(node.childForFieldName("name")?.text ?? "")) testMethod2(node, add);
       else if (t === "function_call_expression" && /^(it|test)$/.test(calleeName(node))) pestTest(node, add);
     } else {
-      if (t === "catch_clause") catchClause(node, add);
+      if (t === "catch_clause") catchClause2(node, add);
       else if (t === "function_call_expression" && DUMP.has(calleeName(node).toLowerCase())) add("limpeza/print-esquecido", node, { call: `${calleeName(node)}()` });
       else if (t === "function_call_expression" && HALT.has(calleeName(node).toLowerCase())) add("limpeza/debugger", node, { call: `${calleeName(node)}()` });
       else if (t === "conditional_expression" && node.parent?.type !== "conditional_expression" && node.namedChildren.some((c) => c.type === "conditional_expression"))
         add("complexidade/ternario-aninhado", node);
-      if (t === "function_definition" || t === "method_declaration") fn2(node, add, functions);
+      if (t === "function_definition" || t === "method_declaration") fn4(node, add, functions);
     }
     for (const child of node.namedChildren) visit(child);
   };
@@ -13761,28 +14098,28 @@ function phpModule(root) {
   }
   return m;
 }
-function catchClause(node, add) {
+function catchClause2(node, add) {
   const body2 = node.childForFieldName("body");
-  const list = statements2(body2);
-  if (!list.length) return hasComment2(body2) ? void 0 : add("falha/catch-vazio", node);
-  if (list.every((s) => s.type === "echo_statement" || s.type === "expression_statement" && LOG_ONLY.test(s.text))) return add("falha/catch-so-loga", node);
-  if (list.length === 1 && isEmptyReturn2(list[0]) && !hasComment2(body2)) add("falha/catch-devolve-nulo", node);
+  const list = statements3(body2);
+  if (!list.length) return hasComment3(body2) ? void 0 : add("falha/catch-vazio", node);
+  if (list.every((s) => s.type === "echo_statement" || s.type === "expression_statement" && LOG_ONLY2.test(s.text))) return add("falha/catch-so-loga", node);
+  if (list.length === 1 && isEmptyReturn2(list[0]) && !hasComment3(body2)) add("falha/catch-devolve-nulo", node);
 }
-function fn2(node, add, functions) {
+function fn4(node, add, functions) {
   const body2 = node.childForFieldName("body");
   if (!body2) return;
   const metrics = measureBody(body2, {
-    functions: FUNCTIONS2,
-    branch: (c) => BRANCHES2.has(c.type) || c.type === "binary_expression" && LOGICAL.test(c.childForFieldName("operator")?.text ?? ""),
-    nests: (c) => NESTING2.has(c.type)
+    functions: FUNCTIONS3,
+    branch: (c) => BRANCHES3.has(c.type) || c.type === "binary_expression" && LOGICAL.test(c.childForFieldName("operator")?.text ?? ""),
+    nests: (c) => NESTING3.has(c.type)
   });
   recordFunction(node, node.childForFieldName("name")?.text ?? "(an\xF4nima)", metrics, add, functions);
 }
-function testMethod(node, add) {
+function testMethod2(node, add) {
   const name2 = node.childForFieldName("name")?.text ?? "test";
   const body2 = node.childForFieldName("body")?.text ?? "";
   if (/markTestSkipped|markTestIncomplete/.test(body2)) return add("testes/pulado", node, { call: "markTestSkipped()" });
-  if (!CHECKS2.test(body2) && !/expectException/.test(body2)) add("testes/sem-conferencia", node, { name: name2.slice(0, 80) });
+  if (!CHECKS3.test(body2) && !/expectException/.test(body2)) add("testes/sem-conferencia", node, { name: name2.slice(0, 80) });
   if (/\b(u?sleep)\s*\(/.test(body2)) add("testes/espera-fixa", node, { call: "sleep()" });
 }
 function pestTest(node, add) {
@@ -13791,17 +14128,17 @@ function pestTest(node, add) {
   const chained = node.parent?.type === "member_call_expression" ? node.parent.text : "";
   if (/->skip\s*\(/.test(chained)) return add("testes/pulado", node, { call: "->skip()" });
   if (/->only\s*\(/.test(chained)) return add("testes/only", node, { call: "->only()" });
-  if (!CHECKS2.test(text)) add("testes/sem-conferencia", node, { name: name2.slice(0, 80) });
+  if (!CHECKS3.test(text)) add("testes/sem-conferencia", node, { name: name2.slice(0, 80) });
 }
 
 // engine/src/quality-python.ts
-var BRANCHES3 = /* @__PURE__ */ new Set(["if_statement", "elif_clause", "for_statement", "while_statement", "except_clause", "conditional_expression", "case_clause", "boolean_operator", "if_clause"]);
-var NESTING3 = /* @__PURE__ */ new Set(["if_statement", "for_statement", "while_statement", "try_statement", "with_statement", "match_statement"]);
-var FUNCTIONS3 = /* @__PURE__ */ new Set(["function_definition", "lambda"]);
+var BRANCHES4 = /* @__PURE__ */ new Set(["if_statement", "elif_clause", "for_statement", "while_statement", "except_clause", "conditional_expression", "case_clause", "boolean_operator", "if_clause"]);
+var NESTING4 = /* @__PURE__ */ new Set(["if_statement", "for_statement", "while_statement", "try_statement", "with_statement", "match_statement"]);
+var FUNCTIONS4 = /* @__PURE__ */ new Set(["function_definition", "lambda"]);
 var MOCK_MODULE = /(^|\.)(mocks?|fixtures?|fakes?|stubs?)(\.|$)/i;
-var CHECKS3 = /\bassert\b|pytest\.(raises|warns|approx|fail)\b|self\.assert\w*\(|\.assert_\w+\(|\bexpect\(/;
-var statements3 = (block) => (block?.namedChildren ?? []).filter((n) => n.type !== "comment");
-var hasComment3 = (block) => (block?.namedChildren ?? []).some((n) => n.type === "comment");
+var CHECKS4 = /\bassert\b|pytest\.(raises|warns|approx|fail)\b|self\.assert\w*\(|\.assert_\w+\(|\bexpect\(/;
+var statements4 = (block) => (block?.namedChildren ?? []).filter((n) => n.type !== "comment");
+var hasComment4 = (block) => (block?.namedChildren ?? []).some((n) => n.type === "comment");
 var blockOf = (node) => node.namedChildren.filter((c) => c.type === "block").at(-1) ?? null;
 var callee = (n) => n?.type === "call" ? n.childForFieldName("function")?.text ?? "" : "";
 var isPrintOnly2 = (n) => n.type === "expression_statement" && callee(n.namedChildren[0]) === "print";
@@ -13814,7 +14151,7 @@ async function analyzePython(source, { test = false } = {}) {
   const visit = (node) => {
     const t = node.type;
     if (test) {
-      if (t === "function_definition" && /^test/.test(node.childForFieldName("name")?.text ?? "")) testFunction(node, add);
+      if (t === "function_definition" && /^test/.test(node.childForFieldName("name")?.text ?? "")) testFunction2(node, add);
       if (t === "call" && /^(time\.)?sleep$/.test(callee(node))) add("testes/espera-fixa", node, { call: "time.sleep" });
     } else {
       if (t === "except_clause") exceptClause(node, add);
@@ -13824,7 +14161,7 @@ async function analyzePython(source, { test = false } = {}) {
         const from = node.childForFieldName("module_name")?.text ?? "";
         if (MOCK_MODULE.test(from)) add("falha/mock-em-producao", node, { from });
       }
-      if (t === "function_definition") fn3(node, add, functions);
+      if (t === "function_definition") fn5(node, add, functions);
     }
     for (const child of node.namedChildren) visit(child);
   };
@@ -13853,8 +14190,8 @@ function pythonModule(root) {
 }
 function exceptClause(node, add) {
   const body2 = blockOf(node);
-  const list = statements3(body2);
-  const explained = hasComment3(body2) || hasComment3(node);
+  const list = statements4(body2);
+  const explained = hasComment4(body2) || hasComment4(node);
   if (list.every((s) => s.type === "pass_statement")) return explained ? void 0 : add("falha/catch-vazio", node);
   if (list.every(isPrintOnly2)) return add("falha/catch-so-loga", node);
   if (list.length === 1 && list[0].type === "return_statement" && isEmptyValue(list[0].namedChildren[0]) && !explained) add("falha/catch-devolve-nulo", node);
@@ -13864,19 +14201,19 @@ var unwrap2 = (n) => {
   return n;
 };
 var hasNestedConditional = (node) => node.namedChildren.some((c) => unwrap2(c)?.type === "conditional_expression");
-function testFunction(node, add) {
+function testFunction2(node, add) {
   const name2 = node.childForFieldName("name")?.text ?? "test";
   const decorated = node.parent?.type === "decorated_definition" ? node.parent : null;
   const skip = decorated?.namedChildren.find((d) => d.type === "decorator" && /pytest\.mark\.(skip|skipif|xfail)\b|unittest\.skip/.test(d.text));
   if (skip) return add("testes/pulado", skip, { call: skip.text.replace(/\(.*$/s, "").slice(0, 40) });
   const body2 = node.childForFieldName("body");
   if (body2 && /\bpytest\.skip\(/.test(body2.text)) return add("testes/pulado", node, { call: "pytest.skip()" });
-  if (body2 && !CHECKS3.test(body2.text)) add("testes/sem-conferencia", node, { name: name2.slice(0, 80) });
+  if (body2 && !CHECKS4.test(body2.text)) add("testes/sem-conferencia", node, { name: name2.slice(0, 80) });
 }
-function fn3(node, add, functions) {
+function fn5(node, add, functions) {
   const body2 = node.childForFieldName("body");
   if (!body2) return;
-  const metrics = measureBody(body2, { functions: FUNCTIONS3, branch: (c) => BRANCHES3.has(c.type), nests: (c) => NESTING3.has(c.type) });
+  const metrics = measureBody(body2, { functions: FUNCTIONS4, branch: (c) => BRANCHES4.has(c.type), nests: (c) => NESTING4.has(c.type) });
   recordFunction(node, node.childForFieldName("name")?.text ?? "(an\xF4nima)", metrics, add, functions);
 }
 var CODE_LINE = /^\s*(def|class|import|from|return|if|elif|else|for|while|try|except|with|raise|yield|print|await|async)\b|^\s*[\w.[\]]+\s*=[^=]|^\s*[\w.]+\(.*\)\s*$/;
@@ -13917,9 +14254,13 @@ var GRAMMAR = {
   ".cjs": "javascript",
   ".py": "python",
   ".dart": "dart",
-  ".php": "php"
+  ".php": "php",
+  ".go": "go",
+  ".java": "java",
+  ".kt": "kotlin",
+  ".cs": "c_sharp"
 };
-var FUNCTIONS4 = /* @__PURE__ */ new Set([
+var FUNCTIONS5 = /* @__PURE__ */ new Set([
   "function_declaration",
   "function_expression",
   "function",
@@ -13928,7 +14269,7 @@ var FUNCTIONS4 = /* @__PURE__ */ new Set([
   "arrow_function",
   "method_definition"
 ]);
-var BRANCHES4 = /* @__PURE__ */ new Set([
+var BRANCHES5 = /* @__PURE__ */ new Set([
   "if_statement",
   "for_statement",
   "for_in_statement",
@@ -13937,7 +14278,7 @@ var BRANCHES4 = /* @__PURE__ */ new Set([
   "catch_clause",
   "ternary_expression"
 ]);
-var NESTING4 = /* @__PURE__ */ new Set(["if_statement", "for_statement", "for_in_statement", "while_statement", "do_statement", "switch_statement", "try_statement"]);
+var NESTING5 = /* @__PURE__ */ new Set(["if_statement", "for_statement", "for_in_statement", "while_statement", "do_statement", "switch_statement", "try_statement"]);
 var MOCK_IMPORT = /(^|\/)(__mocks__|mocks?|fixtures?|fakes?|stubs?)(\/|$)|[./-](mock|fake|stub)s?(\.[jt]sx?)?$/i;
 var LIMITS = { complexity: 20, complexityHigh: 40, functionLines: 150, nesting: 4, nonNull: 10 };
 function qualityGrammar(rel) {
@@ -13951,6 +14292,9 @@ async function analyzeQuality(rel, source, { test = false } = {}) {
   if (grammar === "python") return analyzePython(source, { test });
   if (grammar === "dart") return analyzeDart(source, { test });
   if (grammar === "php") return analyzePhp(source, { test });
+  if (grammar === "go") return analyzeGo(source, { test });
+  if (grammar === "java" || grammar === "kotlin") return analyzeTyped(grammar, source, { test });
+  if (grammar === "c_sharp") return analyzeTyped("csharp", source, { test });
   const tree = await parse(grammar, source);
   const hits = [];
   const functions = [];
@@ -13974,7 +14318,7 @@ async function analyzeQuality(rel, source, { test = false } = {}) {
 }
 function productionNode(node, add, functions) {
   const t = node.type;
-  if (t === "catch_clause") catchClause2(node, add);
+  if (t === "catch_clause") catchClause3(node, add);
   else if (t === "call_expression") call(node, add);
   else if (t === "debugger_statement") add("limpeza/debugger", node);
   else if (t === "predefined_type" && node.text === "any") {
@@ -13984,7 +14328,7 @@ function productionNode(node, add, functions) {
     const from = node.childForFieldName("source")?.text.slice(1, -1) ?? "";
     if (MOCK_IMPORT.test(from)) add("falha/mock-em-producao", node, { from });
   }
-  if (FUNCTIONS4.has(t)) fn4(node, add, functions);
+  if (FUNCTIONS5.has(t)) fn6(node, add, functions);
 }
 function trackModule(node, module2) {
   const t = node.type;
@@ -13992,16 +14336,16 @@ function trackModule(node, module2) {
   else if (t === "call_expression") dynamicImport(node, module2);
   else if (t === "member_expression" && /^(module\.exports|exports\.\w+)$/.test(node.text)) module2.commonjs = true;
 }
-var statements4 = (block) => (block?.namedChildren ?? []).filter((n) => n.type !== "comment");
-var hasComment4 = (block) => (block?.namedChildren ?? []).some((n) => n.type === "comment");
+var statements5 = (block) => (block?.namedChildren ?? []).filter((n) => n.type !== "comment");
+var hasComment5 = (block) => (block?.namedChildren ?? []).some((n) => n.type === "comment");
 var isConsoleCall = (n) => n.type === "expression_statement" && n.namedChildren[0]?.type === "call_expression" && /^console\.\w+$/.test(n.namedChildren[0].childForFieldName("function")?.text ?? "");
 var isEmptyValue2 = (n) => !n || ["null", "undefined", "false"].includes(n.type) || n.text === "undefined" || /^(\[\s*\]|\{\s*\})$/.test(n.text);
-function catchClause2(node, add) {
+function catchClause3(node, add) {
   const body2 = node.childForFieldName("body");
-  const list = statements4(body2);
-  if (!list.length) return hasComment4(body2) ? void 0 : add("falha/catch-vazio", node);
+  const list = statements5(body2);
+  if (!list.length) return hasComment5(body2) ? void 0 : add("falha/catch-vazio", node);
   if (list.every(isConsoleCall)) return add("falha/catch-so-loga", node);
-  if (list.length === 1 && list[0].type === "return_statement" && isEmptyValue2(list[0].namedChildren[0]) && !hasComment4(body2))
+  if (list.length === 1 && list[0].type === "return_statement" && isEmptyValue2(list[0].namedChildren[0]) && !hasComment5(body2))
     add("falha/catch-devolve-nulo", node);
 }
 function call(node, add) {
@@ -14012,13 +14356,13 @@ function call(node, add) {
     if (handler && (handler.type === "arrow_function" || handler.type === "function_expression" || handler.type === "function")) {
       const body2 = handler.childForFieldName("body");
       if (body2?.type === "statement_block") {
-        if (!statements4(body2).length && !hasComment4(body2)) add("falha/catch-vazio", node);
+        if (!statements5(body2).length && !hasComment5(body2)) add("falha/catch-vazio", node);
       } else if (isEmptyValue2(body2)) add("falha/catch-devolve-nulo", node);
     }
   }
   if (/^console\.(log|debug)$/.test(callee2.text)) add("limpeza/console-log", node);
 }
-var CHECKS4 = /\b(expect|assert)\b|\.should\b|\bt\.(is|true|false|deepEqual|throws)\b|toMatch(Inline)?Snapshot/;
+var CHECKS5 = /\b(expect|assert)\b|\.should\b|\bt\.(is|true|false|deepEqual|throws)\b|toMatch(Inline)?Snapshot/;
 function testCall2(node, add) {
   const callee2 = node.childForFieldName("function")?.text ?? "";
   if (/(^|\.)waitForTimeout$/.test(callee2) || callee2 === "setTimeout" && /^\d+$/.test(node.childForFieldName("arguments")?.namedChildren[1]?.text ?? ""))
@@ -14031,9 +14375,9 @@ function testCall2(node, add) {
   }
   if (!/^(it|test)(\.(concurrent|serial))?$/.test(callee2)) return;
   const args2 = node.childForFieldName("arguments")?.namedChildren ?? [];
-  const body2 = args2.find((a) => FUNCTIONS4.has(a.type));
+  const body2 = args2.find((a) => FUNCTIONS5.has(a.type));
   const name2 = args2[0]?.type === "string" || args2[0]?.type === "template_string" ? args2[0].text.slice(1, -1) : callee2;
-  if (body2 && !CHECKS4.test(body2.text)) add("testes/sem-conferencia", node, { name: name2.slice(0, 80) });
+  if (body2 && !CHECKS5.test(body2.text)) add("testes/sem-conferencia", node, { name: name2.slice(0, 80) });
 }
 var isTernaryChild = (node) => {
   let p = node.parent;
@@ -14056,14 +14400,14 @@ function functionName(node) {
   if (holder?.type === "variable_declarator") return holder.childForFieldName("name")?.text ?? "(an\xF4nima)";
   return "(an\xF4nima)";
 }
-function fn4(node, add, functions) {
+function fn6(node, add, functions) {
   const body2 = node.childForFieldName("body");
   if (!body2) return;
   const metrics = measureBody(body2, {
-    functions: FUNCTIONS4,
-    branch: (c) => BRANCHES4.has(c.type) || c.type === "switch_case" || c.type === "binary_expression" && /^(&&|\|\|)$/.test(c.childForFieldName("operator")?.text ?? ""),
+    functions: FUNCTIONS5,
+    branch: (c) => BRANCHES5.has(c.type) || c.type === "switch_case" || c.type === "binary_expression" && /^(&&|\|\|)$/.test(c.childForFieldName("operator")?.text ?? ""),
     // else if não aprofunda.
-    nests: (c) => NESTING4.has(c.type) && !(c.type === "if_statement" && c.parent?.type === "else_clause")
+    nests: (c) => NESTING5.has(c.type) && !(c.type === "if_statement" && c.parent?.type === "else_clause")
   });
   recordFunction(node, functionName(node), metrics, add, functions);
 }
@@ -14099,7 +14443,7 @@ function comment(node, add) {
   const es = text.match(/eslint-disable(-next-line|-line)?\b(.*)/);
   if (es && !/--\s*\S/.test(es[2])) add("tipos/eslint-disable-sem-motivo", node);
 }
-var CODE_LINE2 = /[;{}]\s*$|^\s*(const|let|var|if|for|while|return|import|export|function|await|async|try|catch|switch|case|throw|class)\b|^\s*[\w.$\]]+\s*\(.*\)\s*;?\s*$|^\s*[\w.$]+\s*=[^=]|^\s*<\/?[A-Za-z][\w.]*[\s>/]/;
+var CODE_LINE2 = /[;{}]\s*$|^\s*(const|let|var|if|for|while|return|import|export|function|await|async|try|catch|switch|case|throw|class|func|fun|val|defer|public|private|protected)\b|^\s*[\w.$\]]+\s*\(.*\)\s*;?\s*$|^\s*[\w.$]+\s*=[^=]|^\s*[\w, ]+\s*:=|^\s*<\/?[A-Za-z][\w.]*[\s>/]/;
 function commentedCode(root, lines, hits, extra = {}) {
   let run2 = null;
   let lastRow = -2;
@@ -14111,7 +14455,7 @@ function commentedCode(root, lines, hits, extra = {}) {
     for (const c of n.namedChildren) {
       const row = c.startPosition.row;
       const alone = !(lines[row] ?? "").slice(0, c.startPosition.column).trim();
-      if (c.type === "comment" && alone && c.text.startsWith("//") && !c.text.startsWith("///")) {
+      if ((c.type === "comment" || c.type === "line_comment") && alone && c.text.startsWith("//") && !c.text.startsWith("///")) {
         if (row !== lastRow + 1) flush();
         run2 ??= { start: row, code: 0, total: 0 };
         run2.total++;
@@ -14174,6 +14518,7 @@ function resolveImport(resolver, lang, spec, rel) {
   if (lang === "php") return spec.startsWith("class:") ? resolver.resolvePhpClass(spec.slice(6)) : resolver.resolveRelativeFile(spec.slice(5), rel);
   return resolver.resolveJs(spec, rel);
 }
+var PACKAGE_LANGS = /* @__PURE__ */ new Set(["go", "java", "kotlin", "csharp"]);
 function unusedCode(root, modules, texts, entry) {
   const resolver = new PathResolver(root);
   const importedBy = /* @__PURE__ */ new Map();
@@ -14195,7 +14540,7 @@ function unusedCode(root, modules, texts, entry) {
   const orphans = [];
   const exports = [];
   for (const [rel, m] of modules) {
-    if (entry(rel)) continue;
+    if (entry(rel) || PACKAGE_LANGS.has(m.lang ?? "")) continue;
     if (!importedBy.get(rel)) {
       if (!mentioned(rel)) orphans.push(rel);
       continue;

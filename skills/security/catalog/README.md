@@ -17,5 +17,8 @@ Um arquivo por tema. Leia só os que se aplicam à stack e ao código do projeto
 | `php-laravel.md` | o projeto tem código PHP (com ou sem Laravel) |
 | `python-web.md` | o projeto usa Django, Flask ou FastAPI |
 | `flutter.md` | o projeto é um app Flutter ou tem código Dart |
+| `go.md` | o projeto tem `go.mod` ou código Go |
+| `java-spring.md` | o projeto tem código Java ou Kotlin (Spring Boot, Ktor, Android) |
+| `dotnet.md` | o projeto tem `.csproj`/`.sln` ou código C# (ASP.NET Core, Blazor) |
 
 Destilado das skills de conhecimento do Strix (usestrix/strix, Apache-2.0) e adaptado para revisão estática de código.

@@ -77,7 +77,7 @@
 //   faundr quality-rule "<nome>" --pattern …   cria uma regra da casa em .faundr-regras/ (padrão + mensagem)
 //   faundr quality-ladder on|off               liga/desliga o lembrete de qualidade no início das sessões
 //   faundr tests-scan                          inventário dos testes sem rodar nada (executores, arquivos, resultado no disco)
-//   faundr tests-run [--changed] [--coverage] [--files a,b] [--exclude a,b] [--runner vitest|jest|playwright|node|pytest|flutter|dart|phpunit|pest] [--python <caminho>] [--confirm-db]  roda os testes (só quando pedido)
+//   faundr tests-run [--changed] [--coverage] [--files a,b] [--exclude a,b] [--runner vitest|jest|playwright|node|pytest|flutter|dart|phpunit|pest|go|maven|gradle|dotnet] [--python <caminho>] [--confirm-db]  roda os testes (só quando pedido)
 //   faundr tests-show                          última rodada, testes falhando e instáveis
 //   faundr tests-context [--fix]               contexto para o agente escrever ou consertar testes (skills "tests" e "tests-fix")
 //   faundr tests-map "<funcionalidade>" …      mapa testes × funcionalidades (--status, --tests, --critical)
@@ -3257,6 +3257,14 @@ function coverageReady(runner, info) {
     return false
   }
   if (runner === 'phpunit' || runner === 'pest') console.log('  Cobertura: o PHP precisa do Xdebug ou do PCOV ligado; sem eles, os testes rodam e a cobertura não aparece.')
+  if (runner === 'gradle' && !info?.coverage) {
+    console.log("  Cobertura: no Gradle ela vem do plugin jacoco, que o projeto não aplica. Peça ao usuário para aprovar: acrescentar id(\"jacoco\") (ou apply plugin: 'jacoco') no build.gradle. Rodando sem cobertura.")
+    return false
+  }
+  if (runner === 'dotnet' && !info?.coverage) {
+    console.log('  Cobertura: falta o coverlet.collector no projeto de teste. Peça ao usuário para aprovar: dotnet add <projeto de teste> package coverlet.collector. Rodando sem cobertura.')
+    return false
+  }
   if (runner === 'vitest' && !info?.coverage) {
     console.log('  Cobertura: falta a ferramenta no projeto. Peça ao usuário para aprovar: npm install -D @vitest/coverage-v8 (depois rode de novo com --coverage). Rodando sem cobertura.')
     return false
@@ -3302,6 +3310,10 @@ const NOT_INSTALLED = {
   dart: () => 'o Dart não está no PATH deste computador',
   phpunit: (r) => `rode composer install${r.dir ? ` em ${r.dir}/` : ''} (e confira se o php está no PATH)`,
   pest: (r) => `rode composer install${r.dir ? ` em ${r.dir}/` : ''} (e confira se o php está no PATH)`,
+  go: () => 'o Go não está no PATH deste computador',
+  maven: () => 'o Maven (mvn) não está no PATH e o projeto não tem o mvnw',
+  gradle: () => 'o Gradle não está no PATH e o projeto não tem o gradlew',
+  dotnet: () => 'o .NET SDK (dotnet) não está no PATH deste computador',
 }
 const notInstalled = (r) => NOT_INSTALLED[r.runner]?.(r) ?? `não instalado: rode npm install${r.dir ? ` em ${r.dir}/` : ''}`
 const listArg = (args, name) => flag(args, name)?.split(',').map((f) => f.trim().replace(/\\/g, '/').replace(/^\.\//, '')).filter(Boolean) ?? null

@@ -62,3 +62,57 @@ test('Python: função que ninguém importa vira código sem uso; rota com decor
   assert.deepEqual(found('loja/precos.py'), ['morto/export-sem-uso'])
   assert.deepEqual(found('loja/orfao.py'), ['morto/arquivo-orfao'])
 })
+
+test('Go: if err != nil vazio, que só loga ou devolve nil; println e fmt.Print fora do main; teste sem conferência', async () => {
+  const { found } = await check({
+    'go.mod': 'module example.com/loja\n',
+    'cmd/api/main.go': 'package main\n\nimport "fmt"\n\nfunc main() {\n\tfmt.Println("subiu")\n}\n',
+    'internal/pedido/pedido.go': `package pedido\n\nimport (\n\t"fmt"\n\t"log"\n)\n\nfunc Salva(p int) error {\n\terr := grava(p)\n\tif err != nil {\n\t}\n\tif err != nil {\n\t\tlog.Println(err)\n\t}\n\tfmt.Println("salvo")\n\tprintln("debug")\n\treturn nil\n}\n\nfunc Busca(id int) (*int, error) {\n\tv, err := le(id)\n\tif err != nil {\n\t\treturn nil, nil\n\t}\n\treturn v, nil\n}\n\nfunc Nota(x int) int {\n${ifs((i) => `\tif x == ${i} {\n\t\treturn ${i}\n\t}`)}\n\treturn -1\n}\n`,
+    'internal/pedido/ok.go': 'package pedido\n\nfunc Confere(err error) error {\n\tif err != nil {\n\t\treturn fmt.Errorf("salva: %w", err)\n\t}\n\treturn nil\n}\n',
+    'internal/pedido/pedido_test.go':
+      'package pedido\n\nimport "testing"\n\nfunc TestSalva(t *testing.T) {\n\tSalva(1)\n}\n\nfunc TestBusca(t *testing.T) {\n\tif _, err := Busca(1); err != nil {\n\t\tt.Fatal(err)\n\t}\n}\n\nfunc TestPulado(t *testing.T) {\n\tt.Skip("depois")\n}\n',
+  })
+  assert.deepEqual(found('cmd/api/main.go'), [], 'fmt.Println no package main é a saída do programa')
+  assert.deepEqual(found('internal/pedido/pedido.go').sort(), ['complexidade/funcao', 'falha/catch-devolve-nulo', 'falha/catch-so-loga', 'falha/catch-vazio', 'limpeza/print-esquecido'])
+  assert.deepEqual(found('internal/pedido/ok.go'), [], 'erro devolvido com contexto está certo')
+  assert.deepEqual(found('internal/pedido/pedido_test.go').sort(), ['testes/pulado', 'testes/sem-conferencia'])
+})
+
+test('Java: catch vazio e só com printStackTrace, System.out fora do main, ternário aninhado; JUnit sem assert e @Disabled', async () => {
+  const { found } = await check({
+    'pom.xml': '<project></project>\n',
+    'src/main/java/com/acme/App.java': 'package com.acme;\n\npublic class App {\n    public static void main(String[] args) {\n        System.out.println("subiu");\n    }\n}\n',
+    'src/main/java/com/acme/Pedido.java': `package com.acme;\n\npublic class Pedido {\n    public String salva(int p) {\n        try {\n            grava(p);\n        } catch (Exception e) {\n        }\n        try {\n            grava(p);\n        } catch (Exception e) {\n            e.printStackTrace();\n        }\n        System.out.println("salvo");\n        return p > 0 ? "a" : p < 0 ? "b" : "c";\n    }\n    public int nota(int x) {\n${ifs((i) => `        if (x == ${i}) return ${i};`)}\n        return -1;\n    }\n    private void grava(int p) throws Exception {}\n}\n`,
+    'src/test/java/com/acme/PedidoTest.java':
+      'package com.acme;\n\nimport org.junit.jupiter.api.*;\nimport static org.junit.jupiter.api.Assertions.*;\n\nclass PedidoTest {\n    @Test\n    void salva() {\n        new Pedido().salva(1);\n    }\n    @Test\n    void nota() {\n        assertEquals(1, new Pedido().nota(1));\n    }\n    @Disabled\n    @Test\n    void velho() {}\n}\n',
+  })
+  assert.deepEqual(found('src/main/java/com/acme/App.java'), [])
+  assert.deepEqual(found('src/main/java/com/acme/Pedido.java').sort(), ['complexidade/funcao', 'complexidade/ternario-aninhado', 'falha/catch-so-loga', 'falha/catch-vazio', 'limpeza/print-esquecido'])
+  assert.deepEqual(found('src/test/java/com/acme/PedidoTest.java').sort(), ['testes/pulado', 'testes/sem-conferencia'])
+})
+
+test('Kotlin: catch vazio, catch que devolve null, println fora do main e teste sem conferência', async () => {
+  const { found } = await check({
+    'build.gradle.kts': 'plugins { kotlin("jvm") }\n',
+    'src/main/kotlin/Main.kt': 'fun main() {\n    println("subiu")\n}\n',
+    'src/main/kotlin/Pedido.kt':
+      'package loja\n\nclass Pedido {\n    fun salva(p: Int): String? {\n        try {\n            grava(p)\n        } catch (e: Exception) {\n        }\n        println("salvo")\n        return try {\n            le(p)\n        } catch (e: Exception) {\n            null\n        }\n    }\n    private fun grava(p: Int) {}\n    private fun le(p: Int): String = "x"\n}\n',
+    'src/test/kotlin/PedidoTest.kt': 'import org.junit.jupiter.api.Test\nimport kotlin.test.assertEquals\n\nclass PedidoTest {\n    @Test\n    fun salva() {\n        Pedido().salva(1)\n    }\n    @Test\n    fun le() {\n        assertEquals("x", Pedido().salva(1))\n    }\n}\n',
+  })
+  assert.deepEqual(found('src/main/kotlin/Main.kt'), [])
+  assert.deepEqual(found('src/main/kotlin/Pedido.kt').sort(), ['falha/catch-devolve-nulo', 'falha/catch-vazio', 'limpeza/print-esquecido'])
+  assert.deepEqual(found('src/test/kotlin/PedidoTest.kt'), ['testes/sem-conferencia'])
+})
+
+test('C#: catch vazio e que devolve null, Console.WriteLine fora do Program, Debugger.Break; xUnit sem Assert e com Skip', async () => {
+  const { found } = await check({
+    'Loja/Loja.csproj': '<Project Sdk="Microsoft.NET.Sdk"></Project>\n',
+    'Loja/Program.cs': 'Console.WriteLine("subiu");\n',
+    'Loja/Pedido.cs': `namespace Loja;\n\npublic class Pedido\n{\n    public string? Salva(int p)\n    {\n        try { Grava(p); } catch (Exception) { }\n        Console.WriteLine("salvo");\n        System.Diagnostics.Debugger.Break();\n        try { return Le(p); } catch { return null; }\n    }\n    public int Nota(int x)\n    {\n${ifs((i) => `        if (x == ${i}) return ${i};`)}\n        return -1;\n    }\n    void Grava(int p) { }\n    string Le(int p) => "x";\n}\n`,
+    'Loja.Tests/PedidoTests.cs':
+      'using Xunit;\n\npublic class PedidoTests\n{\n    [Fact]\n    public void Salva()\n    {\n        new Loja.Pedido().Salva(1);\n    }\n    [Fact]\n    public void Nota() => Assert.Equal(1, new Loja.Pedido().Nota(1));\n    [Fact(Skip = "depois")]\n    public void Velho() { }\n}\n',
+  })
+  assert.deepEqual(found('Loja/Program.cs'), [])
+  assert.deepEqual(found('Loja/Pedido.cs').sort(), ['complexidade/funcao', 'falha/catch-devolve-nulo', 'falha/catch-vazio', 'limpeza/debugger', 'limpeza/print-esquecido'])
+  assert.deepEqual(found('Loja.Tests/PedidoTests.cs').sort(), ['testes/pulado', 'testes/sem-conferencia'])
+})

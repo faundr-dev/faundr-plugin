@@ -11,10 +11,12 @@ import { COVERAGE_DIR, coverageArgs } from './coverage.mjs'
 import { subDirs } from './parts.mjs'
 import { relPath } from './paths.mjs'
 import { findSecrets, mask, projectFiles } from './security.mjs'
-import { countLangCases, DART_TEST_FILE, langRunnersIn, PHP_TEST_FILE, runLangTests } from './tests-langs.mjs'
+import { countLangCases, CS_TEST_FILE, DART_TEST_FILE, GO_TEST_FILE, isLangProjectDir, JVM_TEST_FILE, junitCaseFiles, langRunnersIn, PHP_TEST_FILE, runLangTests } from './tests-langs.mjs'
 
 export const TEST_FILE = /(^|\/)(__tests__|tests?|e2e|spec)\/.*\.[cm]?[jt]sx?$|\.(test|spec)\.[cm]?[jt]sx?$/
 export const PY_TEST_FILE = /(^|\/)(test_[^/]*|[^/]*_test)\.py$/
+// Arquivos de teste de todas as linguagens que o inventário conta.
+const LANG_TEST_FILES = [TEST_FILE, PY_TEST_FILE, DART_TEST_FILE, PHP_TEST_FILE, GO_TEST_FILE, JVM_TEST_FILE, CS_TEST_FILE]
 const NOT_PROJECT = /(^|\/)(node_modules|dist|build|site-packages|\.?venv|env)\//
 const OUT_DIR = path.normalize(relPath('tests'))
 const RUN_TIMEOUT = 15 * 60_000
@@ -50,11 +52,11 @@ const readJson = (root, rel) => {
   }
 }
 
-// Subpastas com package.json, configuração do pytest, pubspec.yaml ou composer.json: cada parte pode ter o seu executor.
-const projectDirs = (root) =>
-  subDirs(root, (d) => ['package.json', 'pubspec.yaml', 'composer.json'].some((f) => fs.existsSync(path.join(root, d, f))) || PYTEST_CONFIG(root, d))
+// Subpastas com package.json, configuração do pytest ou projeto de outra linguagem (pubspec.yaml, composer.json,
+// go.mod, pom.xml, build.gradle, .sln/.csproj): cada parte pode ter o seu executor.
+const projectDirs = (root) => subDirs(root, (d) => fs.existsSync(path.join(root, d, 'package.json')) || PYTEST_CONFIG(root, d) || isLangProjectDir(root, d))
 // Executores que o Faundr roda fora do Node e do Python (tests-langs.mjs).
-export const LANG_RUNNERS = ['flutter', 'dart', 'phpunit', 'pest']
+export const LANG_RUNNERS = ['flutter', 'dart', 'phpunit', 'pest', 'go', 'maven', 'gradle', 'dotnet']
 // pytest-cov declarado no projeto: dá para medir a cobertura do pytest.
 const hasPytestCov = (root, dir) =>
   ['requirements.txt', 'requirements-dev.txt', 'requirements_dev.txt', 'pyproject.toml', 'Pipfile', 'setup.cfg'].some((f) => /pytest-cov/.test(read(root, path.join(dir, f)) ?? ''))
@@ -150,7 +152,7 @@ const CASE_CALL = /\b(?:it|test)(?:\.(only|skip|todo|fixme|fail|concurrent|each\
 
 /** Inventário: arquivos de teste, estimativa de testes, quais são de ponta a ponta (navegador). */
 export function inventory(root, files = projectFiles(root).files) {
-  const testFiles = files.filter((f) => (TEST_FILE.test(f) || PY_TEST_FILE.test(f) || DART_TEST_FILE.test(f) || PHP_TEST_FILE.test(f)) && !NOT_PROJECT.test(f) && !/(^|\/)vendor\//.test(f))
+  const testFiles = files.filter((f) => LANG_TEST_FILES.some((re) => re.test(f)) && !NOT_PROJECT.test(f) && !/(^|\/)vendor\//.test(f))
   let cases = 0
   let skipped = 0
   let e2eFiles = 0
@@ -289,7 +291,7 @@ export function runTests(root, runner, { dir = '', python = null, changed = fals
   if (LANG_RUNNERS.includes(runner)) {
     const xmlOut = out.replace(/\.json$/, '.xml')
     const r = runLangTests(root, runner, { dir, files: local, out: xmlOut, timeout, coverageArgs: covArgs })
-    if (r.junit) return { runner, durationMs: r.durationMs, cases: fromJUnit(r.junit, root), error: null }
+    if (r.junit) return { runner, durationMs: r.durationMs, cases: junitCaseFiles(runner, fromJUnit(r.junit, root), root, dir), error: null }
     return { ...r, cases: r.cases ? r.cases.map((c) => ({ ...c, message: c.message ? clean(c.message) : null })) : r.cases }
   }
   const args = commandFor(runner, out, { changed, files: local, nodeArgs, exclude: insideDir(dir, exclude) })

@@ -107,32 +107,32 @@ export const LANGUAGE_SUPPORT = [
     id: 'go', name: 'Go',
     match: { languages: ['Go'] },
     features: {
-      mapa: ['parcial', 'sem ligação entre arquivos'], qualidade: CLAUDE, seguranca: CLAUDE_SEC, dependencias: ['completo'], segredos: SECRETS,
-      erros: ['completo'], producao: ['nao'], testes: ['nao'], design: NA, stack: ['completo'],
+      mapa: ['completo'], qualidade: ['completo'], seguranca: ['completo'], dependencias: ['completo'], segredos: SECRETS,
+      erros: ['completo'], producao: ['completo'], testes: ['completo'], design: NA, stack: ['completo'],
     },
   },
   {
     id: 'java', name: 'Java', examples: 'Spring',
     match: { languages: ['Java'] },
     features: {
-      mapa: ['parcial', 'sem ligação entre arquivos'], qualidade: CLAUDE, seguranca: CLAUDE_SEC, dependencias: ['completo'], segredos: SECRETS,
-      erros: ['completo'], producao: ['nao'], testes: ['nao'], design: NA, stack: ['completo'],
+      mapa: ['completo'], qualidade: ['completo'], seguranca: ['completo'], dependencias: ['completo'], segredos: SECRETS,
+      erros: ['completo'], producao: ['completo'], testes: ['completo'], design: NA, stack: ['completo'],
     },
   },
   {
     id: 'kotlin', name: 'Kotlin', examples: 'Android',
     match: { languages: ['Kotlin'] },
     features: {
-      mapa: ['parcial', 'sem ligação entre arquivos'], qualidade: CLAUDE, seguranca: CLAUDE_SEC, dependencias: ['completo'], segredos: SECRETS,
-      erros: ['completo'], producao: ['nao'], testes: ['nao'], design: CLAUDE_DESIGN, stack: ['completo'],
+      mapa: ['completo'], qualidade: ['completo'], seguranca: ['completo'], dependencias: ['completo'], segredos: SECRETS,
+      erros: ['completo'], producao: ['completo'], testes: ['completo'], design: CLAUDE_DESIGN, stack: ['completo'],
     },
   },
   {
     id: 'csharp', name: 'C#', examples: '.NET',
     match: { languages: ['C#'] },
     features: {
-      mapa: ['parcial', 'sem ligação entre arquivos'], qualidade: CLAUDE, seguranca: CLAUDE_SEC, dependencias: ['completo'], segredos: SECRETS,
-      erros: ['completo'], producao: ['nao'], testes: ['nao'], design: NA, stack: ['completo'],
+      mapa: ['completo'], qualidade: ['completo'], seguranca: ['completo'], dependencias: ['completo'], segredos: SECRETS,
+      erros: ['completo'], producao: ['completo'], testes: ['completo'], design: NA, stack: ['completo'],
     },
   },
   {
