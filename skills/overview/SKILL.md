@@ -16,7 +16,7 @@ Quem vai ler é o dono do projeto, que pode não entender o próprio código. Re
 - Português simples, frases curtas. Nada de jargão sem explicar (se usar "API", "hook", "grafo", explique no glossário).
 - Diga **o que a coisa faz para a pessoa**, não como está implementada.
 - Seja específico: nomes reais das telas, comandos e funcionalidades deste projeto.
-- Se já existe uma Visão anterior, **atualize-a**: mantenha o que continua verdadeiro, corrija o que mudou, mova itens entre "em andamento" e "pronto".
+- Se já existe uma Visão anterior, **atualize-a**: mantenha o que continua verdadeiro e corrija o que mudou.
 - Coloque em `evidence` os caminhos de arquivo que comprovam cada item (1 a 4 por item).
 
 ## 3. Formato (JSON) — salve em `.faundr/painel/overview.json`
@@ -41,7 +41,7 @@ Quem vai ler é o dono do projeto, que pode não entender o próprio código. Re
       "evidence": ["caminho/arquivo"]
     }
   ],
-  "progress": { "done": ["..."], "in_progress": ["..."], "next": ["..."] },
+  "progress": { "done": ["o que já foi entregue, cada item confirmado nos commits ou no quadro"], "in_progress": [], "next": [] },
   "decisions": [{ "title": "decisão", "why": "porquê", "evidence": ["..."] }],
   "how_to_use": [{ "title": "o que a pessoa quer fazer", "detail": "como fazer, passo a passo curto", "command": "/comando se houver" }],
   "glossary": [{ "term": "termo técnico", "meaning": "explicação simples" }],
@@ -49,7 +49,7 @@ Quem vai ler é o dono do projeto, que pode não entender o próprio código. Re
 }
 ```
 
-Preocupações abertas registradas no Faundr entram em `open_questions`. Tamanhos: `how_it_works` 3–6 passos; `parts` 3–10; `decisions` as 3–8 mais importantes; `how_to_use` cobre **todos** os comandos/fluxos que o usuário tem à disposição (explique cada um; máximo 40); `glossary` só termos que aparecem no texto (máximo 30). Listas acima do limite são recusadas no envio.
+`progress.in_progress` e `progress.next` ficam **vazios**: o painel lê o que está em andamento e as próximas etapas direto do quadro de Funcionalidades, na hora (texto escrito aqui envelhecia). Se o quadro estiver com coisas já feitas ainda abertas, sugira ao dono rodar `/faundr:quadro`. Preocupações abertas registradas no Faundr entram em `open_questions`. Tamanhos: `how_it_works` 3–6 passos; `parts` 3–10; `decisions` as 3–8 mais importantes; `how_to_use` cobre **todos** os comandos/fluxos que o usuário tem à disposição (explique cada um; máximo 40); `glossary` só termos que aparecem no texto (máximo 30). Listas acima do limite são recusadas no envio.
 
 ## 4. Envie
 

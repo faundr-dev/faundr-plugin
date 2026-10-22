@@ -26,7 +26,9 @@
 //   faundr concern "<título>" [--why "..."]    registra uma preocupação para revisar depois
 //   faundr resolve [P-<n> | trecho]            marca uma preocupação como resolvida (sem argumento: lista as abertas)
 //   faundr focus "<nome>"                      troca a funcionalidade atual
-//   faundr board [--all | --memory]             mostra o checklist (--memory: as regras e decisões confirmadas)
+//   faundr board [--all | --memory | --review] mostra o checklist (--memory: as regras e decisões confirmadas; --review: tudo o que está aberto, para a skill quadro)
+//   faundr feature-discard "<id ou nome>"      descarta uma funcionalidade (sai das abas e do contexto; dá para voltar)
+//   faundr feature-restore "<id ou nome>"      traz de volta uma funcionalidade descartada
 //   faundr overview-context                    contexto para o agente escrever a Visão do projeto
 //   faundr overview-save [arquivo]              valida e envia a Visão (padrão: .faundr/painel/overview.json)
 //   faundr architecture-check [--quiet|--pull] confere quais partes da arquitetura já existem e o código fora do plano (sem IA); --pull grava a arquitetura para editar
@@ -1339,7 +1341,7 @@ async function skillsWhen(root, rest) {
 async function work(command, args) {
   await workCommand(command, args)
   // A barra de status lê o resumo do arquivo de estado: atualiza depois de mexer no quadro.
-  if (['feature', 'task', 'done', 'start', 'pegar', 'focus', 'concern', 'resolve'].includes(command)) await refreshStatus().catch((err) => log(`status: ${err?.message ?? err}`))
+  if (['feature', 'task', 'done', 'start', 'pegar', 'focus', 'concern', 'resolve', 'feature-discard', 'feature-restore'].includes(command)) await refreshStatus().catch((err) => log(`status: ${err?.message ?? err}`))
 }
 
 /** Guarda em .faundr/state.json o resumo que a barra de status mostra (projeto, funcionalidade, passo, preocupações). */
@@ -1517,10 +1519,11 @@ async function workResolve({ text }) {
 }
 
 // done e start: muda a situação da tarefa.
-async function workTaskStatus({ command, root, current, text }) {
+async function workTaskStatus({ command, args, root, current, text }) {
   if (!text) throw new Error(`uso: faundr ${command} "<trecho do nome ou nº da tarefa>"`)
   // Ao concluir: o commit do momento e se há mudanças fora de commit (a tarefa fica marcada até o próximo commit).
-  const dirty = command === 'done' ? uncommittedChanges(root) : 0
+  // --already-committed: trabalho antigo, já no git (revisão do quadro); as mudanças de agora não são dele.
+  const dirty = command === 'done' && !args.includes('--already-committed') ? uncommittedChanges(root) : 0
   const r = await memoryApi({
     action: 'task-status',
     query: text,
@@ -1567,6 +1570,7 @@ async function workBoard({ args, current }) {
   const byId = new Map((allFeatures ?? features).map((f) => [f.id, f]))
   // --memory: as regras e decisões confirmadas (para conferir o código contra elas).
   if (args.includes('--memory')) return printDecisions(decisions)
+  if (args.includes('--review')) return printReview(allFeatures ?? features, current)
   if (concerns?.length) {
     console.log('Preocupações abertas (para revisar):')
     concerns.forEach((c) => console.log(`  P-${c.ref}  ${c.title}${c.body ? ` — ${c.body}` : ''}`))
@@ -1579,6 +1583,42 @@ async function workBoard({ args, current }) {
     console.log('')
   }
   if (orphanTasks?.length) printFeature({ title: 'Tarefas sem funcionalidade', tasks: orphanTasks })
+}
+
+// Tudo o que está aberto no quadro (em andamento e próximas etapas), com datas e id curto, para a skill quadro
+// conferir cada item contra os commits e o código.
+function printReview(all, current) {
+  const day = (iso) => (iso ? iso.slice(0, 10) : '?')
+  const open = all.filter((f) => !f.finished)
+  const byId = new Map(all.map((f) => [f.id, f]))
+  if (!open.length) return console.log('Nada aberto no quadro: todas as funcionalidades estão concluídas.')
+  const groups = [
+    ['Em andamento', open.filter((f) => !f.planned)],
+    ['Próximas etapas (planejadas)', open.filter((f) => f.planned)],
+  ]
+  for (const [label, list] of groups) {
+    if (!list.length) continue
+    console.log(`## ${label} (${list.length})`)
+    for (const f of list) {
+      const done = f.tasks.filter((t) => t.task_status === 'completed').length
+      const prev = f.after && byId.get(f.after)
+      const tags = [f.id === current && 'atual', f.stale && 'parada'].filter(Boolean)
+      console.log(
+        `[${f.id.slice(0, 8)}] ${f.title}  (${done}/${f.tasks.length})${tags.length ? `  [${tags.join(', ')}]` : ''}  criada ${day(f.created_at)}, mexida ${day(f.touched)}${prev ? `  · vem depois de "${prev.title}"` : ''}`,
+      )
+      if (f.body) console.log(`    ${f.body}`)
+      f.tasks.filter((t) => t.task_status !== 'completed').forEach((t) => console.log(`    ${MARK[t.task_status] ?? '[ ]'} [${t.id.slice(0, 8)}] ${t.title}`))
+      if (!f.tasks.length) console.log('    (sem tarefas)')
+    }
+    console.log('')
+  }
+}
+
+async function workDiscard({ command, text }) {
+  if (!text) throw new Error(`Uso: faundr ${command} "<id ou nome da funcionalidade>"`)
+  const restore = command === 'feature-restore'
+  const r = await memoryApi({ action: 'feature-discard', query: text, restore })
+  return console.log(restore ? `Restaurada: ${r.title}` : `Descartada: ${r.title} (sai das abas; para voltar: faundr feature-restore "${r.id.slice(0, 8)}")`)
 }
 
 function printDecisions(decisions) {
@@ -1607,6 +1647,8 @@ const WORK_HANDLERS = {
   soltar: workAssign,
   focus: workFocus,
   board: workBoard,
+  'feature-discard': workDiscard,
+  'feature-restore': workDiscard,
 }
 
 // ---- Visão do projeto ------------------------------------------------------------------------
@@ -1667,7 +1709,9 @@ function overviewPrevious(say, prev) {
   if (prev.overview) {
     say(`Gerada em ${prev.overview.created_at} (commit ${prev.overview.built_at_commit ?? '-'}). ATUALIZE esta visão; mantenha o que continua verdadeiro.`)
     say('```json')
-    say(JSON.stringify(prev.overview.content, null, 1))
+    // Em andamento e próximas vêm do quadro (o painel lê na hora): não entregar o texto velho para não ser copiado.
+    const { in_progress: _i, next: _n, ...progress } = prev.overview.content.progress ?? {}
+    say(JSON.stringify({ ...prev.overview.content, progress }, null, 1))
     say('```')
   } else say('(nenhuma — esta é a primeira)')
   say()
@@ -4717,14 +4761,14 @@ async function cli() {
 
 function printCommands() {
   console.log(
-    'comandos: login | link | status | browse | browse-key | checkpoint | checkpoints | restore | mapa | graph | graph-query | graph-path | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | memory-edit | workflow | skills | concern | resolve | start | done | focus | board | criteria | criteria-check | handoff | handover | weekly | resume | diagram-save | architecture-check | stack-scan | env-check | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | security-import | security-supabase | db-test | launch-check | lgpd | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
+    'comandos: login | link | status | browse | browse-key | checkpoint | checkpoints | restore | mapa | graph | graph-query | graph-path | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | memory-edit | workflow | skills | concern | resolve | start | done | focus | board | feature-discard | feature-restore | criteria | criteria-check | handoff | handover | weekly | resume | diagram-save | architecture-check | stack-scan | env-check | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | security-import | security-supabase | db-test | launch-check | lgpd | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
   )
 }
 
 // Cada comando da CLI e o que ele roda (recebe os argumentos depois do nome do comando).
 function cliCommands() {
   const toWork = (name) => (a) => work(name, a)
-  const workCommands = ['feature', 'task', 'decision', 'rule', 'concern', 'resolve', 'done', 'start', 'pegar', 'soltar', 'focus', 'board', 'criteria', 'criteria-check']
+  const workCommands = ['feature', 'task', 'decision', 'rule', 'concern', 'resolve', 'done', 'start', 'pegar', 'soltar', 'focus', 'board', 'criteria', 'criteria-check', 'feature-discard', 'feature-restore']
   return {
     login: (a) => login(a),
     link: (a) => link(a.join(' ').trim()),
