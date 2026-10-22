@@ -99,6 +99,8 @@
 //   faundr team                                quem mais está no projeto agora, onde e em quais arquivos
 //   faundr pegar "<tarefa>" [--force]          vira o responsável pela tarefa (avisa se já é de outra pessoa)
 //   faundr soltar "<tarefa>"                   deixa a tarefa livre para qualquer pessoa
+//   faundr dono ["<funcionalidade>"] [--force] vira o dono da funcionalidade (sem nome: a atual; avisa se é de outra pessoa)
+//   faundr soltar-dono ["<funcionalidade>"]    deixa a funcionalidade sem dono (quem mexer nela primeiro vira o dono)
 //   faundr fila [--feito <código> "nota"]       pedidos do painel, recados e notas esperando você; --feito fecha um pedido
 //   faundr recado "<texto>" [--para "<nome>"]   recado para uma pessoa do time (sem --para: para o time todo)
 //   faundr escutar                             (opcional) ajudante do "Rodar agora": abre sessões de fundo do Claude Code
@@ -1111,11 +1113,19 @@ async function findFeature(query, current) {
   return f
 }
 
-function printFeature(f, byId) {
+function printFeature(f, byId, people) {
   const done = f.tasks.filter((t) => t.task_status === 'completed').length
   const prev = f.after && byId?.get(f.after)
-  console.log(`${f.title}  (${done}/${f.tasks.length} concluídas)${f.planned ? '  [planejada]' : ''}${prev ? `  · vem depois de "${prev.title}"` : ''}`)
-  f.tasks.forEach((t, i) => console.log(`  ${String(i + 1).padStart(2)}. ${MARK[t.task_status] ?? '[ ]'} ${t.title}${t.done_dirty ? '  (sem commit)' : ''}`))
+  const name = (id) => (id && people?.[id]) || null
+  console.log(
+    `${f.title}  (${done}/${f.tasks.length} concluídas)${f.planned ? '  [planejada]' : ''}${name(f.assignee_id) ? `  · dono: ${name(f.assignee_id)}` : ''}${prev ? `  · vem depois de "${prev.title}"` : ''}`,
+  )
+  // Tarefa passada para outra pessoa (não a dona da funcionalidade) mostra com quem está.
+  f.tasks.forEach((t, i) =>
+    console.log(
+      `  ${String(i + 1).padStart(2)}. ${MARK[t.task_status] ?? '[ ]'} ${t.title}${t.done_dirty ? '  (sem commit)' : ''}${t.assignee_id && t.assignee_id !== f.assignee_id && name(t.assignee_id) ? `  (com ${name(t.assignee_id)})` : ''}`,
+    ),
+  )
   if (!f.tasks.length) console.log('  (sem tarefas ainda — faundr task "<descrição>")')
   if (f.criteria?.length)
     console.log(`  Pronto quando: ${f.criteria.map((c, i) => `${i + 1}. ${c.text}${firstOf([[c.met === true, ' [atendido]'], [c.met === false, ' [não atendido]']], '')}`).join(' ')}`)
@@ -1341,7 +1351,7 @@ async function skillsWhen(root, rest) {
 async function work(command, args) {
   await workCommand(command, args)
   // A barra de status lê o resumo do arquivo de estado: atualiza depois de mexer no quadro.
-  if (['feature', 'task', 'done', 'start', 'pegar', 'focus', 'concern', 'resolve', 'feature-discard', 'feature-restore'].includes(command)) await refreshStatus().catch((err) => log(`status: ${err?.message ?? err}`))
+  if (['feature', 'task', 'done', 'start', 'pegar', 'dono', 'soltar-dono', 'focus', 'concern', 'resolve', 'feature-discard', 'feature-restore'].includes(command)) await refreshStatus().catch((err) => log(`status: ${err?.message ?? err}`))
 }
 
 /** Guarda em .faundr/state.json o resumo que a barra de status mostra (projeto, funcionalidade, passo, preocupações). */
@@ -1408,8 +1418,10 @@ async function workCriteria({ args, current, text }) {
   const f = await targetFeature(args, current)
   if (!f) throw new Error('Nenhuma funcionalidade atual: use --feature "<nome>" ou faundr focus "<nome>".')
   const remove = Number(flag(args, '--remove'))
+  const force = args.includes('--force')
   if (remove) {
-    const r = await memoryApi({ action: 'criteria-remove', featureId: f.id, index: remove })
+    const r = await memoryApi({ action: 'criteria-remove', featureId: f.id, index: remove, force })
+    if (ownerBlocked(r.blocked, `faundr criteria --remove ${remove} --force`)) return
     return console.log(`Critério ${remove} removido de "${r.title}" (ficaram ${r.criteria.length}).`)
   }
   if (!text) {
@@ -1419,7 +1431,8 @@ async function workCriteria({ args, current, text }) {
     console.log(`Pronto quando (${features[0].title}):`)
     return list.forEach((c, i) => console.log(`  ${i + 1}. ${criterionMark(c)} ${c.text}${c.note ? ` (${c.note})` : ''}`))
   }
-  const r = await memoryApi({ action: 'criteria', featureId: f.id, text })
+  const r = await memoryApi({ action: 'criteria', featureId: f.id, text, force })
+  if (ownerBlocked(r.blocked, `faundr criteria "${text}" --force`)) return
   return console.log(`Critério de pronto ${r.criteria.length} em "${r.title}": ${text}`)
 }
 
@@ -1435,7 +1448,8 @@ async function workCriteriaCheck({ args, current, text }) {
   if (!n || met === null) throw new Error('uso: faundr criteria-check <nº> --met|--not-met [--note "como conferiu"] [--feature "<nome>"]')
   const f = await targetFeature(args, current)
   if (!f) throw new Error('Nenhuma funcionalidade atual: use --feature "<nome>".')
-  const r = await memoryApi({ action: 'criteria-check', featureId: f.id, index: n, met, note: flag(args, '--note') })
+  const r = await memoryApi({ action: 'criteria-check', featureId: f.id, index: n, met, note: flag(args, '--note'), force: args.includes('--force') })
+  if (ownerBlocked(r.blocked, `faundr criteria-check ${n} ${met ? '--met' : '--not-met'} --force`)) return
   const open = r.criteria.filter((c) => c.met !== true).length
   return console.log(`Critério ${n} de "${r.title}": ${met ? 'atendido' : 'não atendido'}. ${open ? `${open} ainda não atendido(s).` : 'Todos atendidos.'}`)
 }
@@ -1444,7 +1458,8 @@ async function workTask({ args, current, text }) {
   if (!text) throw new Error('uso: faundr task "<descrição>" [--feature "<nome da etapa>"]')
   const target = flag(args, '--feature')
   const parent = target ? await findFeature(target, current) : null
-  await memoryApi({ action: 'add', kind: 'task', title: text, parentId: parent?.id ?? current })
+  const r = await memoryApi({ action: 'add', kind: 'task', title: text, parentId: parent?.id ?? current, force: args.includes('--force') })
+  if (ownerBlocked(r.blocked, `faundr task "${text}"${target ? ` --feature "${target}"` : ''} --force`)) return
   if (parent) return console.log(`Tarefa adicionada em "${parent.title}": ${text}`)
   return console.log(current ? `Tarefa adicionada: ${text}` : `Tarefa adicionada (sem funcionalidade atual — use faundr feature "<título>" para agrupar): ${text}`)
 }
@@ -1529,8 +1544,10 @@ async function workTaskStatus({ command, args, root, current, text }) {
     query: text,
     status: command === 'done' ? 'completed' : 'in_progress',
     featureId: current,
+    force: args.includes('--force'),
     ...(command === 'done' && { commit: gitHead(root), dirty: dirty > 0 }),
   })
+  if (ownerBlocked(r.blocked, `faundr ${command} "${text}" --force`)) return
   console.log(`${command === 'done' ? 'Concluída' : 'Em andamento'}: ${r.title}`)
   if (dirty)
     console.log(
@@ -1549,24 +1566,48 @@ async function workAssign({ command, args, current, text }) {
     )
   if (!r.taken)
     return console.log(
-      `Atenção: a tarefa "${r.title}" já é de ${r.by}${r.at ? ` (pegou em ${new Date(r.at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })})` : ''}. Não mexa nela sem combinar: conte ao usuário e, se ele confirmar que pode, rode faundr pegar "${text}" --force.`,
+      `Atenção: a tarefa "${r.title}" já é de ${r.by}${r.feature ? ` (dona da funcionalidade "${r.feature}")` : ''}${r.at ? ` (pegou em ${new Date(r.at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })})` : ''}. Não mexa nela sem combinar: conte ao usuário e, se ele confirmar que pode, rode faundr pegar "${text}" --force.`,
     )
   return console.log(`Tarefa pegada: ${r.title}${r.from ? ` (era de ${r.from})` : ''}. Ela aparece com o seu nome no painel; ao terminar, faundr done "${text}".`)
 }
 
+// Funcionalidade (ou tarefa) de outra pessoa: o comando não gravou. Mostra o aviso e como seguir com o OK.
+function ownerBlocked(b, retry) {
+  if (!b) return false
+  const day = b.since ? ` (desde ${b.since.slice(8, 10)}/${b.since.slice(5, 7)})` : ''
+  console.log(`Atenção: "${b.title}" é de ${b.ownerName}${day}. Nada foi gravado. Não mexa sem combinar: conte ao usuário e, se ele confirmar que pode, rode: ${retry}`)
+  return true
+}
+
+// dono e soltar-dono: quem é o dono da funcionalidade (sem nome, a atual).
+async function workOwner({ command, args, current, text }) {
+  const query = text || current
+  if (!query) throw new Error(`uso: faundr ${command} "<nome ou id da funcionalidade>"${command === 'dono' ? ' [--force]' : ''}`)
+  const release = command === 'soltar-dono'
+  const r = await memoryApi({ action: 'feature-owner', query, release, force: args.includes('--force') })
+  if (!r.done)
+    return console.log(
+      `Atenção: a funcionalidade "${r.title}" é de ${r.by}. Não ${release ? 'solte' : 'assuma'} sem combinar: conte ao usuário e, se ele confirmar, rode faundr ${command} "${text || r.id.slice(0, 8)}" --force.`,
+    )
+  if (release) return console.log(`Funcionalidade sem dono: ${r.title} (quem mexer nela primeiro vira o dono).`)
+  return console.log(`Você é o dono de "${r.title}"${r.from ? ` (era de ${r.from})` : ''}. O Claude de outra pessoa avisa antes de mexer nela.`)
+}
+
 async function workFocus({ root, text }) {
-  const { features } = await memoryApi({ action: 'board' })
+  const { features, people, me } = await memoryApi({ action: 'board' })
   const q = text.toLowerCase()
   const f = features.find((x) => x.id === text) ?? features.find((x) => x.title.toLowerCase().includes(q))
   if (!f) throw new Error(`Nenhuma funcionalidade encontrada para "${text}". Existentes: ${features.map((x) => x.title).join('; ') || '(nenhuma)'}`)
   setCurrentFeature(root, f.id)
   console.log('Funcionalidade atual:')
-  return printFeature(f, new Map(features.map((x) => [x.id, x])))
+  printFeature(f, new Map(features.map((x) => [x.id, x])), people)
+  if (f.assignee_id && f.assignee_id !== me)
+    console.log(`\nAtenção: esta funcionalidade é de ${people?.[f.assignee_id] ?? 'outra pessoa'}. Combine com o usuário antes de mexer; os comandos (task, done, start, criteria) avisam e só gravam com --force.`)
 }
 
 async function workBoard({ args, current }) {
   const all = args.includes('--all') || !current
-  const { features, orphanTasks, concerns, allFeatures, decisions } = await memoryApi({ action: 'board', featureId: all ? null : current })
+  const { features, orphanTasks, concerns, allFeatures, decisions, people } = await memoryApi({ action: 'board', featureId: all ? null : current })
   const byId = new Map((allFeatures ?? features).map((f) => [f.id, f]))
   // --memory: as regras e decisões confirmadas (para conferir o código contra elas).
   if (args.includes('--memory')) return printDecisions(decisions)
@@ -1579,7 +1620,7 @@ async function workBoard({ args, current }) {
   if (!features.length && !orphanTasks?.length) return console.log('Nenhuma funcionalidade ainda. Crie com: faundr feature "<título>"')
   for (const f of features) {
     if (f.id === current) console.log('>> atual')
-    printFeature(f, byId)
+    printFeature(f, byId, people)
     console.log('')
   }
   if (orphanTasks?.length) printFeature({ title: 'Tarefas sem funcionalidade', tasks: orphanTasks })
@@ -1645,6 +1686,8 @@ const WORK_HANDLERS = {
   start: workTaskStatus,
   pegar: workAssign,
   soltar: workAssign,
+  dono: workOwner,
+  'soltar-dono': workOwner,
   focus: workFocus,
   board: workBoard,
   'feature-discard': workDiscard,
@@ -4768,7 +4811,7 @@ function printCommands() {
 // Cada comando da CLI e o que ele roda (recebe os argumentos depois do nome do comando).
 function cliCommands() {
   const toWork = (name) => (a) => work(name, a)
-  const workCommands = ['feature', 'task', 'decision', 'rule', 'concern', 'resolve', 'done', 'start', 'pegar', 'soltar', 'focus', 'board', 'criteria', 'criteria-check', 'feature-discard', 'feature-restore']
+  const workCommands = ['feature', 'task', 'decision', 'rule', 'concern', 'resolve', 'done', 'start', 'pegar', 'soltar', 'dono', 'soltar-dono', 'focus', 'board', 'criteria', 'criteria-check', 'feature-discard', 'feature-restore']
   return {
     login: (a) => login(a),
     link: (a) => link(a.join(' ').trim()),
