@@ -116,3 +116,29 @@ test('C#: catch vazio e que devolve null, Console.WriteLine fora do Program, Deb
   assert.deepEqual(found('Loja/Pedido.cs').sort(), ['complexidade/funcao', 'falha/catch-devolve-nulo', 'falha/catch-vazio', 'limpeza/debugger', 'limpeza/print-esquecido'])
   assert.deepEqual(found('Loja.Tests/PedidoTests.cs').sort(), ['testes/pulado', 'testes/sem-conferencia'])
 })
+
+test('Rust: Err(_) vazio, que só loga ou vira None; println! fora do main, dbg! e unwrap(); #[test] sem assert e #[ignore]', async () => {
+  const { found } = await check({
+    'Cargo.toml': '[package]\nname = "loja"\nversion = "0.1.0"\n',
+    'src/main.rs': 'mod pedido;\n\nfn main() {\n    println!("subiu");\n    pedido::salva(1);\n}\n',
+    'src/pedido.rs': `pub fn salva(p: i32) -> Option<i32> {\n    match grava(p) {\n        Ok(_) => {}\n        Err(_) => {}\n    }\n    if let Err(e) = grava(p) {\n        eprintln!("{}", e);\n    }\n    println!("salvo");\n    dbg!(p);\n    let v = le(p).unwrap();\n    match le(v) {\n        Ok(x) => Some(x),\n        Err(_) => None,\n    }\n}\n\npub fn nota(x: i32) -> i32 {\n${ifs((i) => `    if x == ${i} {\n        return ${i};\n    }`)}\n    -1\n}\n\nfn grava(_p: i32) -> Result<(), String> {\n    Ok(())\n}\n\nfn le(p: i32) -> Result<i32, String> {\n    Ok(p)\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn salva_ok() {\n        salva(1);\n    }\n\n    #[test]\n    fn le_ok() {\n        assert_eq!(le(1).unwrap(), 1);\n    }\n\n    #[test]\n    #[ignore]\n    fn velho() {}\n}\n`,
+    'src/ok.rs': 'pub fn confere(r: Result<i32, String>) -> Result<i32, String> {\n    match r {\n        Ok(x) => Ok(x),\n        Err(e) => Err(format!("salva: {e}")),\n    }\n}\n',
+  })
+  assert.deepEqual(found('src/main.rs'), [], 'println! no main é a saída do programa')
+  assert.deepEqual(found('src/pedido.rs').sort(), ['complexidade/funcao', 'falha/catch-devolve-nulo', 'falha/catch-so-loga', 'falha/catch-vazio', 'falha/unwrap', 'limpeza/print-esquecido', 'testes/pulado', 'testes/sem-conferencia'])
+  assert.deepEqual(found('src/ok.rs'), [], 'erro devolvido com contexto está certo')
+})
+
+test('C e C++: catch vazio e que só loga, função complexa; GoogleTest sem EXPECT e DISABLED_', async () => {
+  const { found } = await check({
+    'CMakeLists.txt': 'project(loja)\n',
+    'src/main.cpp': '#include <iostream>\n\nint main() {\n    std::cout << "subiu" << std::endl;\n    return 0;\n}\n',
+    'src/pedido.cpp': `#include <iostream>\n\nint grava(int p);\n\nint salva(int p) {\n    try {\n        grava(p);\n    } catch (...) {\n    }\n    try {\n        grava(p);\n    } catch (const std::exception& e) {\n        std::cerr << e.what() << std::endl;\n    }\n    return p;\n}\n`,
+    'src/nota.c': `int nota(int x) {\n${ifs((i) => `    if (x == ${i}) return ${i};`)}\n    return -1;\n}\n`,
+    'tests/pedido_test.cpp': '#include <gtest/gtest.h>\n\nint salva(int p);\n\nTEST(Pedido, Salva) {\n    salva(1);\n}\n\nTEST(Pedido, Volta) {\n    EXPECT_EQ(salva(1), 1);\n}\n\nTEST(Pedido, DISABLED_Velho) {\n}\n',
+  })
+  assert.deepEqual(found('src/main.cpp'), [])
+  assert.deepEqual(found('src/pedido.cpp').sort(), ['falha/catch-so-loga', 'falha/catch-vazio'])
+  assert.deepEqual(found('src/nota.c'), ['complexidade/funcao'])
+  assert.deepEqual(found('tests/pedido_test.cpp').sort(), ['testes/pulado', 'testes/sem-conferencia'])
+})

@@ -112,3 +112,36 @@ test('C#: using liga aos arquivos do namespace; Classe.Metodo(), new e var.Metod
   assert.ok(edges.some((e) => e.from === '.Show()' && e.to === '.Notify()'), 'Notify() da mesma classe')
   assert.ok(edges.some((e) => e.from === '.Notify()' && e.to === '.Save()'), 'u.Save() pelo tipo do parâmetro')
 })
+
+test('Rust: mod e use crate:: ligam os arquivos; modulo::funcao() e Tipo::new() são chamados', async () => {
+  const { edges } = await graphOf({
+    'Cargo.toml': '[package]\nname = "loja"\nversion = "0.1.0"\n',
+    'src/main.rs': 'mod db;\nmod util;\n\nuse crate::db::repo::Repo;\n\nfn main() {\n    let r = Repo::new();\n    r.save(1);\n    util::ajuda();\n}\n',
+    'src/util.rs': 'pub fn ajuda() {}\n',
+    'src/db/mod.rs': 'pub mod repo;\n',
+    'src/db/repo.rs': 'pub struct Repo;\n\nimpl Repo {\n    pub fn new() -> Self {\n        Repo\n    }\n    pub fn save(&self, x: i32) -> i32 {\n        x\n    }\n}\n',
+  })
+  assert.ok(edges.some((e) => e.fromFile === 'src/main.rs' && e.toFile === 'src/util.rs' && e.relation === 'imports'), 'mod util; → util.rs')
+  assert.ok(edges.some((e) => e.fromFile === 'src/main.rs' && e.toFile === 'src/db/mod.rs' && e.relation === 'imports'), 'mod db; → db/mod.rs')
+  assert.ok(edges.some((e) => e.fromFile === 'src/db/mod.rs' && e.toFile === 'src/db/repo.rs' && e.relation === 'imports'), 'pub mod repo; dentro de db/mod.rs')
+  assert.ok(edges.some((e) => e.fromFile === 'src/main.rs' && e.toFile === 'src/db/repo.rs' && e.relation === 'imports'), 'use crate::db::repo::Repo')
+  assert.ok(edges.some((e) => e.from === 'main()' && e.to === '.new()' && e.relation === 'calls'), 'Repo::new()')
+  assert.ok(edges.some((e) => e.from === 'main()' && e.to === 'ajuda()' && e.toFile === 'src/util.rs'), 'util::ajuda()')
+})
+
+test('C e C++: #include acha o cabeçalho nas pastas de include; funções de outro arquivo são chamadas', async () => {
+  const { edges } = await graphOf({
+    'CMakeLists.txt': 'cmake_minimum_required(VERSION 3.20)\nproject(loja)\ntarget_include_directories(loja PRIVATE include libs/core/include)\n',
+    'include/loja/calc.h': '#pragma once\nint soma(int a, int b);\n',
+    'src/calc.c': '#include "loja/calc.h"\n\nint soma(int a, int b) { return a + b; }\n',
+    'src/main.c': '#include <stdio.h>\n#include <loja/calc.h>\n\nint main(void) {\n    printf("%d", soma(1, 2));\n    return 0;\n}\n',
+    'libs/core/include/core/repo.hpp': '#pragma once\nnamespace core {\nclass Repo {\npublic:\n    int save(int x);\n};\n}\n',
+    'libs/core/src/repo.cpp': '#include "core/repo.hpp"\n\nnamespace core {\nint Repo::save(int x) { return x; }\n}\n',
+    'app/app.cpp': '#include "core/repo.hpp"\n\nint roda() {\n    core::Repo r;\n    return r.save(1);\n}\n',
+  })
+  assert.ok(edges.some((e) => e.fromFile === 'src/calc.c' && e.toFile === 'include/loja/calc.h' && e.relation === 'imports'), '#include "loja/calc.h" pela pasta include')
+  assert.ok(edges.some((e) => e.fromFile === 'src/main.c' && e.toFile === 'include/loja/calc.h' && e.relation === 'imports'), '#include <loja/calc.h> do próprio projeto')
+  assert.ok(!edges.some((e) => e.fromFile === 'src/main.c' && e.toFile && e.toFile.endsWith('stdio.h')), 'stdio.h fica de fora')
+  assert.ok(edges.some((e) => e.fromFile === 'app/app.cpp' && e.toFile === 'libs/core/include/core/repo.hpp' && e.relation === 'imports'), 'pasta de include de uma biblioteca do projeto')
+  assert.ok(edges.some((e) => e.from === 'main()' && e.to === 'soma()' && e.toFile === 'src/calc.c'), 'soma() definida em outro .c')
+})

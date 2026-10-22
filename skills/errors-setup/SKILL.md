@@ -45,6 +45,8 @@ Leia o `package.json` (e os arquivos de configuração) e escolha **um** pacote:
 | Android (Kotlin/Java) | plugin Gradle `io.sentry.android.gradle` | `io.sentry.dsn` no `AndroidManifest.xml` (`<meta-data>`); o plugin liga sozinho |
 | ASP.NET Core (C#) | `Sentry.AspNetCore` (`dotnet add package Sentry.AspNetCore`) | `builder.WebHost.UseSentry(o => {…})` no `Program.cs` |
 | .NET sem ASP.NET (console, worker) | `Sentry` (`dotnet add package Sentry`) | `using var _ = SentrySdk.Init(o => {…})` no começo do `Main` |
+| Rust (Axum, Actix Web, programas) | `sentry` (`cargo add sentry`) e, no Axum, `sentry-tower` (`cargo add sentry-tower --features http`) | `let _guard = sentry::init(...)` na primeira linha do `main()`, antes do runtime do tokio (sem o `#[tokio::main]`; monte o runtime depois do init); no Axum, `.layer(NewSentryLayer::new_from_top())` e `.layer(SentryHttpLayer::new())` |
+| C e C++ | `sentry-native` (pelo vcpkg `sentry-native`, Conan `sentry-native` ou o FetchContent do CMake) | `sentry_init(options)` no começo do `main()` e `sentry_close()` antes de sair; o build precisa dos símbolos (`-g` ou `RelWithDebInfo`) para o erro trazer arquivo e linha |
 
 Se o app tem navegador e servidor, ligue os dois (é o mesmo DSN).
 
@@ -130,9 +132,34 @@ if (builder.Environment.IsProduction())
     });
 ```
 
+```rust
+// Rust: sentry (APP_ENV e COMMIT_SHA vêm do ambiente do servidor). O guard precisa viver até o fim do main.
+let _guard = (std::env::var("APP_ENV").as_deref() == Ok("production")).then(|| {
+    sentry::init(("<DSN acima>", sentry::ClientOptions {
+        environment: Some("production".into()),
+        release: std::env::var("COMMIT_SHA").ok().map(Into::into),
+        send_default_pii: false,
+        traces_sample_rate: 0.0,
+        ..Default::default()
+    }))
+});
+```
+
+```c
+// C/C++: sentry-native (só no build de produção)
+#ifdef NDEBUG
+sentry_options_t *options = sentry_options_new();
+sentry_options_set_dsn(options, "<DSN acima>");
+sentry_options_set_environment(options, "production");
+sentry_options_set_release(options, getenv("COMMIT_SHA") ? getenv("COMMIT_SHA") : "dev");
+sentry_init(options);
+#endif
+// … e no fim do main: sentry_close();
+```
+
 ## 3. Confira com um erro de teste
 
-1. Publique (ou rode o build de produção localmente com `enabled: true` só para o teste) e dispare um erro de propósito: um botão temporário que faz `throw new Error('Teste do Faundr')`, ou `Sentry.captureException(new Error('Teste do Faundr'))`. **Não teste pelo console do navegador**: erros digitados lá não são capturados. Nas outras linguagens: `sentry_sdk.capture_exception(Exception("Teste do Faundr"))` (Python), `Sentry.captureException(Exception('Teste do Faundr'))` (Flutter/Dart), `\Sentry\captureException(new \Exception('Teste do Faundr'))` (PHP) ou `php artisan sentry:test` (Laravel), `sentry.CaptureException(errors.New("Teste do Faundr"))` (Go), `Sentry.captureException(RuntimeException("Teste do Faundr"))` (Java/Kotlin) ou `SentrySdk.CaptureException(new Exception("Teste do Faundr"))` (C#).
+1. Publique (ou rode o build de produção localmente com `enabled: true` só para o teste) e dispare um erro de propósito: um botão temporário que faz `throw new Error('Teste do Faundr')`, ou `Sentry.captureException(new Error('Teste do Faundr'))`. **Não teste pelo console do navegador**: erros digitados lá não são capturados. Nas outras linguagens: `sentry_sdk.capture_exception(Exception("Teste do Faundr"))` (Python), `Sentry.captureException(Exception('Teste do Faundr'))` (Flutter/Dart), `\Sentry\captureException(new \Exception('Teste do Faundr'))` (PHP) ou `php artisan sentry:test` (Laravel), `sentry.CaptureException(errors.New("Teste do Faundr"))` (Go), `Sentry.captureException(RuntimeException("Teste do Faundr"))` (Java/Kotlin), `SentrySdk.CaptureException(new Exception("Teste do Faundr"))` (C#), `sentry::capture_message("Teste do Faundr", sentry::Level::Error)` (Rust) ou `sentry_capture_event(sentry_value_new_message_event(SENTRY_LEVEL_ERROR, NULL, "Teste do Faundr"))` (C/C++).
 2. Rode `faundr errors` e veja se apareceu um E-n "[app publicado]". Pode levar alguns segundos.
 3. Tire o botão de teste e arquive o E-n do teste: `faundr error-archive E-<n>`.
 

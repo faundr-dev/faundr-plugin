@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
-import { scanProject } from '../bin/security.mjs'
+import { projectMap, scanProject } from '../bin/security.mjs'
 
 // Projeto de exemplo no git; devolve as regras de código achadas em cada arquivo.
 async function scan(files) {
@@ -190,4 +190,78 @@ test('C#: SQL com FromSqlRaw e +, cmd /c, BinaryFormatter, TLS, Html.Raw, hash f
   assert.deepEqual(found('Loja/Views/Home/Index.cshtml'), ['cs-raw-html'])
   assert.deepEqual(found('Loja/Bom.cs'), [])
   assert.deepEqual(found('Loja/Views/Home/Bom.cshtml'), [])
+})
+
+test('Rust: SQL com format!, sh -c, TLS sem conferir, CORS liberado, PreEscaped, JWT sem assinatura e hash fraco', async () => {
+  const found = await scan({
+    'src/ruim.rs': [
+      'let rows = sqlx::query(&format!("SELECT * FROM users WHERE id = {}", id)).fetch_all(&pool).await?;',
+      'conn.execute(&format!("DELETE FROM pedidos WHERE dono = \'{dono}\'"), [])?;',
+      'let out = Command::new("sh").arg("-c").arg(format!("convert {}", arquivo)).output()?;',
+      'let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build()?;',
+      'let app = Router::new().layer(CorsLayer::permissive());',
+      'html! { (PreEscaped(comentario)) }',
+      'validation.insecure_disable_signature_validation();',
+      'let h = md5::compute(senha.as_bytes());',
+    ].join('\n'),
+    'src/bom.rs': [
+      'let rows = sqlx::query("SELECT * FROM users WHERE id = $1").bind(id).fetch_all(&pool).await?;',
+      'let out = Command::new("convert").arg(&arquivo).output()?;',
+      'let cors = CorsLayer::new().allow_origin("https://loja.com".parse::<HeaderValue>()?);',
+      'html! { (PreEscaped("<b>fixo</b>")) }',
+      'let h = argon2.hash_password(senha.as_bytes(), &salt)?;',
+    ].join('\n'),
+    'tests/api.rs': 'let c = reqwest::Client::builder().danger_accept_invalid_certs(true).build();\n',
+  })
+  assert.deepEqual(found('src/ruim.rs'), [
+    'rust-command-injection', 'rust-cors-any-origin', 'rust-html-unescaped', 'rust-jwt-without-verify', 'rust-sql-injection', 'rust-tls-verification-disabled', 'rust-weak-password-hash',
+  ])
+  assert.deepEqual(found('src/bom.rs'), [])
+  assert.deepEqual(found('tests/api.rs'), [], 'arquivo de teste fica de fora')
+})
+
+test('C e C++: gets/strcpy, printf com variável, system(), SQL com sprintf, TLS sem conferir e hash fraco', async () => {
+  const found = await scan({
+    'src/ruim.c': [
+      'gets(nome);',
+      'strcpy(destino, entrada);',
+      'printf(mensagem);',
+      'system(comando);',
+      'sprintf(sql, "SELECT * FROM users WHERE nome = \'%s\'", nome);',
+      'curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);',
+      'MD5((unsigned char*)senha, strlen(senha), hash);',
+    ].join('\n'),
+    'src/ruim.cpp': [
+      'auto sql = std::format("DELETE FROM pedidos WHERE dono = {}", dono);',
+      'SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, nullptr);',
+    ].join('\n'),
+    'src/bom.c': [
+      'fgets(nome, sizeof nome, stdin);',
+      'snprintf(destino, sizeof destino, "%s", entrada);',
+      'printf("%s", mensagem);',
+      'system("clear");',
+      'sqlite3_prepare_v2(db, "SELECT * FROM users WHERE nome = ?", -1, &stmt, NULL);',
+      'curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);',
+    ].join('\n'),
+    'tests/ruim_test.c': 'gets(nome);\n',
+  })
+  assert.deepEqual(found('src/ruim.c'), [
+    'c-command-injection', 'c-format-string', 'c-sql-injection', 'c-tls-verification-disabled', 'c-unsafe-string-function', 'c-weak-password-hash',
+  ])
+  assert.deepEqual(found('src/ruim.cpp'), ['c-sql-injection', 'c-tls-verification-disabled'])
+  assert.deepEqual(found('src/bom.c'), [])
+  assert.deepEqual(found('tests/ruim_test.c'), [], 'arquivo de teste fica de fora')
+})
+
+test('Revisão com IA: Rust, C/C++, Go, Java e C# puxam o tema do catálogo de cada um', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-sm-'))
+  for (const rel of ['api/src/main.rs', 'motor/calc.cpp', 'svc/main.go', 'app/App.java', 'web/Program.cs']) {
+    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true })
+    fs.writeFileSync(path.join(dir, rel), '\n')
+  }
+  spawnSync('git', ['init', '-q'], { cwd: dir })
+  spawnSync('git', ['add', '-A'], { cwd: dir })
+  const { topics } = projectMap(dir)
+  for (const t of ['rust', 'c-cpp', 'go', 'java-spring', 'dotnet']) assert.ok(topics.includes(t), t)
+  for (const t of topics) assert.ok(fs.existsSync(new URL(`../skills/security/catalog/${t}.md`, import.meta.url)), `catálogo ${t}.md existe`)
 })

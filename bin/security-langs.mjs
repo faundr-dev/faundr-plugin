@@ -1,4 +1,4 @@
-// Regras de segurança por linha para PHP, Dart/Flutter, Python, Go, Java/Kotlin e C# (as de JS/TS ficam em
+// Regras de segurança por linha para PHP, Dart/Flutter, Python, Go, Java/Kotlin, C#, Rust e C/C++ (as de JS/TS ficam em
 // security.mjs). Mesmo formato: padrão da linha (re), exceção na linha (ok) ou no arquivo (fileOk), e o texto
 // do achado. `files`: em que arquivos a regra vale.
 
@@ -10,6 +10,8 @@ const GO = /\.go$/i
 const JVM = /\.(java|kt|kts)$/i
 const CS = /\.cs$/i
 const RAZOR = /\.(cshtml|razor)$/i
+const RUST = /\.rs$/i
+const C_CPP = /\.(c|cc|cpp|cxx|h|hh|hpp|hxx)$/i
 const USER_INPUT_PHP = /\$_(GET|POST|REQUEST|COOKIE|SERVER|FILES)\b|\$request->(input|get|query|all)\(|request\(\)->/
 
 export const LANG_LINE_RULES = [
@@ -516,5 +518,152 @@ export const LANG_LINE_RULES = [
     detail: 'A API libera chamadas de qualquer origem (AllowAnyOrigin ou SetIsOriginAllowed que aceita tudo).',
     impact: 'Outro site pode chamar a sua API pelo navegador de quem está logado e ler dados que deveriam ficar só no seu app.',
     fix: 'Use WithOrigins("https://seu-app.com") na política de CORS.',
+  },
+
+  // ---- Rust ----
+  {
+    id: 'rust-sql-injection',
+    files: RUST,
+    re: /(sqlx::query(_as|_scalar)?(::<[^>]*>)?|sql_query|\.(query|query_row|query_map|execute|execute_batch|prepare))\s*\(\s*&?\s*format!\s*\(\s*"(?=[^"]*\b(select|insert|update|delete|where|order by)\b)[^"]*\{/i,
+    severity: 'high',
+    cwe: 'CWE-89',
+    title: 'Consulta SQL montada com variável (Rust)',
+    detail: 'A consulta ao banco é montada com format!, juntando o texto do SQL com uma variável.',
+    impact: 'Se a variável vier do usuário (formulário, URL), ele consegue ler ou apagar dados de outras pessoas mudando a consulta.',
+    fix: 'Use parâmetros: sqlx::query("... where id = $1").bind(id) (ou a macro query! que confere na compilação); no rusqlite, conn.execute("... = ?1", [id]).',
+  },
+  {
+    id: 'rust-command-injection',
+    files: RUST,
+    re: /Command::new\(\s*"(sh|bash|\/bin\/sh|\/bin\/bash|cmd|cmd\.exe|powershell)"\s*\)[^;]*"(-c|\/c|\/C|-Command)"[^;]*(format!|\.arg\(\s*&?[a-z_][\w.]*\s*\))/,
+    severity: 'high',
+    cwe: 'CWE-78',
+    title: 'Comando do shell com variável (Rust)',
+    detail: 'Command::new chama o shell (sh -c) com um texto que inclui uma variável.',
+    impact: 'Se o valor vier do usuário, ele roda qualquer comando no servidor: apaga arquivos, lê as senhas do ambiente.',
+    fix: 'Chame o programa direto, sem shell, passando cada argumento separado: Command::new("convert").arg(&entrada).arg(&saida). Confira o valor contra uma lista do que é permitido.',
+  },
+  {
+    id: 'rust-tls-verification-disabled',
+    files: RUST,
+    re: /danger_accept_invalid_(certs|hostnames)\s*\(\s*true\s*\)|\.dangerous\(\)\s*\.set_certificate_verifier|NoCertificateVerification/,
+    severity: 'high',
+    cwe: 'CWE-295',
+    title: 'Conexão HTTPS sem conferir o certificado (Rust)',
+    detail: 'O cliente HTTP aceita qualquer certificado (danger_accept_invalid_certs ou um verificador que aprova tudo).',
+    impact: 'Quem estiver no meio da rede (Wi-Fi público, proxy) lê e altera o que o app manda e recebe, inclusive senhas e tokens.',
+    fix: 'Apague o danger_accept_invalid_certs. Para um certificado próprio, adicione-o com add_root_certificate no ClientBuilder.',
+  },
+  {
+    id: 'rust-html-unescaped',
+    files: RUST,
+    re: /PreEscaped\s*\(\s*(?!")[\w&.]|Html\s*\(\s*format!\s*\(/,
+    severity: 'high',
+    cwe: 'CWE-79',
+    title: 'HTML montado com variável sem escapar (Rust)',
+    detail: 'Uma variável entra na página como HTML pronto (PreEscaped no maud, ou Html(format!(...)) no axum), sem escapar.',
+    impact: 'Se o texto vier do usuário, ele coloca um script na página que roda no navegador de quem abrir: rouba a sessão ou age em nome da pessoa.',
+    fix: 'Deixe o template escapar (no maud, (variavel) sem PreEscaped; no askama, sem o filtro |safe). Se precisar de HTML do usuário, limpe antes com o crate ammonia.',
+  },
+  {
+    id: 'rust-jwt-without-verify',
+    files: RUST,
+    re: /insecure_disable_signature_validation\s*\(|dangerous_insecure_decode|validate_exp\s*=\s*false/,
+    severity: 'critical',
+    cwe: 'CWE-347',
+    title: 'Token de login aceito sem conferir a assinatura ou o prazo (Rust)',
+    detail: 'O jsonwebtoken está com a conferência da assinatura (ou do vencimento) desligada.',
+    impact: 'Qualquer pessoa monta um token (ou reusa um vencido) com o id de outro usuário e entra como ele.',
+    fix: 'Use decode::<Claims>(token, &DecodingKey::from_secret(...), &Validation::new(Algorithm::HS256)) sem desligar nada da Validation.',
+  },
+  {
+    id: 'rust-weak-password-hash',
+    files: RUST,
+    re: /(md5::compute|Md5::digest|Sha1::digest|Md5::new|Sha1::new)\s*\([^)]*(pass|senha|pwd)/i,
+    severity: 'high',
+    cwe: 'CWE-916',
+    title: 'Senha guardada com hash fraco (md5/sha1)',
+    detail: 'A senha é transformada com md5 ou sha1.',
+    impact: 'Se o banco vazar, essas senhas são descobertas em minutos com tabelas prontas.',
+    fix: 'Use o crate argon2 (Argon2::default().hash_password) ou bcrypt.',
+  },
+  {
+    id: 'rust-cors-any-origin',
+    files: RUST,
+    re: /CorsLayer::(very_)?permissive\s*\(|Cors::permissive\s*\(|\.allow_any_origin\s*\(|\.allow_origin\s*\(\s*(Any|AllowOrigin::any\(\))\s*\)|send_wildcard\s*\(/,
+    severity: 'medium',
+    cwe: 'CWE-942',
+    title: 'Qualquer site pode chamar a API (CORS *)',
+    detail: 'A API libera chamadas de qualquer origem (CorsLayer::permissive, allow_any_origin ou Any).',
+    impact: 'Outro site pode chamar a sua API pelo navegador de quem está logado e ler dados que deveriam ficar só no seu app.',
+    fix: 'Liste só os endereços do seu app: CorsLayer::new().allow_origin("https://seu-app.com".parse::<HeaderValue>()?).',
+  },
+
+  // ---- C / C++ ----
+  {
+    id: 'c-unsafe-string-function',
+    files: C_CPP,
+    re: /(?<![\w.>:])(gets|strcpy|strcat|sprintf|vsprintf|wcscpy|wcscat)\s*\((?!\s*\w+\s*,\s*"[^"%]*"\s*\))/,
+    severity: 'high',
+    cwe: 'CWE-120',
+    title: 'Função que pode estourar a memória (C/C++)',
+    detail: 'gets, strcpy, strcat ou sprintf copiam o texto sem saber o tamanho do espaço de destino.',
+    impact: 'Um texto maior que o esperado passa do limite e sobrescreve outra parte da memória: o programa cai, e um atacante pode fazer ele rodar o próprio código.',
+    fix: 'Troque por versões com tamanho: fgets(buf, sizeof buf, stdin), snprintf(buf, sizeof buf, ...), strncpy/strlcpy; em C++, std::string.',
+  },
+  {
+    id: 'c-format-string',
+    files: C_CPP,
+    re: /(?<![\w.>:])(printf|vprintf)\s*\(\s*[a-zA-Z_][\w.>-]*\s*\)|(?<![\w.>:])(fprintf|dprintf|syslog)\s*\(\s*\w+\s*,\s*[a-zA-Z_][\w.>-]*\s*\)/,
+    severity: 'high',
+    cwe: 'CWE-134',
+    title: 'Texto variável usado como formato do printf (C/C++)',
+    detail: 'O printf (ou fprintf/syslog) recebe uma variável no lugar do texto de formato.',
+    impact: 'Se o texto vier de fora, quem manda põe %x e %n nele para ler e até escrever na memória do programa.',
+    fix: 'Passe o formato fixo e a variável como argumento: printf("%s", mensagem).',
+  },
+  {
+    id: 'c-command-injection',
+    files: C_CPP,
+    re: /(?<![\w.>:])(system|popen|_popen|_wsystem)\s*\(\s*(?!")[\w&*(]/,
+    severity: 'high',
+    cwe: 'CWE-78',
+    title: 'Comando do sistema com variável (C/C++)',
+    detail: 'system() ou popen() roda no shell um texto que vem de uma variável.',
+    impact: 'Se parte do texto vier do usuário, ele roda qualquer comando na máquina: apaga arquivos, lê senhas.',
+    fix: 'Chame o programa direto, sem shell (execv/posix_spawn com a lista de argumentos), e confira o valor contra uma lista do que é permitido.',
+  },
+  {
+    id: 'c-sql-injection',
+    files: C_CPP,
+    re: /\b(sn?printf|asprintf)\s*\([^;]*"\s*(select|insert|update|delete)\b[^"]*%s|\b(std::)?format\s*\(\s*"\s*(select|insert|update|delete)\b[^"]*\{\}|"\s*(select|insert|update|delete)\b[^"]*"\s*\+\s*[a-zA-Z_]/i,
+    severity: 'high',
+    cwe: 'CWE-89',
+    title: 'Consulta SQL montada com variável (C/C++)',
+    detail: 'O texto da consulta é montado com sprintf, std::format ou +, juntando o SQL com uma variável.',
+    impact: 'Se a variável vier do usuário, ele consegue ler ou apagar dados de outras pessoas mudando a consulta.',
+    fix: 'Use parâmetros: sqlite3_prepare_v2 com ? e sqlite3_bind_text; no libpq, PQexecParams com $1.',
+  },
+  {
+    id: 'c-tls-verification-disabled',
+    files: C_CPP,
+    re: /CURLOPT_SSL_VERIFY(PEER|HOST)\s*,\s*0L?\s*\)|SSL_(CTX_)?set_verify\s*\(\s*\w+\s*,\s*SSL_VERIFY_NONE|set_verify_mode\s*\(\s*(boost::)?(asio::)?ssl::verify_none/,
+    severity: 'high',
+    cwe: 'CWE-295',
+    title: 'Conexão HTTPS sem conferir o certificado (C/C++)',
+    detail: 'A conexão aceita qualquer certificado (CURLOPT_SSL_VERIFYPEER 0 ou SSL_VERIFY_NONE).',
+    impact: 'Quem estiver no meio da rede (Wi-Fi público, proxy) lê e altera o que o programa manda e recebe, inclusive senhas e tokens.',
+    fix: 'Deixe a conferência ligada (CURLOPT_SSL_VERIFYPEER 1L, SSL_VERIFY_PEER). Para um certificado próprio, aponte o CURLOPT_CAINFO para ele.',
+  },
+  {
+    id: 'c-weak-password-hash',
+    files: C_CPP,
+    re: /\b(MD5|SHA1|MD5_Update|SHA1_Update)\s*\([^;]*(pass|senha|pwd)/i,
+    severity: 'high',
+    cwe: 'CWE-916',
+    title: 'Senha guardada com hash fraco (md5/sha1)',
+    detail: 'A senha é transformada com MD5 ou SHA1.',
+    impact: 'Se o banco vazar, essas senhas são descobertas em minutos com tabelas prontas.',
+    fix: 'Use Argon2 (libsodium: crypto_pwhash) ou bcrypt.',
   },
 ]

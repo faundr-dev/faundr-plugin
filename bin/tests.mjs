@@ -11,12 +11,26 @@ import { COVERAGE_DIR, coverageArgs } from './coverage.mjs'
 import { subDirs } from './parts.mjs'
 import { relPath } from './paths.mjs'
 import { findSecrets, mask, projectFiles } from './security.mjs'
-import { countLangCases, CS_TEST_FILE, DART_TEST_FILE, GO_TEST_FILE, isLangProjectDir, JVM_TEST_FILE, junitCaseFiles, langRunnersIn, PHP_TEST_FILE, runLangTests } from './tests-langs.mjs'
+import {
+  C_TEST_FILE,
+  countLangCases,
+  CS_TEST_FILE,
+  DART_TEST_FILE,
+  GO_TEST_FILE,
+  isLangProjectDir,
+  JVM_TEST_FILE,
+  junitCaseFiles,
+  langRunnersIn,
+  PHP_TEST_FILE,
+  runLangTests,
+  RUST_INLINE_TEST,
+  RUST_TEST_FILE,
+} from './tests-langs.mjs'
 
 export const TEST_FILE = /(^|\/)(__tests__|tests?|e2e|spec)\/.*\.[cm]?[jt]sx?$|\.(test|spec)\.[cm]?[jt]sx?$/
 export const PY_TEST_FILE = /(^|\/)(test_[^/]*|[^/]*_test)\.py$/
 // Arquivos de teste de todas as linguagens que o inventário conta.
-const LANG_TEST_FILES = [TEST_FILE, PY_TEST_FILE, DART_TEST_FILE, PHP_TEST_FILE, GO_TEST_FILE, JVM_TEST_FILE, CS_TEST_FILE]
+const LANG_TEST_FILES = [TEST_FILE, PY_TEST_FILE, DART_TEST_FILE, PHP_TEST_FILE, GO_TEST_FILE, JVM_TEST_FILE, CS_TEST_FILE, RUST_TEST_FILE, C_TEST_FILE]
 const NOT_PROJECT = /(^|\/)(node_modules|dist|build|site-packages|\.?venv|env)\//
 const OUT_DIR = path.normalize(relPath('tests'))
 const RUN_TIMEOUT = 15 * 60_000
@@ -56,7 +70,7 @@ const readJson = (root, rel) => {
 // go.mod, pom.xml, build.gradle, .sln/.csproj): cada parte pode ter o seu executor.
 const projectDirs = (root) => subDirs(root, (d) => fs.existsSync(path.join(root, d, 'package.json')) || PYTEST_CONFIG(root, d) || isLangProjectDir(root, d))
 // Executores que o Faundr roda fora do Node e do Python (tests-langs.mjs).
-export const LANG_RUNNERS = ['flutter', 'dart', 'phpunit', 'pest', 'go', 'maven', 'gradle', 'dotnet']
+export const LANG_RUNNERS = ['flutter', 'dart', 'phpunit', 'pest', 'go', 'maven', 'gradle', 'dotnet', 'cargo', 'ctest']
 // pytest-cov declarado no projeto: dá para medir a cobertura do pytest.
 const hasPytestCov = (root, dir) =>
   ['requirements.txt', 'requirements-dev.txt', 'requirements_dev.txt', 'pyproject.toml', 'Pipfile', 'setup.cfg'].some((f) => /pytest-cov/.test(read(root, path.join(dir, f)) ?? ''))
@@ -152,7 +166,9 @@ const CASE_CALL = /\b(?:it|test)(?:\.(only|skip|todo|fixme|fail|concurrent|each\
 
 /** Inventário: arquivos de teste, estimativa de testes, quais são de ponta a ponta (navegador). */
 export function inventory(root, files = projectFiles(root).files) {
-  const testFiles = files.filter((f) => LANG_TEST_FILES.some((re) => re.test(f)) && !NOT_PROJECT.test(f) && !/(^|\/)vendor\//.test(f))
+  // Rust: o teste de unidade fica no próprio arquivo (#[test]), então o .rs entra se tiver um.
+  const isTest = (f) => LANG_TEST_FILES.some((re) => re.test(f)) || (f.endsWith('.rs') && RUST_INLINE_TEST.test(read(root, f) ?? ''))
+  const testFiles = files.filter((f) => !NOT_PROJECT.test(f) && !/(^|\/)(vendor|target)\//.test(f) && isTest(f))
   let cases = 0
   let skipped = 0
   let e2eFiles = 0

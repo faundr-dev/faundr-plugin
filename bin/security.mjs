@@ -230,7 +230,7 @@ export function findSecrets(text, rel = '') {
   return out
 }
 
-const TEST_PATH = /(^|\/)(__tests__|__mocks__|tests?|spec|specs|fixtures?|mocks?|e2e|cypress|playwright|stories)(\/|$)|\.(test|spec|stories)\.[a-z]+$|_test\.go$|Tests?\.(java|kt|cs)$|(^|\/)[^/]+\.Tests?\//i
+const TEST_PATH = /(^|\/)(__tests__|__mocks__|tests?|spec|specs|fixtures?|mocks?|e2e|cypress|playwright|stories)(\/|$)|\.(test|spec|stories)\.[a-z]+$|_test\.go$|Tests?\.(java|kt|cs)$|(^|\/)[^/]+\.Tests?\/|_(unit)?tests?\.(c|cc|cpp|cxx)$/i
 const EXAMPLE_PATH = /\.(example|sample|template|dist|defaults?)(\.[a-z]+)?$|(^|\/)examples?(\/|$)/i
 const DOC_PATH = /\.(md|mdx|txt|rst|adoc)$/i
 const ENV_FILE = /(^|\/)\.env(\.[\w.-]+)?$/i
@@ -874,14 +874,14 @@ function scanDatabase(root, files) {
 
 // ---- código (padrões perigosos, sem IA) -----------------------------------------------------
 
-const CODE_FILE = /\.(m?[jt]sx?|cjs|cts|vue|svelte|astro|py|php|dart|go|java|kt|kts|cs|cshtml|razor)$/i
+const CODE_FILE = /\.(m?[jt]sx?|cjs|cts|vue|svelte|astro|py|php|dart|go|java|kt|kts|cs|cshtml|razor|rs|c|cc|cpp|cxx|h|hh|hpp|hxx)$/i
 // Código das linguagens sem regras de linha (o Claude lê na revisão).
 const OTHER_CODE = /\.(go|rs|java|kts?|cs|c|cc|cpp|cxx|h|hpp|rb|swift)$/i
 const SERVER_ROUTE = /(^|\/)(app\/(.*\/)?api\/.*\/?route\.[mc]?[jt]s|pages\/api\/.*\.[mc]?[jt]sx?|src\/routes\/api\/.*\.[mc]?[jt]sx?|supabase\/functions\/[^/]+\/index\.[jt]s|functions\/.*\.[jt]s|server\/.*\.[mc]?[jt]s|api\/.*\.[mc]?[jt]s)$/i
 
 // Regras por linha: o que é quase sempre perigoso quando aparece com dado variável.
 // Cada regra: padrão da linha, exceção (se a linha tiver isto, está ok) e o texto do achado.
-// Onde as regras gerais (comando, SQL, eval, CORS) valem: Go, Java/Kotlin e C# têm as próprias em security-langs.mjs.
+// Onde as regras gerais (comando, SQL, eval, CORS) valem: Go, Java/Kotlin, C#, Rust e C/C++ têm as próprias em security-langs.mjs.
 const GENERAL_RULE_FILES = /\.(m?[jt]sx?|cjs|cts|vue|svelte|astro|py|php|dart)$/i
 
 const LINE_RULES = [
@@ -1470,6 +1470,11 @@ const TOPICS = [
   ['php-laravel', (s) => s.includes('PHP') || s.includes('Laravel') || s.includes('Symfony')],
   ['python-web', (s) => s.includes('Django') || s.includes('Flask') || s.includes('FastAPI')],
   ['flutter', (s) => s.includes('Flutter') || s.includes('Dart')],
+  ['go', (s) => s.includes('Go')],
+  ['java-spring', (s) => s.includes('Java') || s.includes('Kotlin')],
+  ['dotnet', (s) => s.includes('C#')],
+  ['rust', (s) => s.includes('Rust')],
+  ['c-cpp', (s) => s.includes('C') || s.includes('C++')],
 ]
 
 /** O que a revisão com IA precisa saber para começar: stack, onde estão as portas de entrada e que temas ler. */
@@ -1477,8 +1482,18 @@ export function projectMap(root) {
   const { files } = projectFiles(root)
   const deps = { ...pythonDeps(root, files), ...allDeps(root) }
   const langFrameworks = [...langDeps(root, files).keys()].map((k) => LANG_TECH[k]).filter((t) => t?.[1] === 'framework').map((t) => t[0])
-  // Linguagem sem framework conhecido também puxa o tema dela (PHP puro, Dart).
-  const langs = [['PHP', /\.php$/], ['Dart', /\.dart$/]].filter(([, re]) => files.some((f) => re.test(f))).map(([name]) => name)
+  // Linguagem sem framework conhecido também puxa o tema dela (PHP puro, Dart, Go, Rust, C/C++…).
+  const langs = [
+    ['PHP', /\.php$/],
+    ['Dart', /\.dart$/],
+    ['Go', /\.go$/],
+    ['Java', /\.java$/],
+    ['Kotlin', /\.kts?$/],
+    ['C#', /\.cs$/],
+    ['Rust', /\.rs$/],
+    ['C', /\.c$/],
+    ['C++', /\.(cc|cpp|cxx|hpp|hh|hxx)$/],
+  ].filter(([, re]) => files.some((f) => re.test(f))).map(([name]) => name)
   const stack = [...new Set([...STACK_SIGNS.filter(([, test]) => test(deps, files)).map(([name]) => name), ...langFrameworks, ...langs])]
   const other = files.filter((f) => OTHER_CODE.test(f) && !TEST_PATH.test(f))
   const code = files.filter((f) => CODE_FILE.test(f) && !TEST_PATH.test(f) && !/\.d\.ts$/.test(f))

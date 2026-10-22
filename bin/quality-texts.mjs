@@ -2,7 +2,7 @@
 // quality-rules.mjs para o arquivo das regras não crescer demais. Cada função recebe o contexto do achado (c),
 // quantas vezes ele aparece no arquivo (n) e a lista de ocorrências (all).
 
-// O que escreve no console em cada linguagem (Dart, PHP, Go, Java, Kotlin e C# marcam ctx.lang; Python marca ctx.py).
+// O que escreve no console em cada linguagem (Dart, PHP, Go, Java, Kotlin, C#, Rust e C/C++ marcam ctx.lang; Python marca ctx.py).
 const LOG_CALLS = {
   dart: 'print/debugPrint',
   php: 'echo, error_log ou var_dump',
@@ -10,13 +10,18 @@ const LOG_CALLS = {
   java: 'System.out.println, printStackTrace ou o logger',
   kotlin: 'println, printStackTrace ou o logger',
   csharp: 'Console.WriteLine ou o logger',
+  rust: 'eprintln!, println! ou o log',
+  c: 'printf ou fprintf(stderr)',
+  cpp: 'std::cerr, printf ou o logger',
 }
 const logCalls = (c) => LOG_CALLS[c.lang] ?? 'console.log/console.error'
 const DEBUG_STOP = { dart: 'debugger()', php: 'dd()', go: 'runtime.Breakpoint()', csharp: 'Debugger.Break()' }
 // Linguagens de servidor: o print vai para a saída do programa, e o log tem nome próprio em cada uma.
-const SERVER_LOG = { go: 'log/slog', java: 'o logger (SLF4J/Logback)', kotlin: 'o logger (SLF4J ou Log no Android)', csharp: 'ILogger' }
-// No Go o "catch" é o if err != nil.
+const SERVER_LOG = { go: 'log/slog', java: 'o logger (SLF4J/Logback)', kotlin: 'o logger (SLF4J ou Log no Android)', csharp: 'ILogger', rust: 'o log ou o tracing', c: 'o log do programa', cpp: 'o logger (spdlog, por exemplo)' }
+// No Go o "catch" é o if err != nil; no Rust, o braço Err(_) do match (ou o if let Err).
 const isGo = (c) => c.lang === 'go'
+const HANDLER = { go: 'if err != nil', rust: 'Err(_) =>' }
+const handler = (c) => HANDLER[c.lang] ?? 'catch'
 const ASSERT_EXAMPLE = {
   php: '$this->assertSame(...)',
   dart: 'expect(valor, equals(...))',
@@ -24,6 +29,9 @@ const ASSERT_EXAMPLE = {
   java: 'assertEquals(esperado, valor)',
   kotlin: 'assertEquals(esperado, valor)',
   csharp: 'Assert.Equal(esperado, valor)',
+  rust: 'assert_eq!(valor, esperado)',
+  c: 'EXPECT_EQ(valor, esperado)',
+  cpp: 'EXPECT_EQ(valor, esperado) ou REQUIRE(valor == esperado)',
 }
 
 export const TEXT = {
@@ -46,14 +54,14 @@ export const TEXT = {
     `Crie o índice numa migração nova, por exemplo: create index on public.${c.table} (${c.column});`,
   ],
   'falha/catch-vazio': (c, n) => [
-    `${n > 1 ? `${n} erros engolidos` : 'Erro engolido'} em silêncio (${c.py ? 'except: pass' : isGo(c) ? 'if err != nil vazio' : 'catch vazio'})`,
-    c.py ? 'Um bloco except só tem pass: não faz nada com o erro.' : isGo(c) ? 'Um bloco if err != nil está vazio: o erro é conferido e esquecido.' : 'Um bloco catch (ou .catch) não faz nada com o erro.',
+    `${n > 1 ? `${n} erros engolidos` : 'Erro engolido'} em silêncio (${c.py ? 'except: pass' : `${handler(c)} vazio`})`,
+    c.py ? 'Um bloco except só tem pass: não faz nada com o erro.' : HANDLER[c.lang] ? `Um bloco ${handler(c)} está vazio: o erro é conferido e esquecido.` : 'Um bloco catch (ou .catch) não faz nada com o erro.',
     'Quando algo falha aqui, ninguém fica sabendo: o app segue como se tivesse dado certo e o problema aparece depois, longe da causa.',
     'Trate o erro (avise a pessoa, tente de novo, registre) ou, se ignorar for de propósito, deixe um comentário dentro do bloco dizendo por quê.',
   ],
   'falha/catch-so-loga': (c, n) => [
     n > 1 ? `${n} erros que só vão para o console` : 'Erro que só vai para o console',
-    c.py ? 'O except só chama print() e o código segue em frente.' : `O ${isGo(c) ? 'if err != nil' : 'catch'} só chama ${logCalls(c)} e o código segue em frente.`,
+    c.py ? 'O except só chama print() e o código segue em frente.' : `O ${handler(c)} só chama ${logCalls(c)} e o código segue em frente.`,
     c.py || SERVER_LOG[c.lang]
       ? 'A mensagem some no meio da saída do servidor: quem chamou recebe um resultado como se tivesse dado certo.'
       : 'No site publicado ninguém olha o console: a pessoa vê a tela parada ou um dado errado, sem aviso.',
@@ -65,9 +73,17 @@ export const TEXT = {
       ? 'O except devolve None, [], {} ou False sem registrar o erro.'
       : isGo(c)
         ? 'O if err != nil devolve nil, zero ou false e deixa o err de fora: quem chamou recebe "sem erro".'
+        : c.lang === 'rust'
+          ? 'O Err(_) vira None, false, zero ou o valor padrão: quem chamou recebe um resultado sem saber que deu erro.'
         : `O catch devolve ${c.lang ? 'null, false ou uma lista vazia' : 'null, undefined, [] ou {}'} sem registrar o erro.`,
     'Quem chamou não consegue diferenciar "não tem dados" de "deu erro": a tela mostra vazio quando, na verdade, falhou.',
     'Registre o erro antes de devolver o valor vazio, ou devolva o erro para quem chamou decidir.',
+  ],
+  'falha/unwrap': (c, n) => [
+    `${n} .unwrap() fora dos testes`,
+    '.unwrap() pega o valor de um Result ou Option e, se for erro ou vazio, derruba o programa (panic) na hora.',
+    'Um arquivo que falta, uma rede fora do ar ou um dado inesperado vira uma queda do servidor ou do app, sem mensagem útil.',
+    'Use ? para devolver o erro a quem chamou, trate com match ou unwrap_or, ou troque por .expect("por que nunca falha") quando não poder falhar for verdade.',
   ],
   'falha/mock-em-producao': (c) => [
     'Dado de teste (mock) importado em código de verdade',

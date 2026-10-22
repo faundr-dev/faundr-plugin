@@ -136,27 +136,27 @@ export const LANGUAGE_SUPPORT = [
     },
   },
   {
-    id: 'rust', name: 'Rust',
+    id: 'rust', name: 'Rust', examples: 'Axum, Actix Web',
     match: { languages: ['Rust'] },
     features: {
-      mapa: ['parcial', 'sem ligação entre arquivos'], qualidade: CLAUDE, seguranca: CLAUDE_SEC, dependencias: ['completo'], segredos: SECRETS,
-      erros: ['completo'], producao: ['nao'], testes: ['nao'], design: NA, stack: ['completo'],
+      mapa: ['completo'], qualidade: ['completo'], seguranca: ['completo'], dependencias: ['completo'], segredos: SECRETS,
+      erros: ['completo'], producao: ['completo'], testes: ['completo'], design: NA, stack: ['completo'],
     },
   },
   {
     id: 'c', name: 'C',
     match: { languages: ['C'] },
     features: {
-      mapa: ['parcial', 'só os #include com caminho relativo'], qualidade: CLAUDE, seguranca: CLAUDE_SEC, dependencias: ['parcial', 'só com Conan (conan.lock); vcpkg ainda não'], segredos: SECRETS,
-      erros: ['completo'], producao: ['nao'], testes: ['nao'], design: NA, stack: ['completo'],
+      mapa: ['completo'], qualidade: ['completo'], seguranca: ['completo'], dependencias: ['parcial', 'só com Conan (conan.lock); o vcpkg não tem base pública de falhas conhecidas'], segredos: SECRETS,
+      erros: ['completo'], producao: ['completo'], testes: ['parcial', 'só projetos com CMake (CTest), sem cobertura; Makefile ainda não'], design: NA, stack: ['completo'],
     },
   },
   {
     id: 'cpp', name: 'C++',
     match: { languages: ['C++'] },
     features: {
-      mapa: ['parcial', 'só os #include com caminho relativo'], qualidade: CLAUDE, seguranca: CLAUDE_SEC, dependencias: ['parcial', 'só com Conan (conan.lock); vcpkg ainda não'], segredos: SECRETS,
-      erros: ['completo'], producao: ['nao'], testes: ['nao'], design: NA, stack: ['completo'],
+      mapa: ['completo'], qualidade: ['completo'], seguranca: ['completo'], dependencias: ['parcial', 'só com Conan (conan.lock); o vcpkg não tem base pública de falhas conhecidas'], segredos: SECRETS,
+      erros: ['completo'], producao: ['completo'], testes: ['parcial', 'só projetos com CMake (CTest), sem cobertura; Makefile ainda não'], design: NA, stack: ['completo'],
     },
   },
   {

@@ -469,8 +469,8 @@ var require_getters = __commonJS({
         return v;
       };
       if (typeof defaultValue === "function") coerceToDefault = defaultValue;
-      var get = function(attributes) {
-        return coerceToDefault(attributes[nameOrFunction]);
+      var get = function(attributes2) {
+        return coerceToDefault(attributes2[nameOrFunction]);
       };
       var returnDefault = function() {
         return coerceToDefault(void 0);
@@ -480,8 +480,8 @@ var require_getters = __commonJS({
         getter.fromGraph = function(graph, node) {
           return get(graph.getNodeAttributes(node));
         };
-        getter.fromEntry = function(node, attributes) {
-          return get(attributes);
+        getter.fromEntry = function(node, attributes2) {
+          return get(attributes2);
         };
       } else if (typeof nameOrFunction === "function") {
         getter.fromAttributes = function() {
@@ -494,8 +494,8 @@ var require_getters = __commonJS({
             nameOrFunction(node, graph.getNodeAttributes(node))
           );
         };
-        getter.fromEntry = function(node, attributes) {
-          return coerceToDefault(nameOrFunction(node, attributes));
+        getter.fromEntry = function(node, attributes2) {
+          return coerceToDefault(nameOrFunction(node, attributes2));
         };
       } else {
         getter.fromAttributes = returnDefault;
@@ -511,8 +511,8 @@ var require_getters = __commonJS({
         return v;
       };
       if (typeof defaultValue === "function") coerceToDefault = defaultValue;
-      var get = function(attributes) {
-        return coerceToDefault(attributes[nameOrFunction]);
+      var get = function(attributes2) {
+        return coerceToDefault(attributes2[nameOrFunction]);
       };
       var returnDefault = function() {
         return coerceToDefault(void 0);
@@ -522,8 +522,8 @@ var require_getters = __commonJS({
         getter.fromGraph = function(graph, edge2) {
           return get(graph.getEdgeAttributes(edge2));
         };
-        getter.fromEntry = function(edge2, attributes) {
-          return get(attributes);
+        getter.fromEntry = function(edge2, attributes2) {
+          return get(attributes2);
         };
         getter.fromPartialEntry = getter.fromEntry;
         getter.fromMinimalEntry = getter.fromEntry;
@@ -1586,8 +1586,8 @@ var require_graphology_communities_louvain = __commonJS({
           resolution: options.resolution
         };
       }
-      var fn8 = type === "undirected" ? undirectedLouvain : directedLouvain;
-      var results = fn8(detailed, graph, options);
+      var fn10 = type === "undirected" ? undirectedLouvain : directedLouvain;
+      var results = fn10(detailed, graph, options);
       var index = results.index;
       if (!detailed) {
         if (assign2) {
@@ -1613,20 +1613,20 @@ var require_graphology_communities_louvain = __commonJS({
       output.communities = index.collect();
       return output;
     }
-    var fn7 = louvain2.bind(null, false, false);
-    fn7.assign = louvain2.bind(null, true, false);
-    fn7.detailed = louvain2.bind(null, false, true);
-    fn7.defaults = DEFAULTS2;
-    module2.exports = fn7;
+    var fn9 = louvain2.bind(null, false, false);
+    fn9.assign = louvain2.bind(null, true, false);
+    fn9.detailed = louvain2.bind(null, false, true);
+    fn9.defaults = DEFAULTS2;
+    module2.exports = fn9;
   }
 });
 
 // node_modules/graphology-utils/add-node.js
 var require_add_node = __commonJS({
   "node_modules/graphology-utils/add-node.js"(exports) {
-    exports.copyNode = function(graph, key, attributes) {
-      attributes = Object.assign({}, attributes);
-      return graph.addNode(key, attributes);
+    exports.copyNode = function(graph, key, attributes2) {
+      attributes2 = Object.assign({}, attributes2);
+      return graph.addNode(key, attributes2);
     };
   }
 });
@@ -1634,39 +1634,39 @@ var require_add_node = __commonJS({
 // node_modules/graphology-utils/add-edge.js
 var require_add_edge = __commonJS({
   "node_modules/graphology-utils/add-edge.js"(exports) {
-    exports.addEdge = function addEdge2(graph, undirected, key, source, target, attributes) {
+    exports.addEdge = function addEdge2(graph, undirected, key, source, target, attributes2) {
       if (undirected) {
         if (key === null || key === void 0)
-          return graph.addUndirectedEdge(source, target, attributes);
-        else return graph.addUndirectedEdgeWithKey(key, source, target, attributes);
+          return graph.addUndirectedEdge(source, target, attributes2);
+        else return graph.addUndirectedEdgeWithKey(key, source, target, attributes2);
       } else {
         if (key === null || key === void 0)
-          return graph.addDirectedEdge(source, target, attributes);
-        else return graph.addDirectedEdgeWithKey(key, source, target, attributes);
+          return graph.addDirectedEdge(source, target, attributes2);
+        else return graph.addDirectedEdgeWithKey(key, source, target, attributes2);
       }
     };
-    exports.copyEdge = function copyEdge(graph, undirected, key, source, target, attributes) {
-      attributes = Object.assign({}, attributes);
+    exports.copyEdge = function copyEdge(graph, undirected, key, source, target, attributes2) {
+      attributes2 = Object.assign({}, attributes2);
       if (undirected) {
         if (key === null || key === void 0)
-          return graph.addUndirectedEdge(source, target, attributes);
-        else return graph.addUndirectedEdgeWithKey(key, source, target, attributes);
+          return graph.addUndirectedEdge(source, target, attributes2);
+        else return graph.addUndirectedEdgeWithKey(key, source, target, attributes2);
       } else {
         if (key === null || key === void 0)
-          return graph.addDirectedEdge(source, target, attributes);
-        else return graph.addDirectedEdgeWithKey(key, source, target, attributes);
+          return graph.addDirectedEdge(source, target, attributes2);
+        else return graph.addDirectedEdgeWithKey(key, source, target, attributes2);
       }
     };
-    exports.mergeEdge = function mergeEdge2(graph, undirected, key, source, target, attributes) {
+    exports.mergeEdge = function mergeEdge2(graph, undirected, key, source, target, attributes2) {
       if (undirected) {
         if (key === null || key === void 0)
-          return graph.mergeUndirectedEdge(source, target, attributes);
+          return graph.mergeUndirectedEdge(source, target, attributes2);
         else
-          return graph.mergeUndirectedEdgeWithKey(key, source, target, attributes);
+          return graph.mergeUndirectedEdgeWithKey(key, source, target, attributes2);
       } else {
         if (key === null || key === void 0)
-          return graph.mergeDirectedEdge(source, target, attributes);
-        else return graph.mergeDirectedEdgeWithKey(key, source, target, attributes);
+          return graph.mergeDirectedEdge(source, target, attributes2);
+        else return graph.mergeDirectedEdgeWithKey(key, source, target, attributes2);
       }
     };
     exports.updateEdge = function updateEdge(graph, undirected, key, source, target, updater) {
@@ -2945,9 +2945,9 @@ var UsageGraphError = class _UsageGraphError extends GraphError {
       Error.captureStackTrace(this, _UsageGraphError.prototype.constructor);
   }
 };
-function MixedNodeData(key, attributes) {
+function MixedNodeData(key, attributes2) {
   this.key = key;
-  this.attributes = attributes;
+  this.attributes = attributes2;
   this.clear();
 }
 MixedNodeData.prototype.clear = function() {
@@ -2960,9 +2960,9 @@ MixedNodeData.prototype.clear = function() {
   this.out = {};
   this.undirected = {};
 };
-function DirectedNodeData(key, attributes) {
+function DirectedNodeData(key, attributes2) {
   this.key = key;
-  this.attributes = attributes;
+  this.attributes = attributes2;
   this.clear();
 }
 DirectedNodeData.prototype.clear = function() {
@@ -2972,9 +2972,9 @@ DirectedNodeData.prototype.clear = function() {
   this.in = {};
   this.out = {};
 };
-function UndirectedNodeData(key, attributes) {
+function UndirectedNodeData(key, attributes2) {
   this.key = key;
-  this.attributes = attributes;
+  this.attributes = attributes2;
   this.clear();
 }
 UndirectedNodeData.prototype.clear = function() {
@@ -2982,9 +2982,9 @@ UndirectedNodeData.prototype.clear = function() {
   this.undirectedLoops = 0;
   this.undirected = {};
 };
-function EdgeData(undirected, key, source, target, attributes) {
+function EdgeData(undirected, key, source, target, attributes2) {
   this.key = key;
-  this.attributes = attributes;
+  this.attributes = attributes2;
   this.undirected = undirected;
   this.source = source;
   this.target = target;
@@ -3175,9 +3175,9 @@ function attachNodeAttributeUpdater(Class, method, mode) {
       throw new InvalidArgumentsGraphError(
         `Graph.${method}: updater should be a function.`
       );
-    const attributes = data.attributes;
-    const value = updater(attributes[name2]);
-    attributes[name2] = value;
+    const attributes2 = data.attributes;
+    const value = updater(attributes2[name2]);
+    attributes2[name2] = value;
     this.emit("nodeAttributesUpdated", {
       key: data.key,
       type: "set",
@@ -3209,7 +3209,7 @@ function attachNodeAttributeRemover(Class, method, mode) {
 }
 function attachNodeAttributesReplacer(Class, method, mode) {
   Class.prototype[method] = function(nodeOrEdge, nameOrEdge, add1) {
-    const [data, attributes] = findRelevantNodeData(
+    const [data, attributes2] = findRelevantNodeData(
       this,
       method,
       mode,
@@ -3217,11 +3217,11 @@ function attachNodeAttributesReplacer(Class, method, mode) {
       nameOrEdge,
       add1
     );
-    if (!isPlainObject(attributes))
+    if (!isPlainObject(attributes2))
       throw new InvalidArgumentsGraphError(
         `Graph.${method}: provided attributes are not a plain object.`
       );
-    data.attributes = attributes;
+    data.attributes = attributes2;
     this.emit("nodeAttributesUpdated", {
       key: data.key,
       type: "replace",
@@ -3232,7 +3232,7 @@ function attachNodeAttributesReplacer(Class, method, mode) {
 }
 function attachNodeAttributesMerger(Class, method, mode) {
   Class.prototype[method] = function(nodeOrEdge, nameOrEdge, add1) {
-    const [data, attributes] = findRelevantNodeData(
+    const [data, attributes2] = findRelevantNodeData(
       this,
       method,
       mode,
@@ -3240,16 +3240,16 @@ function attachNodeAttributesMerger(Class, method, mode) {
       nameOrEdge,
       add1
     );
-    if (!isPlainObject(attributes))
+    if (!isPlainObject(attributes2))
       throw new InvalidArgumentsGraphError(
         `Graph.${method}: provided attributes are not a plain object.`
       );
-    assign(data.attributes, attributes);
+    assign(data.attributes, attributes2);
     this.emit("nodeAttributesUpdated", {
       key: data.key,
       type: "merge",
       attributes: data.attributes,
-      data: attributes
+      data: attributes2
     });
     return this;
   };
@@ -3559,7 +3559,7 @@ function attachEdgeAttributeRemover(Class, method, type) {
   };
 }
 function attachEdgeAttributesReplacer(Class, method, type) {
-  Class.prototype[method] = function(element, attributes) {
+  Class.prototype[method] = function(element, attributes2) {
     let data;
     if (this.type !== "mixed" && type !== "mixed" && type !== this.type)
       throw new UsageGraphError(
@@ -3570,8 +3570,8 @@ function attachEdgeAttributesReplacer(Class, method, type) {
         throw new UsageGraphError(
           `Graph.${method}: cannot use a {source,target} combo when asking about an edge's attributes in a MultiGraph since we cannot infer the one you want information about.`
         );
-      const source = "" + element, target = "" + attributes;
-      attributes = arguments[2];
+      const source = "" + element, target = "" + attributes2;
+      attributes2 = arguments[2];
       data = getMatchingEdge(this, source, target, type);
       if (!data)
         throw new NotFoundGraphError(
@@ -3589,11 +3589,11 @@ function attachEdgeAttributesReplacer(Class, method, type) {
           `Graph.${method}: could not find the "${element}" edge in the graph.`
         );
     }
-    if (!isPlainObject(attributes))
+    if (!isPlainObject(attributes2))
       throw new InvalidArgumentsGraphError(
         `Graph.${method}: provided attributes are not a plain object.`
       );
-    data.attributes = attributes;
+    data.attributes = attributes2;
     this.emit("edgeAttributesUpdated", {
       key: data.key,
       type: "replace",
@@ -3603,7 +3603,7 @@ function attachEdgeAttributesReplacer(Class, method, type) {
   };
 }
 function attachEdgeAttributesMerger(Class, method, type) {
-  Class.prototype[method] = function(element, attributes) {
+  Class.prototype[method] = function(element, attributes2) {
     let data;
     if (this.type !== "mixed" && type !== "mixed" && type !== this.type)
       throw new UsageGraphError(
@@ -3614,8 +3614,8 @@ function attachEdgeAttributesMerger(Class, method, type) {
         throw new UsageGraphError(
           `Graph.${method}: cannot use a {source,target} combo when asking about an edge's attributes in a MultiGraph since we cannot infer the one you want information about.`
         );
-      const source = "" + element, target = "" + attributes;
-      attributes = arguments[2];
+      const source = "" + element, target = "" + attributes2;
+      attributes2 = arguments[2];
       data = getMatchingEdge(this, source, target, type);
       if (!data)
         throw new NotFoundGraphError(
@@ -3633,16 +3633,16 @@ function attachEdgeAttributesMerger(Class, method, type) {
           `Graph.${method}: could not find the "${element}" edge in the graph.`
         );
     }
-    if (!isPlainObject(attributes))
+    if (!isPlainObject(attributes2))
       throw new InvalidArgumentsGraphError(
         `Graph.${method}: provided attributes are not a plain object.`
       );
-    assign(data.attributes, attributes);
+    assign(data.attributes, attributes2);
     this.emit("edgeAttributesUpdated", {
       key: data.key,
       type: "merge",
       attributes: data.attributes,
-      data: attributes
+      data: attributes2
     });
     return this;
   };
@@ -3960,10 +3960,10 @@ function forEachEdge(breakable, graph, type, callback) {
   while (step = iterator.next(), step.done !== true) {
     data = step.value;
     if (shouldFilter && data.undirected !== mask) continue;
-    const { key, attributes, source, target } = data;
+    const { key, attributes: attributes2, source, target } = data;
     shouldBreak = callback(
       key,
-      attributes,
+      attributes2,
       source.key,
       target.key,
       source.attributes,
@@ -4006,15 +4006,15 @@ function createEdgeIterator(graph, type) {
   };
 }
 function forEachEdgeForNode(breakable, multi, type, direction, nodeData, callback) {
-  const fn7 = multi ? forEachMulti : forEachSimple;
+  const fn9 = multi ? forEachMulti : forEachSimple;
   let found;
   if (type !== "undirected") {
     if (direction !== "out") {
-      found = fn7(breakable, nodeData.in, callback);
+      found = fn9(breakable, nodeData.in, callback);
       if (breakable && found) return found;
     }
     if (direction !== "in") {
-      found = fn7(
+      found = fn9(
         breakable,
         nodeData.out,
         callback,
@@ -4024,7 +4024,7 @@ function forEachEdgeForNode(breakable, multi, type, direction, nodeData, callbac
     }
   }
   if (type !== "directed") {
-    found = fn7(breakable, nodeData.undirected, callback);
+    found = fn9(breakable, nodeData.undirected, callback);
     if (breakable && found) return found;
   }
   return;
@@ -4053,21 +4053,21 @@ function createEdgeIteratorForNode(type, direction, nodeData) {
   return iterator;
 }
 function forEachEdgeForPath(breakable, type, multi, direction, sourceData, target, callback) {
-  const fn7 = multi ? forEachForKeyMulti : forEachForKeySimple;
+  const fn9 = multi ? forEachForKeyMulti : forEachForKeySimple;
   let found;
   if (type !== "undirected") {
     if (typeof sourceData.in !== "undefined" && direction !== "out") {
-      found = fn7(breakable, sourceData.in, target, callback);
+      found = fn9(breakable, sourceData.in, target, callback);
       if (breakable && found) return found;
     }
     if (typeof sourceData.out !== "undefined" && direction !== "in" && (direction || sourceData.key !== target)) {
-      found = fn7(breakable, sourceData.out, target, callback);
+      found = fn9(breakable, sourceData.out, target, callback);
       if (breakable && found) return found;
     }
   }
   if (type !== "directed") {
     if (typeof sourceData.undirected !== "undefined") {
-      found = fn7(breakable, sourceData.undirected, target, callback);
+      found = fn9(breakable, sourceData.undirected, target, callback);
       if (breakable && found) return found;
     }
   }
@@ -4867,35 +4867,35 @@ var DEFAULTS = {
   multi: false,
   type: "mixed"
 };
-function addNode(graph, node, attributes) {
-  if (attributes && !isPlainObject(attributes))
+function addNode(graph, node, attributes2) {
+  if (attributes2 && !isPlainObject(attributes2))
     throw new InvalidArgumentsGraphError(
-      `Graph.addNode: invalid attributes. Expecting an object but got "${attributes}"`
+      `Graph.addNode: invalid attributes. Expecting an object but got "${attributes2}"`
     );
   node = "" + node;
-  attributes = attributes || {};
+  attributes2 = attributes2 || {};
   if (graph._nodes.has(node))
     throw new UsageGraphError(
       `Graph.addNode: the "${node}" node already exist in the graph.`
     );
-  const data = new graph.NodeDataClass(node, attributes);
+  const data = new graph.NodeDataClass(node, attributes2);
   graph._nodes.set(node, data);
   graph.emit("nodeAdded", {
     key: node,
-    attributes
+    attributes: attributes2
   });
   return data;
 }
-function unsafeAddNode(graph, node, attributes) {
-  const data = new graph.NodeDataClass(node, attributes);
+function unsafeAddNode(graph, node, attributes2) {
+  const data = new graph.NodeDataClass(node, attributes2);
   graph._nodes.set(node, data);
   graph.emit("nodeAdded", {
     key: node,
-    attributes
+    attributes: attributes2
   });
   return data;
 }
-function addEdge(graph, name2, mustGenerateKey, undirected, edge2, source, target, attributes) {
+function addEdge(graph, name2, mustGenerateKey, undirected, edge2, source, target, attributes2) {
   if (!undirected && graph.type === "undirected")
     throw new UsageGraphError(
       `Graph.${name2}: you cannot add a directed edge to an undirected graph. Use the #.addEdge or #.addUndirectedEdge instead.`
@@ -4904,13 +4904,13 @@ function addEdge(graph, name2, mustGenerateKey, undirected, edge2, source, targe
     throw new UsageGraphError(
       `Graph.${name2}: you cannot add an undirected edge to a directed graph. Use the #.addEdge or #.addDirectedEdge instead.`
     );
-  if (attributes && !isPlainObject(attributes))
+  if (attributes2 && !isPlainObject(attributes2))
     throw new InvalidArgumentsGraphError(
-      `Graph.${name2}: invalid attributes. Expecting an object but got "${attributes}"`
+      `Graph.${name2}: invalid attributes. Expecting an object but got "${attributes2}"`
     );
   source = "" + source;
   target = "" + target;
-  attributes = attributes || {};
+  attributes2 = attributes2 || {};
   if (!graph.allowSelfLoops && source === target)
     throw new UsageGraphError(
       `Graph.${name2}: source & target are the same ("${source}"), thus creating a loop explicitly forbidden by this graph 'allowSelfLoops' option set to false.`
@@ -4929,7 +4929,7 @@ function addEdge(graph, name2, mustGenerateKey, undirected, edge2, source, targe
     undirected,
     source,
     target,
-    attributes
+    attributes: attributes2
   };
   if (mustGenerateKey) {
     edge2 = graph._edgeKeyGenerator();
@@ -4950,7 +4950,7 @@ function addEdge(graph, name2, mustGenerateKey, undirected, edge2, source, targe
     edge2,
     sourceData,
     targetData,
-    attributes
+    attributes2
   );
   graph._edges.set(edge2, edgeData);
   const isSelfLoop = source === target;
@@ -4977,7 +4977,7 @@ function addEdge(graph, name2, mustGenerateKey, undirected, edge2, source, targe
   graph.emit("edgeAdded", eventData);
   return edge2;
 }
-function mergeEdge(graph, name2, mustGenerateKey, undirected, edge2, source, target, attributes, asUpdater) {
+function mergeEdge(graph, name2, mustGenerateKey, undirected, edge2, source, target, attributes2, asUpdater) {
   if (!undirected && graph.type === "undirected")
     throw new UsageGraphError(
       `Graph.${name2}: you cannot merge/update a directed edge to an undirected graph. Use the #.mergeEdge/#.updateEdge or #.addUndirectedEdge instead.`
@@ -4986,16 +4986,16 @@ function mergeEdge(graph, name2, mustGenerateKey, undirected, edge2, source, tar
     throw new UsageGraphError(
       `Graph.${name2}: you cannot merge/update an undirected edge to a directed graph. Use the #.mergeEdge/#.updateEdge or #.addDirectedEdge instead.`
     );
-  if (attributes) {
+  if (attributes2) {
     if (asUpdater) {
-      if (typeof attributes !== "function")
+      if (typeof attributes2 !== "function")
         throw new InvalidArgumentsGraphError(
-          `Graph.${name2}: invalid updater function. Expecting a function but got "${attributes}"`
+          `Graph.${name2}: invalid updater function. Expecting a function but got "${attributes2}"`
         );
     } else {
-      if (!isPlainObject(attributes))
+      if (!isPlainObject(attributes2))
         throw new InvalidArgumentsGraphError(
-          `Graph.${name2}: invalid attributes. Expecting an object but got "${attributes}"`
+          `Graph.${name2}: invalid attributes. Expecting an object but got "${attributes2}"`
         );
     }
   }
@@ -5003,8 +5003,8 @@ function mergeEdge(graph, name2, mustGenerateKey, undirected, edge2, source, tar
   target = "" + target;
   let updater;
   if (asUpdater) {
-    updater = attributes;
-    attributes = void 0;
+    updater = attributes2;
+    attributes2 = void 0;
   }
   if (!graph.allowSelfLoops && source === target)
     throw new UsageGraphError(
@@ -5032,7 +5032,7 @@ function mergeEdge(graph, name2, mustGenerateKey, undirected, edge2, source, tar
   }
   if (alreadyExistingEdgeData) {
     const info2 = [alreadyExistingEdgeData.key, false, false, false];
-    if (asUpdater ? !updater : !attributes) return info2;
+    if (asUpdater ? !updater : !attributes2) return info2;
     if (asUpdater) {
       const oldAttributes = alreadyExistingEdgeData.attributes;
       alreadyExistingEdgeData.attributes = updater(oldAttributes);
@@ -5042,24 +5042,24 @@ function mergeEdge(graph, name2, mustGenerateKey, undirected, edge2, source, tar
         attributes: alreadyExistingEdgeData.attributes
       });
     } else {
-      assign(alreadyExistingEdgeData.attributes, attributes);
+      assign(alreadyExistingEdgeData.attributes, attributes2);
       graph.emit("edgeAttributesUpdated", {
         type: "merge",
         key: alreadyExistingEdgeData.key,
         attributes: alreadyExistingEdgeData.attributes,
-        data: attributes
+        data: attributes2
       });
     }
     return info2;
   }
-  attributes = attributes || {};
-  if (asUpdater && updater) attributes = updater(attributes);
+  attributes2 = attributes2 || {};
+  if (asUpdater && updater) attributes2 = updater(attributes2);
   const eventData = {
     key: null,
     undirected,
     source,
     target,
-    attributes
+    attributes: attributes2
   };
   if (mustGenerateKey) {
     edge2 = graph._edgeKeyGenerator();
@@ -5084,7 +5084,7 @@ function mergeEdge(graph, name2, mustGenerateKey, undirected, edge2, source, tar
     targetData = unsafeAddNode(graph, target, {});
     targetWasAdded = true;
   }
-  edgeData = new EdgeData(undirected, edge2, sourceData, targetData, attributes);
+  edgeData = new EdgeData(undirected, edge2, sourceData, targetData, attributes2);
   graph._edges.set(edge2, edgeData);
   const isSelfLoop = source === target;
   if (undirected) {
@@ -5112,7 +5112,7 @@ function mergeEdge(graph, name2, mustGenerateKey, undirected, edge2, source, tar
 }
 function dropEdgeFromData(graph, edgeData) {
   graph._edges.delete(edgeData.key);
-  const { source: sourceData, target: targetData, attributes } = edgeData;
+  const { source: sourceData, target: targetData, attributes: attributes2 } = edgeData;
   const undirected = edgeData.undirected;
   const isSelfLoop = sourceData === targetData;
   if (undirected) {
@@ -5136,7 +5136,7 @@ function dropEdgeFromData(graph, edgeData) {
   else graph._directedSize--;
   graph.emit("edgeDropped", {
     key: edgeData.key,
-    attributes,
+    attributes: attributes2,
     source: sourceData.key,
     target: targetData.key,
     undirected
@@ -6018,8 +6018,8 @@ var Graph = class _Graph extends EventEmitter {
    * @throws {Error} - Will throw if the given node already exist.
    * @throws {Error} - Will throw if the given attributes are not an object.
    */
-  addNode(node, attributes) {
-    const nodeData = addNode(this, node, attributes);
+  addNode(node, attributes2) {
+    const nodeData = addNode(this, node, attributes2);
     return nodeData.key;
   }
   /**
@@ -6029,31 +6029,31 @@ var Graph = class _Graph extends EventEmitter {
    * @param  {object} [attributes] - Optional attributes.
    * @return {any}                 - The node.
    */
-  mergeNode(node, attributes) {
-    if (attributes && !isPlainObject(attributes))
+  mergeNode(node, attributes2) {
+    if (attributes2 && !isPlainObject(attributes2))
       throw new InvalidArgumentsGraphError(
-        `Graph.mergeNode: invalid attributes. Expecting an object but got "${attributes}"`
+        `Graph.mergeNode: invalid attributes. Expecting an object but got "${attributes2}"`
       );
     node = "" + node;
-    attributes = attributes || {};
+    attributes2 = attributes2 || {};
     let data = this._nodes.get(node);
     if (data) {
-      if (attributes) {
-        assign(data.attributes, attributes);
+      if (attributes2) {
+        assign(data.attributes, attributes2);
         this.emit("nodeAttributesUpdated", {
           type: "merge",
           key: node,
           attributes: data.attributes,
-          data: attributes
+          data: attributes2
         });
       }
       return [node, false];
     }
-    data = new this.NodeDataClass(node, attributes);
+    data = new this.NodeDataClass(node, attributes2);
     this._nodes.set(node, data);
     this.emit("nodeAdded", {
       key: node,
-      attributes
+      attributes: attributes2
     });
     return [node, true];
   }
@@ -6084,12 +6084,12 @@ var Graph = class _Graph extends EventEmitter {
       }
       return [node, false];
     }
-    const attributes = updater ? updater({}) : {};
-    data = new this.NodeDataClass(node, attributes);
+    const attributes2 = updater ? updater({}) : {};
+    data = new this.NodeDataClass(node, attributes2);
     this._nodes.set(node, data);
     this.emit("nodeAdded", {
       key: node,
-      attributes
+      attributes: attributes2
     });
     return [node, true];
   }
@@ -6347,12 +6347,12 @@ var Graph = class _Graph extends EventEmitter {
    *
    * @throws {Error} - Will throw if given attributes are not a plain object.
    */
-  replaceAttributes(attributes) {
-    if (!isPlainObject(attributes))
+  replaceAttributes(attributes2) {
+    if (!isPlainObject(attributes2))
       throw new InvalidArgumentsGraphError(
         "Graph.replaceAttributes: provided attributes are not a plain object."
       );
-    this._attributes = attributes;
+    this._attributes = attributes2;
     this.emit("attributesUpdated", {
       type: "replace",
       attributes: this._attributes
@@ -6367,16 +6367,16 @@ var Graph = class _Graph extends EventEmitter {
    *
    * @throws {Error} - Will throw if given attributes are not a plain object.
    */
-  mergeAttributes(attributes) {
-    if (!isPlainObject(attributes))
+  mergeAttributes(attributes2) {
+    if (!isPlainObject(attributes2))
       throw new InvalidArgumentsGraphError(
         "Graph.mergeAttributes: provided attributes are not a plain object."
       );
-    assign(this._attributes, attributes);
+    assign(this._attributes, attributes2);
     this.emit("attributesUpdated", {
       type: "merge",
       attributes: this._attributes,
-      data: attributes
+      data: attributes2
     });
     return this;
   }
@@ -6744,9 +6744,9 @@ var Graph = class _Graph extends EventEmitter {
       for (i2 = 0, l = list.length; i2 < l; i2++) {
         node = list[i2];
         validateSerializedNode(node);
-        const { key, attributes } = node;
-        if (merge) this.mergeNode(key, attributes);
-        else this.addNode(key, attributes);
+        const { key, attributes: attributes2 } = node;
+        if (merge) this.mergeNode(key, attributes2);
+        else this.addNode(key, attributes2);
       }
     }
     if (data.edges) {
@@ -6765,16 +6765,16 @@ var Graph = class _Graph extends EventEmitter {
         const {
           source,
           target,
-          attributes,
+          attributes: attributes2,
           undirected = undirectedByDefault
         } = edge2;
         let method;
         if ("key" in edge2) {
           method = merge ? undirected ? this.mergeUndirectedEdgeWithKey : this.mergeDirectedEdgeWithKey : undirected ? this.addUndirectedEdgeWithKey : this.addDirectedEdgeWithKey;
-          method.call(this, edge2.key, source, target, attributes);
+          method.call(this, edge2.key, source, target, attributes2);
         } else {
           method = merge ? undirected ? this.mergeUndirectedEdge : this.mergeDirectedEdge : undirected ? this.addUndirectedEdge : this.addDirectedEdge;
-          method.call(this, source, target, attributes);
+          method.call(this, source, target, attributes2);
         }
       }
     }
@@ -6806,8 +6806,8 @@ var Graph = class _Graph extends EventEmitter {
   emptyCopy(options) {
     const graph = this.nullCopy(options);
     this._nodes.forEach((nodeData, key) => {
-      const attributes = assign({}, nodeData.attributes);
-      nodeData = new graph.NodeDataClass(key, attributes);
+      const attributes2 = assign({}, nodeData.attributes);
+      nodeData = new graph.NodeDataClass(key, attributes2);
       graph._nodes.set(key, nodeData);
     });
     return graph;
@@ -6921,10 +6921,10 @@ if (typeof Symbol !== "undefined")
 EDGE_ADD_METHODS.forEach((method) => {
   ["add", "merge", "update"].forEach((verb) => {
     const name2 = method.name(verb);
-    const fn7 = verb === "add" ? addEdge : mergeEdge;
+    const fn9 = verb === "add" ? addEdge : mergeEdge;
     if (method.generateKey) {
-      Graph.prototype[name2] = function(source, target, attributes) {
-        return fn7(
+      Graph.prototype[name2] = function(source, target, attributes2) {
+        return fn9(
           this,
           name2,
           true,
@@ -6932,13 +6932,13 @@ EDGE_ADD_METHODS.forEach((method) => {
           null,
           source,
           target,
-          attributes,
+          attributes2,
           verb === "update"
         );
       };
     } else {
-      Graph.prototype[name2] = function(edge2, source, target, attributes) {
-        return fn7(
+      Graph.prototype[name2] = function(edge2, source, target, attributes2) {
+        return fn9(
           this,
           name2,
           false,
@@ -6946,7 +6946,7 @@ EDGE_ADD_METHODS.forEach((method) => {
           edge2,
           source,
           target,
-          attributes,
+          attributes2,
           verb === "update"
         );
       };
@@ -7288,7 +7288,7 @@ var LANGUAGES = [
     classTypes: S("struct_item", "enum_item", "trait_item", "impl_item"),
     nameFieldByType: { impl_item: "type" },
     functionTypes: S("function_item", "function_signature_item"),
-    importTypes: S("use_declaration"),
+    importTypes: S("use_declaration", "mod_item"),
     callTypes: S("call_expression"),
     callFunctionField: "function",
     accessorTypes: S("field_expression", "scoped_identifier"),
@@ -7531,7 +7531,7 @@ var BUILTIN_GLOBALS = /* @__PURE__ */ new Set([
 
 // engine/src/resolve.ts
 var JS_EXT = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
-var TYPED_IMPORT_EXT = /\.(php|dart|java|kt|kts|cs)$/;
+var TYPED_IMPORT_EXT = /\.(php|dart|java|kt|kts|cs|rs)$/;
 var SAME_PACKAGE_EXT = /\.(java|kt|kts|cs)$/;
 function familyOf(rel) {
   const ext = path3.posix.extname(rel).toLowerCase();
@@ -9164,19 +9164,19 @@ var QueryError = class _QueryError extends Error {
     }
   }
 };
-function parseAnyPredicate(steps, index, operator2, textPredicates) {
+function parseAnyPredicate(steps, index, operator3, textPredicates) {
   if (steps.length !== 3) {
     throw new Error(
-      `Wrong number of arguments to \`#${operator2}\` predicate. Expected 2, got ${steps.length - 1}`
+      `Wrong number of arguments to \`#${operator3}\` predicate. Expected 2, got ${steps.length - 1}`
     );
   }
   if (!isCaptureStep(steps[1])) {
     throw new Error(
-      `First argument of \`#${operator2}\` predicate must be a capture. Got "${steps[1].value}"`
+      `First argument of \`#${operator3}\` predicate must be a capture. Got "${steps[1].value}"`
     );
   }
-  const isPositive = operator2 === "eq?" || operator2 === "any-eq?";
-  const matchAll = !operator2.startsWith("any-");
+  const isPositive = operator3 === "eq?" || operator3 === "any-eq?";
+  const matchAll = !operator3.startsWith("any-");
   if (isCaptureStep(steps[2])) {
     const captureName1 = steps[1].name;
     const captureName2 = steps[2].name;
@@ -9208,24 +9208,24 @@ function parseAnyPredicate(steps, index, operator2, textPredicates) {
   }
 }
 __name(parseAnyPredicate, "parseAnyPredicate");
-function parseMatchPredicate(steps, index, operator2, textPredicates) {
+function parseMatchPredicate(steps, index, operator3, textPredicates) {
   if (steps.length !== 3) {
     throw new Error(
-      `Wrong number of arguments to \`#${operator2}\` predicate. Expected 2, got ${steps.length - 1}.`
+      `Wrong number of arguments to \`#${operator3}\` predicate. Expected 2, got ${steps.length - 1}.`
     );
   }
   if (steps[1].type !== "capture") {
     throw new Error(
-      `First argument of \`#${operator2}\` predicate must be a capture. Got "${steps[1].value}".`
+      `First argument of \`#${operator3}\` predicate must be a capture. Got "${steps[1].value}".`
     );
   }
   if (steps[2].type !== "string") {
     throw new Error(
-      `Second argument of \`#${operator2}\` predicate must be a string. Got @${steps[2].name}.`
+      `Second argument of \`#${operator3}\` predicate must be a string. Got @${steps[2].name}.`
     );
   }
-  const isPositive = operator2 === "match?" || operator2 === "any-match?";
-  const matchAll = !operator2.startsWith("any-");
+  const isPositive = operator3 === "match?" || operator3 === "any-match?";
+  const matchAll = !operator3.startsWith("any-");
   const captureName = steps[1].name;
   const regex = new RegExp(steps[2].value);
   textPredicates[index].push((captures) => {
@@ -9241,23 +9241,23 @@ function parseMatchPredicate(steps, index, operator2, textPredicates) {
   });
 }
 __name(parseMatchPredicate, "parseMatchPredicate");
-function parseAnyOfPredicate(steps, index, operator2, textPredicates) {
+function parseAnyOfPredicate(steps, index, operator3, textPredicates) {
   if (steps.length < 2) {
     throw new Error(
-      `Wrong number of arguments to \`#${operator2}\` predicate. Expected at least 1. Got ${steps.length - 1}.`
+      `Wrong number of arguments to \`#${operator3}\` predicate. Expected at least 1. Got ${steps.length - 1}.`
     );
   }
   if (steps[1].type !== "capture") {
     throw new Error(
-      `First argument of \`#${operator2}\` predicate must be a capture. Got "${steps[1].value}".`
+      `First argument of \`#${operator3}\` predicate must be a capture. Got "${steps[1].value}".`
     );
   }
-  const isPositive = operator2 === "any-of?";
+  const isPositive = operator3 === "any-of?";
   const captureName = steps[1].name;
   const stringSteps = steps.slice(2);
   if (!stringSteps.every(isStringStep)) {
     throw new Error(
-      `Arguments to \`#${operator2}\` predicate must be strings.".`
+      `Arguments to \`#${operator3}\` predicate must be strings.".`
     );
   }
   const values = stringSteps.map((s) => s.value);
@@ -9271,18 +9271,18 @@ function parseAnyOfPredicate(steps, index, operator2, textPredicates) {
   });
 }
 __name(parseAnyOfPredicate, "parseAnyOfPredicate");
-function parseIsPredicate(steps, index, operator2, assertedProperties, refutedProperties) {
+function parseIsPredicate(steps, index, operator3, assertedProperties, refutedProperties) {
   if (steps.length < 2 || steps.length > 3) {
     throw new Error(
-      `Wrong number of arguments to \`#${operator2}\` predicate. Expected 1 or 2. Got ${steps.length - 1}.`
+      `Wrong number of arguments to \`#${operator3}\` predicate. Expected 1 or 2. Got ${steps.length - 1}.`
     );
   }
   if (!steps.every(isStringStep)) {
     throw new Error(
-      `Arguments to \`#${operator2}\` predicate must be strings.".`
+      `Arguments to \`#${operator3}\` predicate must be strings.".`
     );
   }
-  const properties = operator2 === "is?" ? assertedProperties : refutedProperties;
+  const properties = operator3 === "is?" ? assertedProperties : refutedProperties;
   if (!properties[index]) properties[index] = {};
   properties[index][steps[1].value] = steps[2]?.value ?? null;
 }
@@ -9308,33 +9308,33 @@ function parsePattern(index, stepType, stepValueId, captureNames, stringValues, 
     if (steps[0].type !== "string") {
       throw new Error("Predicates must begin with a literal value");
     }
-    const operator2 = steps[0].value;
-    switch (operator2) {
+    const operator3 = steps[0].value;
+    switch (operator3) {
       case "any-not-eq?":
       case "not-eq?":
       case "any-eq?":
       case "eq?":
-        parseAnyPredicate(steps, index, operator2, textPredicates);
+        parseAnyPredicate(steps, index, operator3, textPredicates);
         break;
       case "any-not-match?":
       case "not-match?":
       case "any-match?":
       case "match?":
-        parseMatchPredicate(steps, index, operator2, textPredicates);
+        parseMatchPredicate(steps, index, operator3, textPredicates);
         break;
       case "not-any-of?":
       case "any-of?":
-        parseAnyOfPredicate(steps, index, operator2, textPredicates);
+        parseAnyOfPredicate(steps, index, operator3, textPredicates);
         break;
       case "is?":
       case "is-not?":
-        parseIsPredicate(steps, index, operator2, assertedProperties, refutedProperties);
+        parseIsPredicate(steps, index, operator3, assertedProperties, refutedProperties);
         break;
       case "set!":
         parseSetDirective(steps, index, setProperties);
         break;
       default:
-        predicates[index].push({ operator: operator2, operands: steps.slice(1) });
+        predicates[index].push({ operator: operator3, operands: steps.slice(1) });
     }
     steps.length = 0;
   }
@@ -12142,6 +12142,7 @@ var PathResolver = class {
   dartPackage = null;
   files = null;
   goModule;
+  crates = null;
   // Java/Kotlin (package) e C# (namespace): pacote → arquivos que o declaram e os tipos/funções de topo de cada um.
   packages = /* @__PURE__ */ new Map();
   /** Os arquivos do projeto (lidos uma vez, só quando um import de Go, Java, Kotlin ou C# precisa). */
@@ -12257,6 +12258,75 @@ var PathResolver = class {
     if (files) return files.slice(0, MAX_PACKAGE_FILES).map((f) => f.rel);
     return this.byPackage("cs", ns);
   }
+  /**
+   * C/C++: `#include "x.h"` ao lado do arquivo; senão (e no `<x.h>`) o arquivo do projeto que termina com esse
+   * caminho (pastas de include como include/, src/ ou libs/core/include). Se houver mais de um, o mais perto de quem inclui.
+   */
+  resolveCInclude(raw, fromRel, quoted) {
+    if (quoted) {
+      const local = this.resolveRelativeFile(raw, fromRel);
+      if (local) return local;
+    }
+    const want = path8.posix.normalize(raw);
+    if (want.startsWith("..")) return null;
+    const hits = this.sourceFiles().filter((f) => f === want || f.endsWith(`/${want}`));
+    if (hits.length <= 1) return hits[0] ?? null;
+    return hits.sort((a, b) => sharedPrefix(b, fromRel) - sharedPrefix(a, fromRel))[0];
+  }
+  /** Rust: `mod nome;` → nome.rs ou nome/mod.rs na pasta do módulo atual. */
+  resolveRustMod(name2, fromRel) {
+    return this.rustModuleFile(rustModuleDir(fromRel), [name2]);
+  }
+  /**
+   * Rust: caminho de um `use` (`crate::a::b::C`, `self::x`, `super::y`, `outro_crate::z`) → o arquivo do módulo
+   * mais longo que existe e o nome importado dele (null quando o caminho todo é o módulo).
+   */
+  resolveRustUse(segments, fromRel) {
+    const [head, ...rest] = segments;
+    let base;
+    if (head === "crate") base = this.rustCrateSrc(fromRel);
+    else if (head === "self") base = rustModuleDir(fromRel);
+    else if (head === "super") {
+      base = path8.posix.dirname(rustModuleDir(fromRel));
+      while (rest[0] === "super") {
+        rest.shift();
+        base = path8.posix.dirname(base);
+      }
+    } else base = this.rustCrates().get(head) ?? null;
+    if (base === null) return null;
+    for (let i2 = rest.length; i2 > 0; i2--) {
+      const file = this.rustModuleFile(base, rest.slice(0, i2));
+      if (file) return { file, item: rest[i2] ?? null };
+    }
+    const own = this.rustRootFile(base) ?? (this.exists(`${base}.rs`) === "file" ? `${base}.rs` : null);
+    return own && rest.length ? { file: own, item: rest[0] } : null;
+  }
+  rustModuleFile(dir2, mods) {
+    const rel = path8.posix.normalize(path8.posix.join(dir2, ...mods));
+    if (this.exists(`${rel}.rs`) === "file") return `${rel}.rs`;
+    return this.exists(`${rel}/mod.rs`) === "file" ? `${rel}/mod.rs` : null;
+  }
+  rustRootFile(dir2) {
+    for (const f of ["lib.rs", "main.rs", "mod.rs"]) if (this.exists(path8.posix.join(dir2, f)) === "file") return path8.posix.join(dir2, f);
+    return null;
+  }
+  /** A pasta src do crate do arquivo (a do Cargo.toml mais próximo). */
+  rustCrateSrc(fromRel) {
+    for (let dir2 = path8.posix.dirname(fromRel); ; dir2 = path8.posix.dirname(dir2)) {
+      if (this.exists(path8.posix.join(dir2, "Cargo.toml")) === "file") return path8.posix.join(dir2, "src");
+      if (dir2 === ".") return this.exists("src") === "dir" ? "src" : ".";
+    }
+  }
+  /** Crates do próprio workspace: nome (com _ no lugar de -) → pasta src. */
+  rustCrates() {
+    if (this.crates) return this.crates;
+    this.crates = /* @__PURE__ */ new Map();
+    for (const src of new Set(this.sourceFiles().filter((f) => f.endsWith(".rs")).map((f) => this.rustCrateSrc(f)))) {
+      const name2 = readText(path8.join(this.root, path8.posix.dirname(src), "Cargo.toml")).match(/^\s*name\s*=\s*"([\w-]+)"/m)?.[1];
+      if (name2) this.crates.set(name2.replace(/-/g, "_"), src);
+    }
+    return this.crates;
+  }
   byPackage(kind, fq) {
     const index = this.packageIndex(kind);
     if (fq.endsWith(".*")) return (index.get(fq.slice(0, -2)) ?? []).slice(0, MAX_PACKAGE_FILES).map((f) => f.rel);
@@ -12285,6 +12355,19 @@ var PathResolver = class {
 };
 var MAX_PACKAGE_FILES = 30;
 var DECLARED = /\b(?:class|interface|enum|record|struct|object|@interface|typealias)\s+(\w+)|^(?:(?:public|private|internal|inline|suspend)\s+)*fun\s+(?:<[^>]*>\s*)?(?:[\w.]+\.)?(\w+)/gm;
+function rustModuleDir(rel) {
+  const dir2 = path8.posix.dirname(rel);
+  const stem2 = path8.posix.basename(rel, ".rs");
+  if (["main", "lib", "mod"].includes(stem2) || /(^|\/)(bin|examples|tests|benches)$/.test(dir2)) return dir2;
+  return path8.posix.join(dir2, stem2);
+}
+function sharedPrefix(a, b) {
+  const x = a.split("/");
+  const y = b.split("/");
+  let i2 = 0;
+  while (i2 < x.length - 1 && i2 < y.length - 1 && x[i2] === y[i2]) i2++;
+  return i2;
+}
 function readText(file) {
   try {
     return fs4.readFileSync(file, "utf8");
@@ -12539,6 +12622,28 @@ var CodeExtractor = class {
       if (imported !== "*") this.out.importBindings.push({ local: aliasEq ?? aliasAs ?? imported, imported, targetRel: t });
     }
   }
+  /** Rust: `mod x;` → x.rs ou x/mod.rs; `mod x { … }` é caminhado; `use crate::a::B` → o arquivo do módulo a. */
+  importRust(n) {
+    if (n.type === "mod_item") {
+      const body2 = n.childForFieldName("body");
+      if (body2) return body2.namedChildren.forEach((c) => this.walk(c, null));
+      const name2 = n.childForFieldName("name")?.text;
+      const target = name2 ? this.resolver.resolveRustMod(name2, this.rel) : null;
+      if (target) this.addEdge(this.fileNid, fileNodeId(target), "imports", n, { context: "import" });
+      return;
+    }
+    const arg = n.childForFieldName("argument")?.text ?? "";
+    for (const { segments, alias } of rustUsePaths(arg)) {
+      const hit = this.resolver.resolveRustUse(segments, this.rel);
+      if (!hit) {
+        if (!["crate", "self", "super"].includes(segments[0])) this.addEdge(this.fileNid, makeId("ref", segments[0]), "imports", n, { context: "import" });
+        continue;
+      }
+      if (hit.file === this.rel) continue;
+      this.addEdge(this.fileNid, fileNodeId(hit.file), "imports", n, { context: "import" });
+      if (hit.item) this.out.importBindings.push({ local: alias ?? hit.item, imported: hit.item, targetRel: hit.file });
+    }
+  }
   // Demais linguagens: o import vira referência a um módulo externo (stub criado no build).
   importOther(n) {
     const { rel, fileNid } = this;
@@ -12547,10 +12652,11 @@ var CodeExtractor = class {
       const p = n.childForFieldName("path");
       if (!p) return;
       raw = p.text.replace(/^[<"]|[>"]$/g, "");
-      const local = p.type === "string_literal" ? this.resolver.resolveRelativeFile(raw, rel) : null;
+      const local = this.resolver.resolveCInclude(raw, rel, p.type === "string_literal");
       this.addEdge(fileNid, local ? fileNodeId(local) : makeId("ref", raw), "imports", n, { context: "import" });
       return;
     }
+    if (this.cfg.importStyle === "rust") return this.importRust(n);
     raw = n.text.replace(/^(import|using|use|namespace)\s+(static\s+)?/, "").replace(/[;{].*$/s, "").replace(/\s+as\s+\w+$/, "").trim();
     if (raw) this.addEdge(fileNid, makeId("ref", raw), "imports", n, { context: "import" });
   }
@@ -12754,31 +12860,32 @@ var CodeExtractor = class {
     if (this.cfg.name === "php") return phpCallee(n);
     const c = this.genericCallee(n);
     if (c?.member && c.receiver && this.goPackages.has(c.receiver)) return { name: c.name, member: false };
+    if (this.cfg.name === "rust" && c?.member && c.receiver && /^(crate|self|super|[a-z_][\w]*)$/.test(c.receiver.split("::").pop())) return { name: c.name, member: false };
     return c;
   }
   genericCallee(n) {
-    const fn7 = this.calleeNode(n);
-    if (!fn7) return null;
+    const fn9 = this.calleeNode(n);
+    if (!fn9) return null;
     if (this.cfg.name === "java" && n.type === "method_invocation") {
       const obj = n.childForFieldName("object");
-      return { name: fn7.text, member: !!obj, receiver: obj?.text };
+      return { name: fn9.text, member: !!obj, receiver: obj?.text };
     }
-    if (IDENTIFIER_CALLEES.has(fn7.type)) return { name: fn7.text, member: false };
-    if (this.cfg.accessorTypes.has(fn7.type)) return this.accessorCallee(fn7);
+    if (IDENTIFIER_CALLEES.has(fn9.type)) return { name: fn9.text, member: false };
+    if (this.cfg.accessorTypes.has(fn9.type)) return this.accessorCallee(fn9);
     return null;
   }
   /** `obj.metodo()`, `this.campo.metodo()`, `Tipo::new()`. */
-  accessorCallee(fn7) {
+  accessorCallee(fn9) {
     const cfg = this.cfg;
-    const prop = cfg.accessorField ? fn7.childForFieldName(cfg.accessorField) : fn7.namedChildren[fn7.namedChildCount - 1];
-    const obj = cfg.accessorObjectField ? fn7.childForFieldName(cfg.accessorObjectField) : fn7.namedChildren[0];
-    const name2 = (prop ?? fn7.namedChildren[fn7.namedChildCount - 1])?.text.replace(/^\./, "");
+    const prop = cfg.accessorField ? fn9.childForFieldName(cfg.accessorField) : fn9.namedChildren[fn9.namedChildCount - 1];
+    const obj = cfg.accessorObjectField ? fn9.childForFieldName(cfg.accessorObjectField) : fn9.namedChildren[0];
+    const name2 = (prop ?? fn9.namedChildren[fn9.namedChildCount - 1])?.text.replace(/^\./, "");
     if (!name2) return null;
     if (obj?.type === "member_expression" && obj.childForFieldName("object")?.type === "this") {
       return { name: name2, member: true, receiver: obj.childForFieldName("property")?.text, thisField: true };
     }
-    if (fn7.type === "scoped_identifier" || fn7.type === "qualified_identifier") {
-      const path17 = fn7.childForFieldName("path") ?? fn7.childForFieldName("scope");
+    if (fn9.type === "scoped_identifier" || fn9.type === "qualified_identifier") {
+      const path17 = fn9.childForFieldName("path") ?? fn9.childForFieldName("scope");
       return { name: name2, member: true, receiver: path17?.text };
     }
     return { name: name2, member: true, receiver: obj?.type === "identifier" || obj?.type === "this" || obj?.type === "self" ? obj.text : obj?.text.slice(0, 40) };
@@ -12945,8 +13052,8 @@ function dartCallee(n) {
 }
 function phpCallee(n) {
   if (n.type === "function_call_expression") {
-    const fn7 = n.childForFieldName("function");
-    return fn7 && (fn7.type === "name" || fn7.type === "qualified_name") ? { name: fn7.text.split("\\").pop(), member: false } : null;
+    const fn9 = n.childForFieldName("function");
+    return fn9 && (fn9.type === "name" || fn9.type === "qualified_name") ? { name: fn9.text.split("\\").pop(), member: false } : null;
   }
   if (n.type === "object_creation_expression") {
     const cls = n.namedChildren.find((c) => c.type === "name" || c.type === "qualified_name");
@@ -12961,6 +13068,32 @@ function phpCallee(n) {
   const obj = n.childForFieldName("object");
   const thisField = obj?.type === "member_access_expression" && obj.childForFieldName("object")?.text === "$this";
   return { name: name2, member: true, receiver: obj?.text === "$this" ? "this" : obj?.text.slice(0, 40), thisField };
+}
+function rustUsePaths(text, prefix = []) {
+  const s = text.trim();
+  const open = s.indexOf("{");
+  if (open === -1) {
+    const [, p, alias] = s.match(/^([\w:]+?)(?:::\*)?(?:\s+as\s+(\w+))?$/) ?? [];
+    if (!p) return [];
+    const segments = [...prefix, ...p.split("::").filter(Boolean)];
+    if (segments[segments.length - 1] === "self") segments.pop();
+    return segments.length ? [{ segments, alias: alias ?? null }] : [];
+  }
+  const head = s.slice(0, open).replace(/::$/, "").split("::").filter(Boolean);
+  const inner = s.slice(open + 1, s.lastIndexOf("}"));
+  const parts2 = [];
+  let depth = 0;
+  let start2 = 0;
+  for (let i2 = 0; i2 < inner.length; i2++) {
+    if (inner[i2] === "{") depth++;
+    else if (inner[i2] === "}") depth--;
+    else if (inner[i2] === "," && depth === 0) {
+      parts2.push(inner.slice(start2, i2));
+      start2 = i2 + 1;
+    }
+  }
+  parts2.push(inner.slice(start2));
+  return parts2.filter((p) => p.trim()).flatMap((p) => rustUsePaths(p, [...prefix, ...head]));
 }
 function phpUseNames(n) {
   const group = n.namedChildren.find((c) => c.type === "namespace_use_group");
@@ -13825,15 +13958,81 @@ function testCall(node, add) {
   if (/Future\.delayed\s*\(|\bsleep\s*\(/.test(node.text)) add("testes/espera-fixa", node, { call: "Future.delayed" });
 }
 
+// engine/src/quality-c.ts
+var BRANCHES2 = /* @__PURE__ */ new Set(["if_statement", "for_statement", "for_range_loop", "while_statement", "do_statement", "case_statement", "catch_clause", "conditional_expression"]);
+var NESTING2 = /* @__PURE__ */ new Set(["if_statement", "for_statement", "for_range_loop", "while_statement", "do_statement", "switch_statement", "try_statement"]);
+var FUNCTIONS2 = /* @__PURE__ */ new Set(["lambda_expression", "function_definition"]);
+var LOG_ONLY = /^(std::)?(cerr|cout|clog)\s*<<|^(f?printf|fputs|puts|perror|spdlog::\w+|LOG\w*|qDebug|qWarning|syslog)\s*\(|^\w*[lL]og(ger)?(\.|->|::)\w+\s*\(/;
+var EMPTY_RETURN = /^return\s*(nullptr|NULL|false|0|-1|""|\{\}|std::nullopt|std::string\(\)|\w+\(\))?\s*;$/;
+var TEST_MACRO = /^(TEST|TEST_F|TEST_P|TYPED_TEST|TEST_CASE|TEST_CASE_METHOD|SCENARIO|BOOST_AUTO_TEST_CASE)$/;
+var CHECKS2 = /\b(EXPECT_\w+|ASSERT_\w+|REQUIRE\w*|CHECK\w*|BOOST_\w*(CHECK|REQUIRE)\w*|assert|static_assert|FAIL|ADD_FAILURE)\s*\(/;
+var SLEEP = /\b(std::this_thread::sleep_for|this_thread::sleep_for|usleep|sleep|Sleep|nanosleep)\s*\(/;
+var operator = (n) => n.childForFieldName("operator")?.text ?? "";
+var statements2 = (block) => (block?.namedChildren ?? []).filter((n) => n.type !== "comment");
+async function analyzeC(grammar, source, { test = false } = {}) {
+  const tree = await parse(grammar, source);
+  const hits = [];
+  const functions = [];
+  const add = (rule, node, ctx) => hits.push({ rule, line: node.startPosition.row + 1, ctx: { ...ctx, lang: grammar } });
+  const visit = (node) => {
+    const t = node.type;
+    if (t === "function_definition") {
+      const macro2 = testMacro(node);
+      if (macro2) testFunction(node, macro2, add);
+      else if (!test) fn2(node, add, functions);
+    } else if (!test && t === "catch_clause") catchClause(node, add);
+    else if (!test && t === "conditional_expression" && node.namedChildren.some((c) => c.type === "conditional_expression")) add("complexidade/ternario-aninhado", node);
+    for (const child of node.namedChildren) visit(child);
+  };
+  visit(tree.rootNode);
+  commentedCode(tree.rootNode, source.split("\n"), hits, { lang: grammar });
+  const module2 = { imports: [], exports: [], commonjs: false, lang: grammar };
+  tree.delete();
+  return { hits, functions, module: module2 };
+}
+function testMacro(node) {
+  const name2 = node.childForFieldName("declarator")?.childForFieldName("declarator")?.text ?? "";
+  return TEST_MACRO.test(name2) ? name2 : null;
+}
+function catchClause(node, add) {
+  const body2 = node.childForFieldName("body");
+  const list = statements2(body2);
+  if (!list.length) return list.length === body2?.namedChildCount ? add("falha/catch-vazio", node) : void 0;
+  if (list.every((s) => s.type === "expression_statement" && LOG_ONLY.test(s.text))) return add("falha/catch-so-loga", node);
+  if (list.length === 1 && list[0].type === "return_statement" && EMPTY_RETURN.test(list[0].text)) add("falha/catch-devolve-nulo", node);
+}
+function fn2(node, add, functions) {
+  const body2 = node.childForFieldName("body");
+  if (!body2) return;
+  const metrics = measureBody(body2, {
+    functions: FUNCTIONS2,
+    branch: (c) => BRANCHES2.has(c.type) || c.type === "binary_expression" && /^(&&|\|\||and|or)$/.test(operator(c)),
+    nests: (c) => NESTING2.has(c.type)
+  });
+  let d = node.childForFieldName("declarator");
+  while (d?.childForFieldName("declarator")) d = d.childForFieldName("declarator");
+  recordFunction(node, d?.text.split("::").pop() ?? "(an\xF4nima)", metrics, add, functions);
+}
+function testFunction(node, macro2, add) {
+  const params = node.childForFieldName("declarator")?.childForFieldName("parameters")?.text ?? "";
+  const body2 = node.childForFieldName("body")?.text ?? "";
+  const name2 = params.replace(/^\(|\)$/g, "").replace(/\s+/g, " ").slice(0, 80);
+  if (/\bDISABLED_|"\[\.|\[\.\]|\[!mayfail\]/.test(params)) return add("testes/pulado", node, { call: macro2.startsWith("TEST_CASE") ? "[.]" : "DISABLED_" });
+  if (/\bGTEST_SKIP\s*\(|\bSKIP\s*\(/.test(body2)) return add("testes/pulado", node, { call: "GTEST_SKIP()" });
+  if (!CHECKS2.test(body2)) add("testes/sem-conferencia", node, { name: name2 });
+  const sleep = body2.match(SLEEP);
+  if (sleep) add("testes/espera-fixa", node, { call: sleep[1] });
+}
+
 // engine/src/quality-go.ts
-var BRANCHES2 = /* @__PURE__ */ new Set(["if_statement", "for_statement", "expression_case", "type_case", "communication_case"]);
-var NESTING2 = /* @__PURE__ */ new Set(["if_statement", "for_statement", "expression_switch_statement", "type_switch_statement", "select_statement"]);
-var FUNCTIONS2 = /* @__PURE__ */ new Set(["func_literal"]);
-var LOG_ONLY = /^(log\.(Print|Println|Printf)|fmt\.(Print|Println|Printf|Fprint\w*)|slog\.\w+|\w*[lL]og(ger)?\.\w+|println|print)\s*\(/;
-var CHECKS2 = /\b\w+\.(Error|Errorf|Fatal|Fatalf|Fail|FailNow)\s*\(|\b(assert|require)\.\w+\s*\(|\bExpect\s*\(|\bΩ\s*\(/;
+var BRANCHES3 = /* @__PURE__ */ new Set(["if_statement", "for_statement", "expression_case", "type_case", "communication_case"]);
+var NESTING3 = /* @__PURE__ */ new Set(["if_statement", "for_statement", "expression_switch_statement", "type_switch_statement", "select_statement"]);
+var FUNCTIONS3 = /* @__PURE__ */ new Set(["func_literal"]);
+var LOG_ONLY2 = /^(log\.(Print|Println|Printf)|fmt\.(Print|Println|Printf|Fprint\w*)|slog\.\w+|\w*[lL]og(ger)?\.\w+|println|print)\s*\(/;
+var CHECKS3 = /\b\w+\.(Error|Errorf|Fatal|Fatalf|Fail|FailNow)\s*\(|\b(assert|require)\.\w+\s*\(|\bExpect\s*\(|\bΩ\s*\(/;
 var HELPER = /\w\(\s*t\s*[,)]|,\s*t\s*\)/;
 var ZERO = /^(nil|false|0|""|``|\w+\{\})$/;
-var statements2 = (block) => (block?.namedChildren ?? []).filter((n) => n.type !== "comment");
+var statements3 = (block) => (block?.namedChildren ?? []).filter((n) => n.type !== "comment");
 var hasComment2 = (block) => (block?.namedChildren ?? []).some((n) => n.type === "comment");
 async function analyzeGo(source, { test = false } = {}) {
   const tree = await parse("go", source);
@@ -13844,11 +14043,11 @@ async function analyzeGo(source, { test = false } = {}) {
   const visit = (node) => {
     const t = node.type;
     if (test) {
-      if (t === "function_declaration" && /^Test[A-Z_]?/.test(node.childForFieldName("name")?.text ?? "")) testFunction(node, add);
+      if (t === "function_declaration" && /^Test[A-Z_]?/.test(node.childForFieldName("name")?.text ?? "")) testFunction2(node, add);
     } else {
       if (t === "if_statement") errCheck(node, add);
       else if (t === "expression_statement") statement(node, isMain, add);
-      if (t === "function_declaration" || t === "method_declaration") fn2(node, add, functions);
+      if (t === "function_declaration" || t === "method_declaration") fn3(node, add, functions);
     }
     for (const child of node.namedChildren) visit(child);
   };
@@ -13870,39 +14069,39 @@ function errCheck(node, add) {
   const cond = node.childForFieldName("condition");
   if (cond?.type !== "binary_expression" || !/^\w*[eE]rr\w*\s*!=\s*nil$/.test(cond.text)) return;
   const body2 = node.childForFieldName("consequence");
-  const list = statements2(body2);
+  const list = statements3(body2);
   if (!list.length) return hasComment2(body2) ? void 0 : add("falha/catch-vazio", node);
-  if (list.every((s) => s.type === "expression_statement" && LOG_ONLY.test(s.text))) return add("falha/catch-so-loga", node);
+  if (list.every((s) => s.type === "expression_statement" && LOG_ONLY2.test(s.text))) return add("falha/catch-so-loga", node);
   const ret = list.length === 1 && list[0].type === "return_statement" ? list[0] : null;
   const values = ret?.namedChildren[0]?.namedChildren ?? [];
   if (ret && values.length && values.every((v) => ZERO.test(v.text)) && !hasComment2(body2)) add("falha/catch-devolve-nulo", node);
 }
-function fn2(node, add, functions) {
+function fn3(node, add, functions) {
   const body2 = node.childForFieldName("body");
   if (!body2) return;
   const metrics = measureBody(body2, {
-    functions: FUNCTIONS2,
-    branch: (c) => BRANCHES2.has(c.type) || c.type === "binary_expression" && /^(&&|\|\|)$/.test(c.childForFieldName("operator")?.text ?? ""),
-    nests: (c) => NESTING2.has(c.type)
+    functions: FUNCTIONS3,
+    branch: (c) => BRANCHES3.has(c.type) || c.type === "binary_expression" && /^(&&|\|\|)$/.test(c.childForFieldName("operator")?.text ?? ""),
+    nests: (c) => NESTING3.has(c.type)
   });
   recordFunction(node, node.childForFieldName("name")?.text ?? "(an\xF4nima)", metrics, add, functions);
 }
-function testFunction(node, add) {
+function testFunction2(node, add) {
   const name2 = node.childForFieldName("name")?.text ?? "Test";
   const body2 = node.childForFieldName("body")?.text ?? "";
   if (/\bt\.Skip(Now|f)?\s*\(/.test(body2)) return add("testes/pulado", node, { call: "t.Skip()" });
-  if (!CHECKS2.test(body2) && !HELPER.test(body2)) add("testes/sem-conferencia", node, { name: name2.slice(0, 80) });
+  if (!CHECKS3.test(body2) && !HELPER.test(body2)) add("testes/sem-conferencia", node, { name: name2.slice(0, 80) });
   if (/\btime\.Sleep\s*\(/.test(body2)) add("testes/espera-fixa", node, { call: "time.Sleep" });
 }
 
 // engine/src/quality-java.ts
 var LOGGER = /^(\w*[lL]og(ger)?|LOG(GER)?|_logger|Log|Timber|Trace|Debug)\.\w+\s*\(/;
-var operator = (n) => n.childForFieldName("operator")?.text ?? n.children.find((c) => !c.isNamed)?.text ?? "";
+var operator2 = (n) => n.childForFieldName("operator")?.text ?? n.children.find((c) => !c.isNamed)?.text ?? "";
 var LANGS = {
   java: {
     grammar: "java",
     branches: /* @__PURE__ */ new Set(["if_statement", "for_statement", "enhanced_for_statement", "while_statement", "do_statement", "switch_block_statement_group", "switch_rule", "catch_clause", "ternary_expression"]),
-    logical: (n) => n.type === "binary_expression" && /^(&&|\|\|)$/.test(operator(n)),
+    logical: (n) => n.type === "binary_expression" && /^(&&|\|\|)$/.test(operator2(n)),
     nesting: /* @__PURE__ */ new Set(["if_statement", "for_statement", "enhanced_for_statement", "while_statement", "do_statement", "switch_expression", "try_statement", "try_with_resources_statement"]),
     inner: /* @__PURE__ */ new Set(["lambda_expression", "method_declaration", "constructor_declaration", "class_body"]),
     functions: /* @__PURE__ */ new Set(["method_declaration", "constructor_declaration"]),
@@ -13940,7 +14139,7 @@ var LANGS = {
   csharp: {
     grammar: "c_sharp",
     branches: /* @__PURE__ */ new Set(["if_statement", "for_statement", "for_each_statement", "while_statement", "do_statement", "switch_section", "switch_expression_arm", "catch_clause", "conditional_expression"]),
-    logical: (n) => n.type === "binary_expression" && /^(&&|\|\||\?\?)$/.test(operator(n)),
+    logical: (n) => n.type === "binary_expression" && /^(&&|\|\||\?\?)$/.test(operator2(n)),
     nesting: /* @__PURE__ */ new Set(["if_statement", "for_statement", "for_each_statement", "while_statement", "do_statement", "switch_statement", "try_statement"]),
     inner: /* @__PURE__ */ new Set(["lambda_expression", "anonymous_method_expression", "local_function_statement", "method_declaration"]),
     functions: /* @__PURE__ */ new Set(["method_declaration", "constructor_declaration", "local_function_statement"]),
@@ -13970,10 +14169,10 @@ async function analyzeTyped(lang, source, { test = false } = {}) {
     if (test) {
       if (rules.functions.has(t) && rules.testMark.test(annotations(node))) testMethod(node, rules, add);
     } else {
-      if (t === rules.catch) catchClause(node, rules, add);
+      if (t === rules.catch) catchClause2(node, rules, add);
       else if (isStatement(node)) statement2(node, rules, isMain, add);
       else if (t === rules.ternary && node.parent?.type !== t && node.namedChildren.some((c) => c.type === t)) add("complexidade/ternario-aninhado", node);
-      if (rules.functions.has(t)) fn3(node, rules, add, functions);
+      if (rules.functions.has(t)) fn4(node, rules, add, functions);
     }
     for (const child of node.namedChildren) visit(child);
   };
@@ -13997,7 +14196,7 @@ function catchBody(node) {
   const comment2 = items.some((c) => COMMENTS.has(c.type)) || node.namedChildren.some((c) => COMMENTS.has(c.type));
   return { list: items.filter((c) => !COMMENTS.has(c.type)), comment: comment2 };
 }
-function catchClause(node, rules, add) {
+function catchClause2(node, rules, add) {
   const { list, comment: comment2 } = catchBody(node);
   if (!list.length) return comment2 ? void 0 : add("falha/catch-vazio", node);
   const logs = (s) => rules.logOnly.test(s.text.trim()) || LOGGER.test(s.text.trim());
@@ -14009,7 +14208,7 @@ function nameAndBody(node) {
   const body2 = node.childForFieldName("body") ?? node.namedChildren.find((c) => c.type === "function_body") ?? null;
   return { name: name2, body: body2 };
 }
-function fn3(node, rules, add, functions) {
+function fn4(node, rules, add, functions) {
   const { name: name2, body: body2 } = nameAndBody(node);
   if (!body2) return;
   const metrics = measureBody(body2, { functions: rules.inner, branch: (c) => rules.branches.has(c.type) || rules.logical(c), nests: (c) => rules.nesting.has(c.type) });
@@ -14030,7 +14229,7 @@ function testMethod(node, rules, add) {
 }
 
 // engine/src/quality-php.ts
-var BRANCHES3 = /* @__PURE__ */ new Set([
+var BRANCHES4 = /* @__PURE__ */ new Set([
   "if_statement",
   "else_if_clause",
   "for_statement",
@@ -14043,13 +14242,13 @@ var BRANCHES3 = /* @__PURE__ */ new Set([
   "match_conditional_expression"
 ]);
 var LOGICAL = /^(&&|\|\||and|or|\?\?)$/i;
-var NESTING3 = /* @__PURE__ */ new Set(["if_statement", "for_statement", "foreach_statement", "while_statement", "do_statement", "switch_statement", "try_statement", "match_expression"]);
-var FUNCTIONS3 = /* @__PURE__ */ new Set(["anonymous_function_creation_expression", "anonymous_function", "arrow_function", "function_definition", "method_declaration"]);
+var NESTING4 = /* @__PURE__ */ new Set(["if_statement", "for_statement", "foreach_statement", "while_statement", "do_statement", "switch_statement", "try_statement", "match_expression"]);
+var FUNCTIONS4 = /* @__PURE__ */ new Set(["anonymous_function_creation_expression", "anonymous_function", "arrow_function", "function_definition", "method_declaration"]);
 var DUMP = /* @__PURE__ */ new Set(["var_dump", "print_r", "dump", "var_export"]);
 var HALT = /* @__PURE__ */ new Set(["dd", "ddd", "xdebug_break"]);
-var LOG_ONLY2 = /^(echo\b|print\b|error_log\s*\(|var_dump\s*\(|print_r\s*\(|dump\s*\()/;
-var CHECKS3 = /\$this->(assert|expect)\w*\(|\bexpect\s*\(|\bself::assert\w*\(|->assert\w*\(|\bassert\w*\s*\(/;
-var statements3 = (block) => (block?.namedChildren ?? []).filter((n) => n.type !== "comment");
+var LOG_ONLY3 = /^(echo\b|print\b|error_log\s*\(|var_dump\s*\(|print_r\s*\(|dump\s*\()/;
+var CHECKS4 = /\$this->(assert|expect)\w*\(|\bexpect\s*\(|\bself::assert\w*\(|->assert\w*\(|\bassert\w*\s*\(/;
+var statements4 = (block) => (block?.namedChildren ?? []).filter((n) => n.type !== "comment");
 var hasComment3 = (block) => (block?.namedChildren ?? []).some((n) => n.type === "comment");
 var calleeName = (n) => n.type === "function_call_expression" ? n.childForFieldName("function")?.text ?? "" : "";
 var isEmptyReturn2 = (n) => n.type === "return_statement" && /^return\s*(null|false|\[\s*\]|array\(\s*\)|''|""|0)?\s*;$/i.test(n.text);
@@ -14064,12 +14263,12 @@ async function analyzePhp(source, { test = false } = {}) {
       if (t === "method_declaration" && /^test/i.test(node.childForFieldName("name")?.text ?? "")) testMethod2(node, add);
       else if (t === "function_call_expression" && /^(it|test)$/.test(calleeName(node))) pestTest(node, add);
     } else {
-      if (t === "catch_clause") catchClause2(node, add);
+      if (t === "catch_clause") catchClause3(node, add);
       else if (t === "function_call_expression" && DUMP.has(calleeName(node).toLowerCase())) add("limpeza/print-esquecido", node, { call: `${calleeName(node)}()` });
       else if (t === "function_call_expression" && HALT.has(calleeName(node).toLowerCase())) add("limpeza/debugger", node, { call: `${calleeName(node)}()` });
       else if (t === "conditional_expression" && node.parent?.type !== "conditional_expression" && node.namedChildren.some((c) => c.type === "conditional_expression"))
         add("complexidade/ternario-aninhado", node);
-      if (t === "function_definition" || t === "method_declaration") fn4(node, add, functions);
+      if (t === "function_definition" || t === "method_declaration") fn5(node, add, functions);
     }
     for (const child of node.namedChildren) visit(child);
   };
@@ -14098,20 +14297,20 @@ function phpModule(root) {
   }
   return m;
 }
-function catchClause2(node, add) {
+function catchClause3(node, add) {
   const body2 = node.childForFieldName("body");
-  const list = statements3(body2);
+  const list = statements4(body2);
   if (!list.length) return hasComment3(body2) ? void 0 : add("falha/catch-vazio", node);
-  if (list.every((s) => s.type === "echo_statement" || s.type === "expression_statement" && LOG_ONLY2.test(s.text))) return add("falha/catch-so-loga", node);
+  if (list.every((s) => s.type === "echo_statement" || s.type === "expression_statement" && LOG_ONLY3.test(s.text))) return add("falha/catch-so-loga", node);
   if (list.length === 1 && isEmptyReturn2(list[0]) && !hasComment3(body2)) add("falha/catch-devolve-nulo", node);
 }
-function fn4(node, add, functions) {
+function fn5(node, add, functions) {
   const body2 = node.childForFieldName("body");
   if (!body2) return;
   const metrics = measureBody(body2, {
-    functions: FUNCTIONS3,
-    branch: (c) => BRANCHES3.has(c.type) || c.type === "binary_expression" && LOGICAL.test(c.childForFieldName("operator")?.text ?? ""),
-    nests: (c) => NESTING3.has(c.type)
+    functions: FUNCTIONS4,
+    branch: (c) => BRANCHES4.has(c.type) || c.type === "binary_expression" && LOGICAL.test(c.childForFieldName("operator")?.text ?? ""),
+    nests: (c) => NESTING4.has(c.type)
   });
   recordFunction(node, node.childForFieldName("name")?.text ?? "(an\xF4nima)", metrics, add, functions);
 }
@@ -14119,7 +14318,7 @@ function testMethod2(node, add) {
   const name2 = node.childForFieldName("name")?.text ?? "test";
   const body2 = node.childForFieldName("body")?.text ?? "";
   if (/markTestSkipped|markTestIncomplete/.test(body2)) return add("testes/pulado", node, { call: "markTestSkipped()" });
-  if (!CHECKS3.test(body2) && !/expectException/.test(body2)) add("testes/sem-conferencia", node, { name: name2.slice(0, 80) });
+  if (!CHECKS4.test(body2) && !/expectException/.test(body2)) add("testes/sem-conferencia", node, { name: name2.slice(0, 80) });
   if (/\b(u?sleep)\s*\(/.test(body2)) add("testes/espera-fixa", node, { call: "sleep()" });
 }
 function pestTest(node, add) {
@@ -14128,16 +14327,16 @@ function pestTest(node, add) {
   const chained = node.parent?.type === "member_call_expression" ? node.parent.text : "";
   if (/->skip\s*\(/.test(chained)) return add("testes/pulado", node, { call: "->skip()" });
   if (/->only\s*\(/.test(chained)) return add("testes/only", node, { call: "->only()" });
-  if (!CHECKS3.test(text)) add("testes/sem-conferencia", node, { name: name2.slice(0, 80) });
+  if (!CHECKS4.test(text)) add("testes/sem-conferencia", node, { name: name2.slice(0, 80) });
 }
 
 // engine/src/quality-python.ts
-var BRANCHES4 = /* @__PURE__ */ new Set(["if_statement", "elif_clause", "for_statement", "while_statement", "except_clause", "conditional_expression", "case_clause", "boolean_operator", "if_clause"]);
-var NESTING4 = /* @__PURE__ */ new Set(["if_statement", "for_statement", "while_statement", "try_statement", "with_statement", "match_statement"]);
-var FUNCTIONS4 = /* @__PURE__ */ new Set(["function_definition", "lambda"]);
+var BRANCHES5 = /* @__PURE__ */ new Set(["if_statement", "elif_clause", "for_statement", "while_statement", "except_clause", "conditional_expression", "case_clause", "boolean_operator", "if_clause"]);
+var NESTING5 = /* @__PURE__ */ new Set(["if_statement", "for_statement", "while_statement", "try_statement", "with_statement", "match_statement"]);
+var FUNCTIONS5 = /* @__PURE__ */ new Set(["function_definition", "lambda"]);
 var MOCK_MODULE = /(^|\.)(mocks?|fixtures?|fakes?|stubs?)(\.|$)/i;
-var CHECKS4 = /\bassert\b|pytest\.(raises|warns|approx|fail)\b|self\.assert\w*\(|\.assert_\w+\(|\bexpect\(/;
-var statements4 = (block) => (block?.namedChildren ?? []).filter((n) => n.type !== "comment");
+var CHECKS5 = /\bassert\b|pytest\.(raises|warns|approx|fail)\b|self\.assert\w*\(|\.assert_\w+\(|\bexpect\(/;
+var statements5 = (block) => (block?.namedChildren ?? []).filter((n) => n.type !== "comment");
 var hasComment4 = (block) => (block?.namedChildren ?? []).some((n) => n.type === "comment");
 var blockOf = (node) => node.namedChildren.filter((c) => c.type === "block").at(-1) ?? null;
 var callee = (n) => n?.type === "call" ? n.childForFieldName("function")?.text ?? "" : "";
@@ -14151,7 +14350,7 @@ async function analyzePython(source, { test = false } = {}) {
   const visit = (node) => {
     const t = node.type;
     if (test) {
-      if (t === "function_definition" && /^test/.test(node.childForFieldName("name")?.text ?? "")) testFunction2(node, add);
+      if (t === "function_definition" && /^test/.test(node.childForFieldName("name")?.text ?? "")) testFunction3(node, add);
       if (t === "call" && /^(time\.)?sleep$/.test(callee(node))) add("testes/espera-fixa", node, { call: "time.sleep" });
     } else {
       if (t === "except_clause") exceptClause(node, add);
@@ -14161,7 +14360,7 @@ async function analyzePython(source, { test = false } = {}) {
         const from = node.childForFieldName("module_name")?.text ?? "";
         if (MOCK_MODULE.test(from)) add("falha/mock-em-producao", node, { from });
       }
-      if (t === "function_definition") fn5(node, add, functions);
+      if (t === "function_definition") fn6(node, add, functions);
     }
     for (const child of node.namedChildren) visit(child);
   };
@@ -14190,7 +14389,7 @@ function pythonModule(root) {
 }
 function exceptClause(node, add) {
   const body2 = blockOf(node);
-  const list = statements4(body2);
+  const list = statements5(body2);
   const explained = hasComment4(body2) || hasComment4(node);
   if (list.every((s) => s.type === "pass_statement")) return explained ? void 0 : add("falha/catch-vazio", node);
   if (list.every(isPrintOnly2)) return add("falha/catch-so-loga", node);
@@ -14201,19 +14400,19 @@ var unwrap2 = (n) => {
   return n;
 };
 var hasNestedConditional = (node) => node.namedChildren.some((c) => unwrap2(c)?.type === "conditional_expression");
-function testFunction2(node, add) {
+function testFunction3(node, add) {
   const name2 = node.childForFieldName("name")?.text ?? "test";
   const decorated = node.parent?.type === "decorated_definition" ? node.parent : null;
   const skip = decorated?.namedChildren.find((d) => d.type === "decorator" && /pytest\.mark\.(skip|skipif|xfail)\b|unittest\.skip/.test(d.text));
   if (skip) return add("testes/pulado", skip, { call: skip.text.replace(/\(.*$/s, "").slice(0, 40) });
   const body2 = node.childForFieldName("body");
   if (body2 && /\bpytest\.skip\(/.test(body2.text)) return add("testes/pulado", node, { call: "pytest.skip()" });
-  if (body2 && !CHECKS4.test(body2.text)) add("testes/sem-conferencia", node, { name: name2.slice(0, 80) });
+  if (body2 && !CHECKS5.test(body2.text)) add("testes/sem-conferencia", node, { name: name2.slice(0, 80) });
 }
-function fn5(node, add, functions) {
+function fn6(node, add, functions) {
   const body2 = node.childForFieldName("body");
   if (!body2) return;
-  const metrics = measureBody(body2, { functions: FUNCTIONS4, branch: (c) => BRANCHES4.has(c.type), nests: (c) => NESTING4.has(c.type) });
+  const metrics = measureBody(body2, { functions: FUNCTIONS5, branch: (c) => BRANCHES5.has(c.type), nests: (c) => NESTING5.has(c.type) });
   recordFunction(node, node.childForFieldName("name")?.text ?? "(an\xF4nima)", metrics, add, functions);
 }
 var CODE_LINE = /^\s*(def|class|import|from|return|if|elif|else|for|while|try|except|with|raise|yield|print|await|async)\b|^\s*[\w.[\]]+\s*=[^=]|^\s*[\w.]+\(.*\)\s*$/;
@@ -14242,6 +14441,103 @@ function commentedCode2(root, lines, hits) {
   flush();
 }
 
+// engine/src/quality-rust.ts
+var BRANCHES6 = /* @__PURE__ */ new Set(["if_expression", "for_expression", "while_expression", "loop_expression", "match_arm"]);
+var NESTING6 = /* @__PURE__ */ new Set(["if_expression", "for_expression", "while_expression", "loop_expression", "match_expression"]);
+var FUNCTIONS6 = /* @__PURE__ */ new Set(["closure_expression", "function_item"]);
+var PRINT2 = /^(println|print|eprintln|eprint)$/;
+var LOG_ONLY4 = /^((log|tracing)::)?(println|print|eprintln|eprint|error|warn|info|debug|trace)!/;
+var EMPTY_VALUE = /^(None|false|0|""|\(\)|Vec::new\(\)|vec!\[\]|String::new\(\)|Default::default\(\)|\w+::default\(\))$/;
+var CHECKS6 = /\b(assert\w*|debug_assert\w*|panic|unreachable|assert_matches|insta::assert_\w+)!|\.(unwrap|expect)\w*\(|\?\s*;|\bproptest!/;
+var SLEEP2 = /\b(thread::sleep|tokio::time::sleep|std::thread::sleep|async_std::task::sleep)\s*\(/;
+var attributes = (fn9) => {
+  const out2 = [];
+  for (let s = fn9.previousNamedSibling; s && (s.type === "attribute_item" || s.type === "line_comment"); s = s.previousNamedSibling) if (s.type === "attribute_item") out2.push(s.text);
+  return out2;
+};
+var isTest = (fn9) => attributes(fn9).some((a) => /^#\[(\w+::)?test\b/.test(a));
+var isCfgTest = (mod) => attributes(mod).some((a) => /^#\[cfg\(test\)\]/.test(a));
+async function analyzeRust(source, { test = false, main = false } = {}) {
+  const tree = await parse("rust", source);
+  const hits = [];
+  const functions = [];
+  const add = (rule, node, ctx) => hits.push({ rule, line: node.startPosition.row + 1, ctx: { ...ctx, lang: "rust" } });
+  const visit = (node, inTest) => {
+    const t = node.type;
+    if (t === "mod_item" && isCfgTest(node)) inTest = true;
+    if (t === "function_item" && isTest(node)) {
+      testFunction4(node, add);
+      inTest = true;
+    }
+    if (!inTest && !test) {
+      if (t === "match_arm") errArm(node, add);
+      else if (t === "if_expression") errIf(node, add);
+      else if (t === "macro_invocation") macro(node, main, add);
+      else if (t === "call_expression" && !main) unwrap3(node, add);
+      if (t === "function_item") fn7(node, add, functions);
+    }
+    for (const child of node.namedChildren) visit(child, inTest);
+  };
+  visit(tree.rootNode, test);
+  commentedCode(tree.rootNode, source.split("\n"), hits, { lang: "rust" });
+  const module2 = { imports: [], exports: [], commonjs: false, lang: "rust" };
+  tree.delete();
+  return { hits, functions, module: module2 };
+}
+function macro(node, main, add) {
+  const name2 = node.childForFieldName("macro")?.text ?? "";
+  if (name2 === "dbg") return add("limpeza/print-esquecido", node, { call: "dbg!()" });
+  if (PRINT2.test(name2) && !main && !inErrHandler(node)) add("limpeza/print-esquecido", node, { call: `${name2}!()` });
+}
+function inErrHandler(node) {
+  for (let p = node.parent; p && p.type !== "function_item"; p = p.parent) {
+    if (p.type === "match_arm" && /^Err\b/.test(p.childForFieldName("pattern")?.text ?? "")) return true;
+    if (p.type === "if_expression" && /^let\s+Err\b/.test(p.childForFieldName("condition")?.text ?? "")) return true;
+  }
+  return false;
+}
+function unwrap3(node, add) {
+  const fn9 = node.childForFieldName("function");
+  if (fn9?.type === "field_expression" && fn9.childForFieldName("field")?.text === "unwrap" && !node.childForFieldName("arguments")?.namedChildCount) add("falha/unwrap", node);
+}
+function errArm(node, add) {
+  if (!/^Err\b/.test(node.childForFieldName("pattern")?.text ?? "")) return;
+  handler(node, node.childForFieldName("value"), add);
+}
+function errIf(node, add) {
+  if (!/^let\s+Err\b/.test(node.childForFieldName("condition")?.text ?? "")) return;
+  handler(node, node.childForFieldName("consequence"), add);
+}
+function handler(node, value, add) {
+  if (!value) return;
+  if (value.type !== "block") return EMPTY_VALUE.test(value.text) || value.text === "{}" ? add("falha/catch-devolve-nulo", node) : void 0;
+  const list = value.namedChildren.filter((n) => n.type !== "line_comment" && n.type !== "block_comment");
+  const commented = list.length !== value.namedChildCount;
+  if (!list.length) return commented ? void 0 : add("falha/catch-vazio", node);
+  if (list.every((s) => LOG_ONLY4.test(s.text))) return add("falha/catch-so-loga", node);
+  const only = list.length === 1 ? list[0].text.replace(/^return\s+/, "").replace(/;$/, "") : null;
+  if (only && EMPTY_VALUE.test(only) && !commented) add("falha/catch-devolve-nulo", node);
+}
+function fn7(node, add, functions) {
+  const body2 = node.childForFieldName("body");
+  if (!body2) return;
+  const metrics = measureBody(body2, {
+    functions: FUNCTIONS6,
+    branch: (c) => BRANCHES6.has(c.type) || c.type === "binary_expression" && /^(&&|\|\|)$/.test(c.childForFieldName("operator")?.text ?? ""),
+    nests: (c) => NESTING6.has(c.type)
+  });
+  recordFunction(node, node.childForFieldName("name")?.text ?? "(an\xF4nima)", metrics, add, functions);
+}
+function testFunction4(node, add) {
+  const name2 = node.childForFieldName("name")?.text ?? "test";
+  const attrs = attributes(node);
+  const body2 = node.childForFieldName("body")?.text ?? "";
+  if (attrs.some((a) => /^#\[ignore\b/.test(a))) return add("testes/pulado", node, { call: "#[ignore]" });
+  if (!CHECKS6.test(body2) && !attrs.some((a) => /should_panic/.test(a))) add("testes/sem-conferencia", node, { name: name2.slice(0, 80) });
+  const sleep = body2.match(SLEEP2);
+  if (sleep) add("testes/espera-fixa", node, { call: sleep[1] });
+}
+
 // engine/src/quality.ts
 var GRAMMAR = {
   ".ts": "typescript",
@@ -14258,9 +14554,19 @@ var GRAMMAR = {
   ".go": "go",
   ".java": "java",
   ".kt": "kotlin",
-  ".cs": "c_sharp"
+  ".cs": "c_sharp",
+  ".rs": "rust",
+  ".c": "c",
+  // .h pode ser de C ou de C++; a gramática do C++ lê os dois.
+  ".h": "cpp",
+  ".cpp": "cpp",
+  ".cc": "cpp",
+  ".cxx": "cpp",
+  ".hpp": "cpp",
+  ".hh": "cpp",
+  ".hxx": "cpp"
 };
-var FUNCTIONS5 = /* @__PURE__ */ new Set([
+var FUNCTIONS7 = /* @__PURE__ */ new Set([
   "function_declaration",
   "function_expression",
   "function",
@@ -14269,7 +14575,7 @@ var FUNCTIONS5 = /* @__PURE__ */ new Set([
   "arrow_function",
   "method_definition"
 ]);
-var BRANCHES5 = /* @__PURE__ */ new Set([
+var BRANCHES7 = /* @__PURE__ */ new Set([
   "if_statement",
   "for_statement",
   "for_in_statement",
@@ -14278,9 +14584,10 @@ var BRANCHES5 = /* @__PURE__ */ new Set([
   "catch_clause",
   "ternary_expression"
 ]);
-var NESTING5 = /* @__PURE__ */ new Set(["if_statement", "for_statement", "for_in_statement", "while_statement", "do_statement", "switch_statement", "try_statement"]);
+var NESTING7 = /* @__PURE__ */ new Set(["if_statement", "for_statement", "for_in_statement", "while_statement", "do_statement", "switch_statement", "try_statement"]);
 var MOCK_IMPORT = /(^|\/)(__mocks__|mocks?|fixtures?|fakes?|stubs?)(\/|$)|[./-](mock|fake|stub)s?(\.[jt]sx?)?$/i;
 var LIMITS = { complexity: 20, complexityHigh: 40, functionLines: 150, nesting: 4, nonNull: 10 };
+var RUST_MAIN = /(^|\/)(main|build)\.rs$|(^|\/)(bin|examples)\/[^/]+\.rs$|(^|\/)(bin|examples)\/[^/]+\/main\.rs$/;
 function qualityGrammar(rel) {
   const ext = rel.slice(rel.lastIndexOf(".")).toLowerCase();
   return GRAMMAR[ext] ?? null;
@@ -14295,6 +14602,8 @@ async function analyzeQuality(rel, source, { test = false } = {}) {
   if (grammar === "go") return analyzeGo(source, { test });
   if (grammar === "java" || grammar === "kotlin") return analyzeTyped(grammar, source, { test });
   if (grammar === "c_sharp") return analyzeTyped("csharp", source, { test });
+  if (grammar === "rust") return analyzeRust(source, { test, main: RUST_MAIN.test(rel) });
+  if (grammar === "c" || grammar === "cpp") return analyzeC(grammar, source, { test });
   const tree = await parse(grammar, source);
   const hits = [];
   const functions = [];
@@ -14318,7 +14627,7 @@ async function analyzeQuality(rel, source, { test = false } = {}) {
 }
 function productionNode(node, add, functions) {
   const t = node.type;
-  if (t === "catch_clause") catchClause3(node, add);
+  if (t === "catch_clause") catchClause4(node, add);
   else if (t === "call_expression") call(node, add);
   else if (t === "debugger_statement") add("limpeza/debugger", node);
   else if (t === "predefined_type" && node.text === "any") {
@@ -14328,7 +14637,7 @@ function productionNode(node, add, functions) {
     const from = node.childForFieldName("source")?.text.slice(1, -1) ?? "";
     if (MOCK_IMPORT.test(from)) add("falha/mock-em-producao", node, { from });
   }
-  if (FUNCTIONS5.has(t)) fn6(node, add, functions);
+  if (FUNCTIONS7.has(t)) fn8(node, add, functions);
 }
 function trackModule(node, module2) {
   const t = node.type;
@@ -14336,13 +14645,13 @@ function trackModule(node, module2) {
   else if (t === "call_expression") dynamicImport(node, module2);
   else if (t === "member_expression" && /^(module\.exports|exports\.\w+)$/.test(node.text)) module2.commonjs = true;
 }
-var statements5 = (block) => (block?.namedChildren ?? []).filter((n) => n.type !== "comment");
+var statements6 = (block) => (block?.namedChildren ?? []).filter((n) => n.type !== "comment");
 var hasComment5 = (block) => (block?.namedChildren ?? []).some((n) => n.type === "comment");
 var isConsoleCall = (n) => n.type === "expression_statement" && n.namedChildren[0]?.type === "call_expression" && /^console\.\w+$/.test(n.namedChildren[0].childForFieldName("function")?.text ?? "");
 var isEmptyValue2 = (n) => !n || ["null", "undefined", "false"].includes(n.type) || n.text === "undefined" || /^(\[\s*\]|\{\s*\})$/.test(n.text);
-function catchClause3(node, add) {
+function catchClause4(node, add) {
   const body2 = node.childForFieldName("body");
-  const list = statements5(body2);
+  const list = statements6(body2);
   if (!list.length) return hasComment5(body2) ? void 0 : add("falha/catch-vazio", node);
   if (list.every(isConsoleCall)) return add("falha/catch-so-loga", node);
   if (list.length === 1 && list[0].type === "return_statement" && isEmptyValue2(list[0].namedChildren[0]) && !hasComment5(body2))
@@ -14352,17 +14661,17 @@ function call(node, add) {
   const callee2 = node.childForFieldName("function");
   if (!callee2) return;
   if (callee2.type === "member_expression" && callee2.childForFieldName("property")?.text === "catch") {
-    const handler = node.childForFieldName("arguments")?.namedChildren[0];
-    if (handler && (handler.type === "arrow_function" || handler.type === "function_expression" || handler.type === "function")) {
-      const body2 = handler.childForFieldName("body");
+    const handler2 = node.childForFieldName("arguments")?.namedChildren[0];
+    if (handler2 && (handler2.type === "arrow_function" || handler2.type === "function_expression" || handler2.type === "function")) {
+      const body2 = handler2.childForFieldName("body");
       if (body2?.type === "statement_block") {
-        if (!statements5(body2).length && !hasComment5(body2)) add("falha/catch-vazio", node);
+        if (!statements6(body2).length && !hasComment5(body2)) add("falha/catch-vazio", node);
       } else if (isEmptyValue2(body2)) add("falha/catch-devolve-nulo", node);
     }
   }
   if (/^console\.(log|debug)$/.test(callee2.text)) add("limpeza/console-log", node);
 }
-var CHECKS5 = /\b(expect|assert)\b|\.should\b|\bt\.(is|true|false|deepEqual|throws)\b|toMatch(Inline)?Snapshot/;
+var CHECKS7 = /\b(expect|assert)\b|\.should\b|\bt\.(is|true|false|deepEqual|throws)\b|toMatch(Inline)?Snapshot/;
 function testCall2(node, add) {
   const callee2 = node.childForFieldName("function")?.text ?? "";
   if (/(^|\.)waitForTimeout$/.test(callee2) || callee2 === "setTimeout" && /^\d+$/.test(node.childForFieldName("arguments")?.namedChildren[1]?.text ?? ""))
@@ -14375,9 +14684,9 @@ function testCall2(node, add) {
   }
   if (!/^(it|test)(\.(concurrent|serial))?$/.test(callee2)) return;
   const args2 = node.childForFieldName("arguments")?.namedChildren ?? [];
-  const body2 = args2.find((a) => FUNCTIONS5.has(a.type));
+  const body2 = args2.find((a) => FUNCTIONS7.has(a.type));
   const name2 = args2[0]?.type === "string" || args2[0]?.type === "template_string" ? args2[0].text.slice(1, -1) : callee2;
-  if (body2 && !CHECKS5.test(body2.text)) add("testes/sem-conferencia", node, { name: name2.slice(0, 80) });
+  if (body2 && !CHECKS7.test(body2.text)) add("testes/sem-conferencia", node, { name: name2.slice(0, 80) });
 }
 var isTernaryChild = (node) => {
   let p = node.parent;
@@ -14400,14 +14709,14 @@ function functionName(node) {
   if (holder?.type === "variable_declarator") return holder.childForFieldName("name")?.text ?? "(an\xF4nima)";
   return "(an\xF4nima)";
 }
-function fn6(node, add, functions) {
+function fn8(node, add, functions) {
   const body2 = node.childForFieldName("body");
   if (!body2) return;
   const metrics = measureBody(body2, {
-    functions: FUNCTIONS5,
-    branch: (c) => BRANCHES5.has(c.type) || c.type === "switch_case" || c.type === "binary_expression" && /^(&&|\|\|)$/.test(c.childForFieldName("operator")?.text ?? ""),
+    functions: FUNCTIONS7,
+    branch: (c) => BRANCHES7.has(c.type) || c.type === "switch_case" || c.type === "binary_expression" && /^(&&|\|\|)$/.test(c.childForFieldName("operator")?.text ?? ""),
     // else if não aprofunda.
-    nests: (c) => NESTING5.has(c.type) && !(c.type === "if_statement" && c.parent?.type === "else_clause")
+    nests: (c) => NESTING7.has(c.type) && !(c.type === "if_statement" && c.parent?.type === "else_clause")
   });
   recordFunction(node, functionName(node), metrics, add, functions);
 }
@@ -14443,7 +14752,7 @@ function comment(node, add) {
   const es = text.match(/eslint-disable(-next-line|-line)?\b(.*)/);
   if (es && !/--\s*\S/.test(es[2])) add("tipos/eslint-disable-sem-motivo", node);
 }
-var CODE_LINE2 = /[;{}]\s*$|^\s*(const|let|var|if|for|while|return|import|export|function|await|async|try|catch|switch|case|throw|class|func|fun|val|defer|public|private|protected)\b|^\s*[\w.$\]]+\s*\(.*\)\s*;?\s*$|^\s*[\w.$]+\s*=[^=]|^\s*[\w, ]+\s*:=|^\s*<\/?[A-Za-z][\w.]*[\s>/]/;
+var CODE_LINE2 = /[;{}]\s*$|^\s*(const|let|var|if|for|while|return|import|export|function|await|async|try|catch|switch|case|throw|class|func|fun|val|defer|public|private|protected|fn|impl|pub|struct)\b|^\s*#\s*(include|define|ifn?def|endif)\b|^\s*[\w.$\]]+\s*\(.*\)\s*;?\s*$|^\s*[\w.$]+\s*=[^=]|^\s*[\w, ]+\s*:=|^\s*<\/?[A-Za-z][\w.]*[\s>/]/;
 function commentedCode(root, lines, hits, extra = {}) {
   let run2 = null;
   let lastRow = -2;
@@ -14518,7 +14827,7 @@ function resolveImport(resolver, lang, spec, rel) {
   if (lang === "php") return spec.startsWith("class:") ? resolver.resolvePhpClass(spec.slice(6)) : resolver.resolveRelativeFile(spec.slice(5), rel);
   return resolver.resolveJs(spec, rel);
 }
-var PACKAGE_LANGS = /* @__PURE__ */ new Set(["go", "java", "kotlin", "csharp"]);
+var PACKAGE_LANGS = /* @__PURE__ */ new Set(["go", "java", "kotlin", "csharp", "rust", "c", "cpp"]);
 function unusedCode(root, modules, texts, entry) {
   const resolver = new PathResolver(root);
   const importedBy = /* @__PURE__ */ new Map();

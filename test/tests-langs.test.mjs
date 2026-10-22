@@ -3,9 +3,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
-import { fromClover, fromCobertura, fromGoCover, fromJacoco } from '../bin/coverage.mjs'
+import { coverageArgs, fromClover, fromCobertura, fromGoCover, fromJacoco } from '../bin/coverage.mjs'
 import { detectRunners, fromJUnit, inventory } from '../bin/tests.mjs'
-import { fromDartJson, fromGoJson, fromTrx, jvmCaseFiles } from '../bin/tests-langs.mjs'
+import { ctestCaseFiles, fromCargoTest, fromDartJson, fromGoJson, fromTrx, jvmCaseFiles } from '../bin/tests-langs.mjs'
 
 function project(files) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-tl-'))
@@ -210,4 +210,120 @@ test('lê o TRX do dotnet test e a cobertura do Go e do Cobertura (coverlet)', (
 <class name="Loja.Pedido" filename="Loja/Pedido.cs"><lines><line number="8" hits="2" branch="False" /><line number="9" hits="1" branch="True" condition-coverage="50% (1/2)" /><line number="12" hits="0" branch="False" /></lines></class>
 </classes></package></packages></coverage>`
   assert.deepEqual([...fromCobertura(cobertura, root).get('Loja/Pedido.cs')], [[8, 'c'], [9, 'p'], [12, 'u']])
+})
+
+test('acha cargo test (workspace fica com a raiz) e CTest, e conta os testes do Rust (também dentro de src/) e do GoogleTest/Catch2', () => {
+  const dir = project({
+    'Cargo.toml': '[workspace]\nmembers = ["api", "core"]\n',
+    'api/Cargo.toml': '[package]\nname = "api"\n',
+    'api/src/main.rs': 'fn main() {}\n',
+    'core/Cargo.toml': '[package]\nname = "loja-core"\n',
+    'core/src/lib.rs': 'pub fn soma(a: i32, b: i32) -> i32 { a + b }\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn soma_ok() { assert_eq!(super::soma(1, 1), 2); }\n    #[test]\n    #[ignore]\n    fn velho() {}\n}\n',
+    'core/src/sem_teste.rs': 'pub fn nada() {}\n',
+    'core/tests/api.rs': '#[tokio::test]\nasync fn sobe() {}\n',
+    'motor/CMakeLists.txt': 'project(motor)\nenable_testing()\nadd_subdirectory(tests)\n',
+    'motor/tests/CMakeLists.txt': 'add_executable(t pedido_test.cpp)\ngtest_discover_tests(t)\n',
+    'motor/tests/pedido_test.cpp': 'TEST(Pedido, Salva) { EXPECT_EQ(1, 1); }\nTEST_F(Base, DISABLED_Velho) {}\n',
+    'motor/tests/catch_test.cpp': 'TEST_CASE("soma dois numeros") { REQUIRE(1 + 1 == 2); }\nTEST_CASE("lento", "[.]") {}\n',
+    'motor/src/motor.cpp': 'int motor() { return 0; }\n',
+  })
+  const { runners } = detectRunners(dir, { files: [] })
+  assert.deepEqual(runners.map((r) => `${r.runner}@${r.dir}`).sort(), ['cargo@', 'ctest@motor'])
+  const files = ['core/src/lib.rs', 'core/src/sem_teste.rs', 'core/tests/api.rs', 'api/src/main.rs', 'motor/tests/pedido_test.cpp', 'motor/tests/catch_test.cpp', 'motor/src/motor.cpp']
+  const inv = inventory(dir, files)
+  assert.equal(inv.testFiles, 4, 'lib.rs com #[test] conta; sem_teste.rs, main.rs e motor.cpp não')
+  assert.equal(inv.cases, 7)
+  assert.equal(inv.skipped, 3)
+})
+
+test('lê a saída do cargo test: arquivo pelo módulo (workspace e testes de integração), ignorado, doc-test e o motivo da falha', () => {
+  const root = project({
+    'Cargo.toml': '[workspace]\nmembers = ["core"]\n',
+    'core/Cargo.toml': '[package]\nname = "loja-core"\n',
+    'core/src/lib.rs': 'pub mod pedido;\n',
+    'core/src/pedido.rs': '#[cfg(test)]\nmod tests {}\n',
+    'core/tests/api.rs': '#[test]\nfn sobe() {}\n',
+  })
+  const out = [
+    '   Compiling loja-core v0.1.0 (C:\\loja\\core)',
+    '    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.20s',
+    '     Running unittests src/lib.rs (target/debug/deps/loja_core-1a2b3c)',
+    '',
+    'running 3 tests',
+    'test pedido::tests::salva_ok ... ok',
+    'test pedido::tests::velho ... ignored, lento demais',
+    'test pedido::tests::soma ... FAILED',
+    '',
+    'failures:',
+    '',
+    '---- pedido::tests::soma stdout ----',
+    "thread 'pedido::tests::soma' panicked at src/pedido.rs:9:9:",
+    'assertion `left == right` failed',
+    '  left: 3',
+    ' right: 2',
+    'note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace',
+    '',
+    '',
+    'failures:',
+    '    pedido::tests::soma',
+    '',
+    'test result: FAILED. 1 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s',
+    '',
+    '     Running tests/api.rs (target/debug/deps/api-9f8e7d)',
+    '',
+    'running 1 test',
+    'test sobe ... ok',
+    '',
+    '   Doc-tests loja_core',
+    '',
+    'running 1 test',
+    'test core/src/lib.rs - soma (line 3) ... ok',
+  ].join('\n')
+  const cases = fromCargoTest(out, root)
+  assert.deepEqual(
+    cases.map((c) => [c.file, c.name, c.status]),
+    [
+      ['core/src/pedido.rs', 'pedido › tests › salva_ok', 'passed'],
+      ['core/src/pedido.rs', 'pedido › tests › velho', 'skipped'],
+      ['core/src/pedido.rs', 'pedido › tests › soma', 'failed'],
+      ['core/tests/api.rs', 'sobe', 'passed'],
+      ['core/src/lib.rs', 'soma (doc-test, linha 3)', 'passed'],
+    ],
+  )
+  assert.match(cases[2].message, /left: 3\n right: 2/)
+  assert.doesNotMatch(cases[2].message, /RUST_BACKTRACE/)
+})
+
+test('CTest: o teste do JUnit vira o arquivo que declara TEST(Suite, Nome) ou TEST_CASE("nome")', () => {
+  const root = project({
+    'motor/tests/pedido_test.cpp': 'TEST(Pedido, Salva) {}\nTEST_F(PedidoBase, Volta) {}\n',
+    'motor/tests/catch_test.cpp': 'TEST_CASE("soma dois numeros", "[calc]") {}\n',
+  })
+  const cases = ctestCaseFiles(
+    [
+      { file: null, name: 'Linux-c++ › Pedido.Salva', status: 'passed' },
+      { file: null, name: 'Linux-c++ › PedidoBase.Volta', status: 'failed' },
+      { file: null, name: 'Linux-c++ › soma dois numeros', status: 'passed' },
+      { file: null, name: 'Linux-c++ › teste_manual', status: 'passed' },
+    ],
+    root,
+    'motor',
+  )
+  assert.deepEqual(
+    cases.map((c) => [c.file, c.name]),
+    [
+      ['motor/tests/pedido_test.cpp', 'Pedido › Salva'],
+      ['motor/tests/pedido_test.cpp', 'PedidoBase › Volta'],
+      ['motor/tests/catch_test.cpp', 'soma dois numeros'],
+      [null, 'teste_manual'],
+    ],
+  )
+})
+
+test('cargo: com cobertura roda o cargo llvm-cov gravando o lcov na pasta do Faundr', () => {
+  const root = project({ 'Cargo.toml': '[package]\nname = "loja"\n' })
+  const args = coverageArgs('cargo', root)
+  assert.deepEqual(args.slice(0, 2), ['--lcov', '--output-path'])
+  assert.ok(args[2].endsWith(path.join('lcov.info')) && path.isAbsolute(args[2]), 'caminho completo do lcov')
+  assert.equal(coverageArgs('ctest', root), null, 'CTest ainda sem cobertura')
 })

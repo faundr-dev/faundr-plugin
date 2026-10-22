@@ -20,5 +20,7 @@ Um arquivo por tema. Leia só os que se aplicam à stack e ao código do projeto
 | `go.md` | o projeto tem `go.mod` ou código Go |
 | `java-spring.md` | o projeto tem código Java ou Kotlin (Spring Boot, Ktor, Android) |
 | `dotnet.md` | o projeto tem `.csproj`/`.sln` ou código C# (ASP.NET Core, Blazor) |
+| `rust.md` | o projeto tem `Cargo.toml` ou código Rust (Axum, Actix Web, Rocket) |
+| `c-cpp.md` | o projeto tem código C ou C++ (CMake, Makefile, Conan, vcpkg) |
 
 Destilado das skills de conhecimento do Strix (usestrix/strix, Apache-2.0) e adaptado para revisão estática de código.

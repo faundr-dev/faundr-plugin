@@ -1,7 +1,8 @@
 // Executores de teste fora do Node e do Python: Flutter (flutter test), Dart (dart test), PHPUnit, Pest, Go
-// (go test), Maven e Gradle (JUnit) e .NET (dotnet test). Detecta pela pasta (pubspec.yaml, composer.json,
-// go.mod, pom.xml, build.gradle, .sln/.csproj), conta os testes sem rodar e, quando pedido, roda e lê o relatório:
-// o JSON por linha do package:test (Flutter e Dart) e do go test, o JUnit do PHPUnit/Pest/Maven/Gradle e o TRX do .NET.
+// (go test), Maven e Gradle (JUnit), .NET (dotnet test), Rust (cargo test) e C/C++ (CTest). Detecta pela pasta
+// (pubspec.yaml, composer.json, go.mod, pom.xml, build.gradle, .sln/.csproj, Cargo.toml, CMakeLists.txt), conta os
+// testes sem rodar e, quando pedido, roda e lê o relatório: o JSON por linha do package:test (Flutter e Dart) e do
+// go test, o JUnit do PHPUnit/Pest/Maven/Gradle/CTest, o TRX do .NET e o texto do cargo test.
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -12,6 +13,10 @@ export const PHP_TEST_FILE = /(^|\/)tests?\/.*\.php$/
 export const GO_TEST_FILE = /_test\.go$/
 export const JVM_TEST_FILE = /(^|\/)src\/test\/.*\.(java|kt)$/
 export const CS_TEST_FILE = /^(?!.*(^|\/)(bin|obj)\/).*(Tests?\.cs$|(^|\/)[^/]*\.Tests?\/.*\.cs$)/
+// Rust: os testes de integração ficam em tests/; os de unidade, dentro do próprio arquivo (#[test]), ver RUST_INLINE_TEST.
+export const RUST_TEST_FILE = /(^|\/)tests\/.*\.rs$/
+export const RUST_INLINE_TEST = /#\[(\w+::)?test\]/
+export const C_TEST_FILE = /^(?!.*(^|\/)(build|cmake-build-[^/]+)\/).*((^|\/)(tests?|unittests?)\/.*|_(unit)?tests?|(^|\/)test_[^/]*)\.(c|cc|cpp|cxx)$/
 
 const WIN = process.platform === 'win32'
 // O wrapper do projeto (mvnw, gradlew) vence o programa instalado: fixa a versão que o projeto usa.
@@ -42,7 +47,7 @@ const onPath = (cmd) => spawnSync(WIN ? 'where' : 'which', [cmd], { encoding: 'u
 
 /** Pasta com projeto de outra linguagem (para procurar executores nas subpastas). */
 export const isLangProjectDir = (root, dir) =>
-  ['pubspec.yaml', 'composer.json', 'go.mod', 'pom.xml', 'build.gradle', 'build.gradle.kts'].some((f) => fs.existsSync(path.join(root, dir, f))) ||
+  ['pubspec.yaml', 'composer.json', 'go.mod', 'pom.xml', 'build.gradle', 'build.gradle.kts', 'Cargo.toml', 'CMakeLists.txt'].some((f) => fs.existsSync(path.join(root, dir, f))) ||
   list(path.join(root, dir)).some((e) => e.isFile() && /\.(slnx?|csproj)$/.test(e.name))
 
 /** Executores numa pasta (raiz = ''). */
@@ -69,7 +74,30 @@ export function langRunnersIn(root, dir) {
   if (jvm) found.push(jvm)
   const dotnet = dotnetRunner(root, dir)
   if (dotnet) found.push(dotnet)
+  const cargo = cargoRunner(root, dir)
+  if (cargo) found.push(cargo)
+  const ctest = ctestRunner(root, dir)
+  if (ctest) found.push(ctest)
   return found
+}
+
+/** cargo test: pelo Cargo.toml da pasta; membro de um workspace fica com a raiz do workspace. Cobertura com o cargo-llvm-cov. */
+function cargoRunner(root, dir) {
+  if (!fs.existsSync(path.join(root, dir, 'Cargo.toml'))) return null
+  if (ancestors(dir).some((d) => /^\s*\[workspace\]/m.test(read(path.join(root, d, 'Cargo.toml'))))) return null
+  return { runner: 'cargo', dir, config: 'Cargo.toml', script: null, installed: onPath('cargo'), coverage: onPath('cargo-llvm-cov') }
+}
+
+// O CMake do projeto (ou de uma subpasta dele) liga os testes do CTest.
+const CTEST_SIGNS = /\b(enable_testing|add_test|gtest_discover_tests|gtest_add_tests|catch_discover_tests|doctest_discover_tests)\s*\(/
+
+/** CTest: CMakeLists.txt que liga os testes (nele ou numa subpasta); subprojeto de um CMake maior fica com a raiz. */
+function ctestRunner(root, dir) {
+  if (!fs.existsSync(path.join(root, dir, 'CMakeLists.txt'))) return null
+  if (ancestors(dir).some((d) => fs.existsSync(path.join(root, d, 'CMakeLists.txt')))) return null
+  const lists = [path.join(dir, 'CMakeLists.txt'), ...['test', 'tests', 'unittests'].map((t) => path.join(dir, t, 'CMakeLists.txt'))]
+  if (!lists.some((f) => CTEST_SIGNS.test(read(path.join(root, f))))) return null
+  return { runner: 'ctest', dir, config: 'CMakeLists.txt', script: null, installed: onPath('cmake') && onPath('ctest'), coverage: false }
 }
 
 // As pastas acima de `dir`, até a raiz ('a/b' → ['', 'a']).
@@ -119,6 +147,12 @@ export function countLangCases(rel, text) {
   if (GO_TEST_FILE.test(rel)) return { cases: count(/^func\s+Test\w*\s*\(\s*\w+\s+\*testing\.T\s*\)/gm), skipped: count(/\bt\.Skip(Now|f)?\s*\(/g) }
   if (JVM_TEST_FILE.test(rel)) return { cases: count(/@(Test|ParameterizedTest|RepeatedTest)\b/g), skipped: count(/@(Disabled|Ignore)\b/g) }
   if (CS_TEST_FILE.test(rel)) return { cases: count(/\[\s*(Fact|Theory|Test|TestMethod)\b/g), skipped: count(/\[\s*(Fact|Theory)\s*\(\s*Skip\s*=|\[\s*Ignore\b/g) }
+  if (rel.endsWith('.rs')) return { cases: count(/#\[(\w+::)?test\]/g), skipped: count(/#\[ignore\b/g) }
+  if (C_TEST_FILE.test(rel))
+    return {
+      cases: count(/^\s*(TEST|TEST_F|TEST_P|TYPED_TEST|TEST_CASE|TEST_CASE_METHOD|SCENARIO|BOOST_AUTO_TEST_CASE)\s*\(/gm),
+      skipped: count(/^\s*TEST(_F|_P)?\s*\(\s*\w+\s*,\s*DISABLED_|^\s*(TEST_CASE|SCENARIO)\s*\([^)]*"\[\.|\bGTEST_SKIP\s*\(/gm),
+    }
   return null
 }
 
@@ -126,6 +160,7 @@ export function countLangCases(rel, text) {
 export function runLangTests(root, runner, { dir = '', files = null, out, timeout, coverageArgs = [] }) {
   const cwd = path.join(root, dir)
   const started = Date.now()
+  if (runner === 'ctest') return runCtest(root, cwd, { out, timeout, started })
   const { cmd, args, shell } = commandFor(root, runner, cwd, { files, out, coverageArgs })
   // flutter, dart, mvnw.cmd e gradlew.bat são .bat/.cmd no Windows: precisam do shell para abrir.
   const r = spawnSync(cmd, args, { cwd, encoding: 'utf8', windowsHide: true, timeout, maxBuffer: 64 * 1024 * 1024, shell, env: { ...process.env, CI: '1', NO_COLOR: '1' } })
@@ -153,9 +188,33 @@ export function runLangTests(root, runner, { dir = '', files = null, out, timeou
     const module = read(path.join(cwd, 'go.mod')).match(/^module\s+(\S+)/m)?.[1]
     if (module) fs.writeFileSync(path.join(root, COVERAGE_DIR, 'go-module.json'), JSON.stringify({ module, dir }))
   }
-  const cases = runner === 'go' ? fromGoJson(r.stdout, root, cwd) : fromDartJson(r.stdout, root, cwd)
+  const cases = runner === 'go' ? fromGoJson(r.stdout, root, cwd) : runner === 'cargo' ? fromCargoTest(r.stdout, root, cwd) : fromDartJson(r.stdout, root, cwd)
   if (!cases.length) return noResult('resultados')
   return { runner, durationMs, cases, error: null }
+}
+
+// CTest: a pasta de build que já tem os testes configurados (build/, out/build/…, cmake-build-*); senão, build/.
+function ctestBuildDir(cwd) {
+  const candidates = ['build', ...list(cwd).filter((e) => e.isDirectory() && /^cmake-build-/.test(e.name)).map((e) => e.name), ...list(path.join(cwd, 'out', 'build')).filter((e) => e.isDirectory()).map((e) => `out/build/${e.name}`)]
+  return candidates.find((d) => fs.existsSync(path.join(cwd, d, 'CTestTestfile.cmake'))) ?? 'build'
+}
+
+/** CTest: configura (se ainda não tem build), compila e roda, com o resultado em JUnit (CMake 3.21 ou mais novo). */
+function runCtest(root, cwd, { out, timeout, started }) {
+  const build = ctestBuildDir(cwd)
+  const left = () => Math.max(1000, timeout - (Date.now() - started))
+  const step = (cmd, args) => spawnSync(cmd, args, { cwd, encoding: 'utf8', windowsHide: true, timeout: left(), maxBuffer: 64 * 1024 * 1024, env: { ...process.env, CI: '1', NO_COLOR: '1' } })
+  const failed = (what, r) => ({ runner: 'ctest', durationMs: Date.now() - started, error: r.error?.code === 'ETIMEDOUT' ? `passou do tempo limite (${Math.round(timeout / 60000)} min)` : r.error?.code === 'ENOENT' ? 'não consegui abrir o cmake (ele está instalado e no PATH?)' : `${what} falhou: ${lastLine(r.stderr) || lastLine(r.stdout)}` })
+  if (!fs.existsSync(path.join(cwd, build, 'CMakeCache.txt'))) {
+    const conf = step('cmake', ['-S', '.', '-B', build])
+    if (conf.status !== 0) return failed('a configuração do CMake', conf)
+  }
+  const compiled = step('cmake', ['--build', build])
+  if (compiled.status !== 0) return failed('a compilação', compiled)
+  const r = step('ctest', ['--test-dir', build, '--output-junit', out, '--output-on-failure'])
+  if (r.error) return failed('o ctest', r)
+  const xml = read(out)
+  return xml ? { runner: 'ctest', durationMs: Date.now() - started, cases: null, junit: xml, error: null } : failed('o ctest', r)
 }
 
 /** O comando de cada executor. `files`: só esses arquivos de teste (relativos à pasta do executor). */
@@ -184,6 +243,14 @@ function commandFor(root, runner, cwd, { files, out, coverageArgs }) {
     const classes = (files ?? []).map((f) => path.posix.basename(f).replace(/\.cs$/, ''))
     const filter = classes.length ? ['--filter', classes.map((c) => `FullyQualifiedName~${c}`).join('|')] : []
     return { cmd: 'dotnet', args: ['test', '--logger', 'trx', '--results-directory', trxDir(out), ...coverageArgs, ...filter], shell: false }
+  }
+  if (runner === 'cargo') {
+    // Só testes de integração pedidos (tests/x.rs) → --test x; teste dentro de src/ roda o projeto todo.
+    const targets = files?.length && files.every((f) => RUST_TEST_FILE.test(f)) ? files.flatMap((f) => ['--test', path.posix.basename(f, '.rs')]) : []
+    // Com cobertura, o cargo llvm-cov roda os mesmos testes e grava o lcov. O "Running <arquivo>" sai no stderr e os
+    // resultados no stdout: o shell junta os dois na ordem (2>&1) para cada teste ficar com o arquivo certo.
+    const quote = (a) => (/\s/.test(a) ? `"${a}"` : a)
+    return { cmd: 'cargo', args: [coverageArgs.length ? 'llvm-cov' : 'test', '--no-fail-fast', ...coverageArgs.map(quote), ...targets, '2>&1'], shell: true }
   }
   return { cmd: runner, args: ['test', runner === 'flutter' ? '--machine' : '--reporter=json', ...coverageArgs, ...(files ?? [])], shell: WIN }
 }
@@ -427,8 +494,124 @@ export function jvmCaseFiles(cases, root, dir = '') {
   })
 }
 
-/** Maven e Gradle: o JUnit não traz o arquivo, que sai do nome da classe. Os outros executores já trazem. */
-export const junitCaseFiles = (runner, cases, root, dir) => (runner === 'maven' || runner === 'gradle' ? jvmCaseFiles(cases, root, dir) : cases)
+/** Maven, Gradle e CTest: o JUnit não traz o arquivo, que sai do nome da classe ou do teste. Os outros executores já trazem. */
+export function junitCaseFiles(runner, cases, root, dir) {
+  if (runner === 'maven' || runner === 'gradle') return jvmCaseFiles(cases, root, dir)
+  return runner === 'ctest' ? ctestCaseFiles(cases, root, dir) : cases
+}
+
+/**
+ * JUnit do CTest: o teste vem como "<site> › Suite.Nome" (GoogleTest) ou "<site> › nome" (Catch2, doctest), sem
+ * arquivo. Acha o arquivo de teste que declara TEST(Suite, Nome) ou TEST_CASE("nome") e tira o nome do site.
+ */
+export function ctestCaseFiles(cases, root, dir = '') {
+  const sources = testSources(root, dir)
+  return cases.map((c) => {
+    if (c.file) return c
+    const name = c.name.split(' › ').pop()
+    const gtest = name.match(/^(?:\w+\/)?(\w+)\.(\w+)(?:\/\d+)?$/)
+    const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const decl = gtest
+      ? new RegExp(`\\b(TEST|TEST_F|TEST_P|TYPED_TEST)\\s*\\(\\s*${gtest[1]}\\s*,\\s*${gtest[2]}\\s*\\)`)
+      : new RegExp(`\\b(TEST_CASE|SCENARIO|TEST_CASE_METHOD|BOOST_AUTO_TEST_CASE)\\s*\\([^"]*"?${esc(name)}"?\\s*[,)]`)
+    const hit = sources.find((s) => decl.test(s.text))
+    return { ...c, file: hit?.rel ?? null, name: gtest ? `${gtest[1]} › ${gtest[2]}` : name }
+  })
+}
+
+// Arquivos de teste C/C++ da pasta (sem as pastas de build), lidos uma vez.
+function testSources(root, dir) {
+  const out = []
+  const walk = (rel, depth) => {
+    for (const e of list(path.join(root, rel))) {
+      const sub = rel ? `${rel}/${e.name}` : e.name
+      if (e.isDirectory() && depth < 6 && !SKIP_DIR.test(e.name) && !/^cmake-build-/.test(e.name)) walk(sub, depth + 1)
+      else if (e.isFile() && C_TEST_FILE.test(sub)) out.push({ rel: sub, text: read(path.join(root, sub)) })
+    }
+  }
+  walk(dir, 0)
+  return out
+}
+
+/**
+ * Texto do `cargo test` (stdout e stderr juntos, na ordem): cada "Running <arquivo> (target/…/<nome>-<hash>)" abre um
+ * bloco, "test a::b::c ... ok|FAILED|ignored" é um teste e "---- a::b::c stdout ----" traz o motivo da falha. O arquivo
+ * sai do caminho do módulo (a/b.rs ou a/b/mod.rs a partir do src/ do crate); nos doc-tests, do próprio nome.
+ */
+export function fromCargoTest(text, root, cwd = root) {
+  const crates = cargoCrates(cwd)
+  const relTo = (abs) => path.relative(root, abs).split(path.sep).join('/')
+  const tests = []
+  const messages = new Map()
+  let block = null
+  let failing = null
+  for (const raw of String(text ?? '').split('\n')) {
+    const line = raw.replace(/\r$/, '')
+    const running = line.match(/^\s+Running (?:unittests )?(\S+\.rs) \((?:.*[/\\])?([\w-]+?)-[0-9a-f]+(?:\.exe)?\)/)
+    const doc = line.match(/^\s+Doc-tests ([\w-]+)/)
+    if (running || doc) {
+      failing = null
+      const crateDir = running ? cargoCrateFor(cwd, crates, running[2], running[1]) : crates.get(doc[1].replace(/-/g, '_')) ?? cwd
+      block = { crateDir, file: running ? path.join(crateDir, running[1]) : null }
+      continue
+    }
+    const header = line.match(/^---- (\S+) stdout ----$/)
+    if (header) {
+      failing = header[1]
+      messages.set(failing, [])
+      continue
+    }
+    if (failing) {
+      if (/^(failures:|test result:)/.test(line)) failing = null
+      else if (!/^note: run with `RUST_BACKTRACE/.test(line)) messages.get(failing).push(line)
+      continue
+    }
+    const t = line.match(/^test (.+?) \.\.\. (ok|FAILED|ignored)(?:, (.*))?$/)
+    if (!t || !block) continue
+    const status = { ok: 'passed', FAILED: 'failed', ignored: 'skipped' }[t[2]]
+    const docTest = t[1].match(/^(.+\.rs) - (.+?) \(line (\d+)\)$/)
+    if (docTest) {
+      const abs = [path.join(cwd, docTest[1]), path.join(block.crateDir, docTest[1])].find((f) => fs.existsSync(f))
+      tests.push({ file: abs ? relTo(abs) : null, name: `${docTest[2]} (doc-test, linha ${docTest[3]})`, status, durationMs: 0, key: t[1], note: t[3] })
+      continue
+    }
+    tests.push({ file: block.file ? relTo(rustTestFile(block.file, t[1])) : null, name: t[1].split('::').join(' › '), status, durationMs: 0, key: t[1], note: t[3] })
+  }
+  return tests.map(({ key, note, ...c }) => ({
+    ...c,
+    message: c.status === 'failed' ? (messages.get(key) ?? []).join('\n').trim().slice(0, 2000) || 'falhou' : c.status === 'skipped' && note ? `Pulado: ${note}` : null,
+  }))
+}
+
+/** Crates da pasta (ela mesma e os membros de um workspace, até 3 níveis): nome com _ → pasta. */
+function cargoCrates(cwd) {
+  const crates = new Map()
+  const walk = (dir, depth) => {
+    const name = read(path.join(dir, 'Cargo.toml')).match(/^\s*name\s*=\s*"([\w-]+)"/m)?.[1]
+    if (name) crates.set(name.replace(/-/g, '_'), dir)
+    if (depth < 3) for (const e of list(dir)) if (e.isDirectory() && !SKIP_DIR.test(e.name)) walk(path.join(dir, e.name), depth + 1)
+  }
+  walk(cwd, 0)
+  return crates
+}
+
+// O crate do bloco: pelo nome do binário (o do crate nos testes de unidade); senão, o primeiro que tem o arquivo.
+function cargoCrateFor(cwd, crates, binary, file) {
+  const byName = crates.get(binary.replace(/-/g, '_'))
+  if (byName && fs.existsSync(path.join(byName, file))) return byName
+  return [cwd, ...crates.values()].find((d) => fs.existsSync(path.join(d, file))) ?? cwd
+}
+
+// `pedido::tests::soma` num bloco de src/lib.rs → src/pedido.rs (o módulo mais longo que existe). Nos testes de
+// integração (tests/x.rs) os módulos ficam dentro do próprio arquivo.
+function rustTestFile(blockFile, name) {
+  if (!/(^|[/\\])src[/\\]/.test(blockFile)) return blockFile
+  const base = path.dirname(blockFile)
+  const mods = name.split('::').slice(0, -1)
+  for (let i = mods.length; i > 0; i--)
+    for (const candidate of [path.join(base, ...mods.slice(0, i)) + '.rs', path.join(base, ...mods.slice(0, i), 'mod.rs')]) if (fs.existsSync(candidate)) return candidate
+  return blockFile
+}
 
 // Projeto com módulos: <módulo>/src/test/java/<pacote>/<Classe>.java.
 function findInModules(root, dir, rel) {

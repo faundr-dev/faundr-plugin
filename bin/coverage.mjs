@@ -36,6 +36,8 @@ export function coverageArgs(runner, root, sub = '') {
   if (runner === 'flutter') return ['--coverage', `--coverage-path=${dir}/lcov.info`]
   if (runner === 'phpunit' || runner === 'pest') return ['--coverage-clover', `${dir}/clover.xml`]
   if (runner === 'go') return [`-coverprofile=${path.resolve(root, COVERAGE_DIR, 'cover.out')}`]
+  // cargo: o cargo-llvm-cov (instalado à parte) roda os testes e grava o lcov.
+  if (runner === 'cargo') return ['--lcov', '--output-path', path.resolve(root, COVERAGE_DIR, 'lcov.info')]
   // dotnet: precisa do coverlet.collector no projeto de teste; o Cobertura vai para a pasta do Faundr depois.
   if (runner === 'dotnet') return ['--collect', 'XPlat Code Coverage']
   // Maven: o JaCoCo pelo nome completo do plugin, sem mexer no pom.xml (antes e depois do test).
