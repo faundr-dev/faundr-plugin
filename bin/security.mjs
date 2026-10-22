@@ -16,7 +16,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { SECRET_RULES } from '../dist/secret-rules.mjs'
 import { LANG_LOCKFILE, parseLangLockfile, preferLocks } from './lockfiles-langs.mjs'
-import { LANG_LINE_RULES } from './security-langs.mjs'
+import { DOCKERFILE, LANG_LINE_RULES } from './security-langs.mjs'
 import { LANG_TECH, langDeps } from './stack-langs.mjs'
 import { LOCKFILE, parseLockfile } from './lockfiles.mjs'
 import { allDeps, partWith, projectParts } from './parts.mjs'
@@ -874,7 +874,7 @@ function scanDatabase(root, files) {
 
 // ---- código (padrões perigosos, sem IA) -----------------------------------------------------
 
-const CODE_FILE = /\.(m?[jt]sx?|cjs|cts|vue|svelte|astro|py|php|dart|go|java|kt|kts|cs|cshtml|razor|rs|c|cc|cpp|cxx|h|hh|hpp|hxx)$/i
+const CODE_FILE = /\.(m?[jt]sx?|cjs|cts|vue|svelte|astro|py|php|dart|go|java|kt|kts|cs|cshtml|razor|rs|c|cc|cpp|cxx|h|hh|hpp|hxx|html?)$/i
 // Código das linguagens sem regras de linha (o Claude lê na revisão).
 const OTHER_CODE = /\.(go|rs|java|kts?|cs|c|cc|cpp|cxx|h|hpp|rb|swift)$/i
 const SERVER_ROUTE = /(^|\/)(app\/(.*\/)?api\/.*\/?route\.[mc]?[jt]s|pages\/api\/.*\.[mc]?[jt]sx?|src\/routes\/api\/.*\.[mc]?[jt]sx?|supabase\/functions\/[^/]+\/index\.[jt]s|functions\/.*\.[jt]s|server\/.*\.[mc]?[jt]s|api\/.*\.[mc]?[jt]s)$/i
@@ -1103,13 +1103,36 @@ function paymentRules(rel, text, isRoute) {
 // Regras por arquivo: o que falta no arquivo inteiro (ex.: webhook que não confere a assinatura).
 function fileRules(rel, text) {
   const isRoute = SERVER_ROUTE.test(rel)
-  return [...webhookRules(rel, text, isRoute), ...paymentRules(rel, text, isRoute)]
+  return [...webhookRules(rel, text, isRoute), ...paymentRules(rel, text, isRoute), ...dockerRules(rel, text)]
+}
+
+/** Dockerfile: a imagem final (a do último FROM) roda como root quando nenhum USER troca o usuário depois dele. */
+function dockerRules(rel, text) {
+  if (!DOCKERFILE.test(rel)) return []
+  const froms = [...text.matchAll(/^\s*FROM\s+(\S+)/gim)]
+  const last = froms.at(-1)
+  if (!last) return []
+  const finalStage = text.slice(last.index)
+  // Imagens que já trocam o usuário (distroless :nonroot, chainguard) não precisam do USER.
+  if (/^\s*USER\s+(?!root\b|0\b)\S+/im.test(finalStage) || /:nonroot\b|chainguard/i.test(last[1])) return []
+  return [
+    {
+      rule_id: 'docker-runs-as-root',
+      severity: 'medium',
+      cwe: 'CWE-250',
+      index: last.index,
+      title: 'Contêiner roda como root',
+      detail: 'A imagem final não tem uma instrução USER: o programa roda como root dentro do contêiner.',
+      impact: 'Se alguém explorar uma falha do app, ganha o controle total do contêiner e fica mais perto de chegar ao servidor.',
+      fix: 'Crie um usuário e troque para ele antes do CMD (no Node: USER node; nas outras: RUN adduser -D app e USER app).',
+    },
+  ]
 }
 
 function scanCode(root, files) {
   const out = []
   for (const rel of files) {
-    if (!CODE_FILE.test(rel) || /\.(d\.ts|min\.js)$/.test(rel) || TEST_PATH.test(rel)) continue
+    if ((!CODE_FILE.test(rel) && !DOCKERFILE.test(rel)) || /\.(d\.ts|min\.js)$/.test(rel) || TEST_PATH.test(rel)) continue
     const text = readText(root, rel)
     if (!text || text.startsWith('// Gerado por')) continue
     const lines = text.split('\n')

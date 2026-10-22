@@ -1,4 +1,4 @@
-// Regras de segurança por linha para PHP, Dart/Flutter, Python, Go, Java/Kotlin, C#, Rust e C/C++ (as de JS/TS ficam em
+// Regras de segurança por linha para PHP, Dart/Flutter, Python, Go, Java/Kotlin, C#, Rust, C/C++, Angular, Docker e HTML (as de JS/TS ficam em
 // security.mjs). Mesmo formato: padrão da linha (re), exceção na linha (ok) ou no arquivo (fileOk), e o texto
 // do achado. `files`: em que arquivos a regra vale.
 
@@ -12,6 +12,8 @@ const CS = /\.cs$/i
 const RAZOR = /\.(cshtml|razor)$/i
 const RUST = /\.rs$/i
 const C_CPP = /\.(c|cc|cpp|cxx|h|hh|hpp|hxx)$/i
+// Dockerfile (e variações como Dockerfile.prod e api.dockerfile).
+export const DOCKERFILE = /(^|\/)(Dockerfile[\w.-]*|[\w.-]+\.dockerfile)$/i
 const USER_INPUT_PHP = /\$_(GET|POST|REQUEST|COOKIE|SERVER|FILES)\b|\$request->(input|get|query|all)\(|request\(\)->/
 
 export const LANG_LINE_RULES = [
@@ -597,6 +599,100 @@ export const LANG_LINE_RULES = [
     detail: 'A API libera chamadas de qualquer origem (CorsLayer::permissive, allow_any_origin ou Any).',
     impact: 'Outro site pode chamar a sua API pelo navegador de quem está logado e ler dados que deveriam ficar só no seu app.',
     fix: 'Liste só os endereços do seu app: CorsLayer::new().allow_origin("https://seu-app.com".parse::<HeaderValue>()?).',
+  },
+
+  // ---- Angular ----
+  {
+    id: 'angular-bypass-sanitizer',
+    files: /\.ts$/i,
+    re: /\.bypassSecurityTrust(Html|Script|Style|Url|ResourceUrl)\s*\(\s*(?!['"`][^'"`$]*['"`]\s*\))/,
+    severity: 'high',
+    cwe: 'CWE-79',
+    title: 'Proteção contra XSS do Angular desligada para um valor variável',
+    detail: 'bypassSecurityTrust… marca um valor como seguro, e o Angular deixa de limpar o HTML, o script ou o link.',
+    impact: 'Se o valor vier do usuário (comentário, perfil, URL), ele coloca um script na página que roda no navegador de quem abrir: rouba a sessão ou age em nome da pessoa.',
+    fix: 'Deixe o Angular limpar sozinho ([innerHTML]="texto" já tira os scripts). Se precisar de HTML do usuário, limpe antes com o DOMPurify e só use bypass em texto fixo do próprio app.',
+  },
+  {
+    id: 'angular-unsafe-html-pipe',
+    files: /\.html$/i,
+    re: /\[(innerHTML|outerHTML|src|href)\]\s*=\s*"[^"]*\|\s*(safe\w*|trust\w*|bypass\w*|unsafe\w*|sanitize\w*)\b/i,
+    severity: 'high',
+    cwe: 'CWE-79',
+    title: 'HTML do template passa por um pipe que desliga a proteção do Angular',
+    detail: 'O template usa um pipe (safeHtml, trustHtml, bypass…) que costuma chamar bypassSecurityTrust por baixo, e o Angular deixa de limpar o valor.',
+    impact: 'Se o valor vier do usuário, ele coloca um script na página que roda no navegador de quem abrir: rouba a sessão ou age em nome da pessoa.',
+    fix: 'Tire o pipe e use [innerHTML]="valor" (o Angular limpa sozinho). Se precisar de HTML formatado do usuário, limpe com o DOMPurify dentro do pipe antes do bypass.',
+  },
+
+  // ---- Docker ----
+  {
+    id: 'docker-secret-in-image',
+    files: DOCKERFILE,
+    re: /^\s*(ENV|ARG)\s+\w*(PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY|PRIVATE_?KEY|SENHA|CREDENTIALS?)\w*\s*[= ]\s*(?!\$)["']?[^\s"'$]{4,}/i,
+    severity: 'high',
+    cwe: 'CWE-798',
+    title: 'Senha ou chave gravada na imagem do Docker',
+    detail: 'Um ENV ou ARG do Dockerfile tem uma senha, token ou chave com o valor escrito.',
+    impact: 'O valor fica guardado nas camadas da imagem: qualquer pessoa que baixar a imagem lê a senha com docker history ou docker inspect.',
+    fix: 'Tire o valor do Dockerfile e passe na hora de rodar (docker run -e, o painel da hospedagem); para usar no build, use RUN --mount=type=secret.',
+  },
+  {
+    id: 'docker-curl-pipe-shell',
+    files: DOCKERFILE,
+    re: /^\s*RUN\b.*\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?(sh|bash|zsh)\b/i,
+    severity: 'medium',
+    cwe: 'CWE-494',
+    title: 'Script baixado da internet roda direto no build',
+    detail: 'O Dockerfile baixa um script com curl/wget e manda direto para o shell (| sh), sem conferir o que veio.',
+    impact: 'Se aquele endereço for invadido ou trocado, o script novo roda dentro da sua imagem e vai junto para produção.',
+    fix: 'Baixe para um arquivo, confira o hash (sha256sum -c) e só então execute; ou prefira o pacote oficial da distribuição.',
+  },
+  {
+    id: 'docker-add-remote-url',
+    files: DOCKERFILE,
+    re: /^\s*ADD\s+(--\S+\s+)*https?:\/\//i,
+    severity: 'low',
+    cwe: 'CWE-494',
+    title: 'ADD baixa um arquivo da internet sem conferir',
+    detail: 'O ADD busca um arquivo por URL na hora do build.',
+    impact: 'O conteúdo pode mudar sem aviso entre um build e outro, e nada confere se é o arquivo esperado.',
+    fix: 'Use ADD --checksum=sha256:… (Docker 1.5+ do BuildKit) ou baixe com curl e confira o hash.',
+  },
+
+  // ---- HTML ----
+  {
+    id: 'html-script-without-integrity',
+    files: /\.html?$/i,
+    re: /<script\b(?=[^>]*\bsrc\s*=\s*["']?(https?:)?\/\/(?!localhost|127\.0\.0\.1)[^"'\s>]+)(?![^>]*\bintegrity\s*=)[^>]*>/i,
+    severity: 'medium',
+    cwe: 'CWE-353',
+    title: 'Script de outro site carregado sem conferir o conteúdo (integrity)',
+    detail: 'A página carrega um script de uma CDN ou de outro site sem o atributo integrity.',
+    impact: 'Se aquela CDN for invadida ou trocar o arquivo, o script novo roda na sua página com acesso a tudo o que a pessoa vê e digita.',
+    fix: 'Acrescente integrity="sha384-…" e crossorigin="anonymous" (a CDN mostra o valor ao lado do link), ou sirva o arquivo pelo seu próprio site.',
+  },
+  {
+    id: 'html-form-insecure',
+    files: /\.html?$/i,
+    re: /<form\b[^>]*\baction\s*=\s*["']?http:\/\/(?!localhost|127\.0\.0\.1)/i,
+    severity: 'high',
+    cwe: 'CWE-319',
+    title: 'Formulário envia os dados sem criptografia (http://)',
+    detail: 'O action do formulário aponta para um endereço http://, sem o s.',
+    impact: 'O que a pessoa digita (senha, e-mail, cartão) vai pela rede em texto aberto: quem estiver no meio (Wi-Fi público) lê tudo.',
+    fix: 'Troque para https:// (ou um caminho do próprio site, como action="/enviar").',
+  },
+  {
+    id: 'html-mixed-content',
+    files: /\.html?$/i,
+    re: /<(img|script|link|iframe|video|audio|source)\b[^>]*\b(src|href)\s*=\s*["']?http:\/\/(?!localhost|127\.0\.0\.1)/i,
+    severity: 'low',
+    cwe: 'CWE-319',
+    title: 'Página carrega imagem, script ou estilo por http://',
+    detail: 'Um recurso da página vem de um endereço http://, sem criptografia.',
+    impact: 'Num site com https o navegador bloqueia ou avisa ("não seguro"); quem estiver no meio da rede pode trocar o arquivo.',
+    fix: 'Troque o endereço para https:// (ou um caminho do próprio site).',
   },
 
   // ---- C / C++ ----

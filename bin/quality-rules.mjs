@@ -14,6 +14,7 @@ import { ignoreSet } from './design-rules.mjs'
 import { projectParts } from './parts.mjs'
 import { foreignKeysWithoutIndex, queriesInLoops, unboundedQueries } from './perf-rules.mjs'
 import { matchesPath, readRules } from './rules.mjs'
+import { DOCKERFILE } from './security-langs.mjs'
 import { projectFiles } from './security.mjs'
 import { houseText, TEXT } from './quality-texts.mjs'
 
@@ -26,7 +27,7 @@ const TEST_PATH = /(^|\/)(__tests__|__mocks__|tests?|e2e|spec|integration_test)(
 const GENERATED = /\.(d\.ts|min\.js)$|\.gen\.[jt]sx?$|(^|\/)(dist|build|out|vendor|generated|\.output)\/|\.pb\.go$|_gen\.go$|\.(Designer|g|g\.i)\.cs$|(^|\/)(bin|obj)\/.*\.cs$|(^|\/)target\/.*\.rs$|(^|\/)cmake-build-[^/]+\/|\.pb\.(h|cc)$/
 const GENERATED_HEADER = /^(\/\/|\/\*)[^\n]*(@generated|auto-?generated|gerado por|do not edit|não edite)/i
 // Telas: onde console.log é esquecimento (em CLI e servidor ele é a saída normal).
-const UI_FILE = /\.(tsx|jsx)$/
+const UI_FILE = /\.(tsx|jsx|vue|svelte|astro|html?)$/
 const SERVER_PATH = /(^|\/)(api|server|bin|scripts|cli|functions|workers?)(\/|$)/
 
 // kind: grupo que o painel mostra; severity: a gravidade pela régua (não pelo modelo).
@@ -61,6 +62,12 @@ export const RULES = {
   'instrucoes/arquivo-inexistente': { kind: 'instructions', severity: 'medium' },
   'instrucoes/script-inexistente': { kind: 'instructions', severity: 'medium' },
   'limpeza/atalho-sem-prazo': { kind: 'cleanup', severity: 'low' },
+  'docker/imagem-sem-versao': { kind: 'failure', severity: 'medium' },
+  'docker/run-cd': { kind: 'cleanup', severity: 'low' },
+  'docker/apt-sem-limpeza': { kind: 'excess', severity: 'low' },
+  'css/important-em-excesso': { kind: 'complexity', severity: 'low' },
+  'css/regra-vazia': { kind: 'cleanup', severity: 'low' },
+  'css/aninhamento-fundo': { kind: 'complexity', severity: 'low' },
   'morto/arquivo-orfao': { kind: 'excess', severity: 'low' },
   'morto/export-sem-uso': { kind: 'excess', severity: 'low', ownLines: true },
   'demais/duplicado': { kind: 'excess', severity: 'medium', ownLines: true },
@@ -219,6 +226,10 @@ async function analyzeFiles(root, files, c, errors) {
 /** O que só dá para ver olhando o projeto inteiro: pacotes, instruções da IA, TODOs, código sem uso, duplicados. */
 function wholeProject(root, all, parsed, c, { history, errors }) {
   projectRules(root, all, c)
+  // O Dockerfile e as folhas de estilo não são código para a árvore de sintaxe: vêm da lista completa do projeto.
+  const everything = projectFiles(root).files
+  dockerfileRules(root, everything, c)
+  styleRules(root, everything, c)
   performanceRules(root, parsed.texts, c)
   if (history) {
     try {
@@ -292,6 +303,7 @@ const ENTRY = [
   /(^|\/)(bin|scripts)\//,
   /(^|\/)(supabase\/functions|api|netlify\/functions)\//,
   /\.d\.ts$/,
+  /\.html?$/, // páginas: o navegador abre pelo endereço, ninguém importa
   // Python: o que o interpretador, o Django ou o servidor carregam pelo nome.
   /(^|\/)(main|app|manage|wsgi|asgi|setup|conftest|settings|urls|admin|apps|models|signals|tasks|celery|__init__|__main__)\.py$/,
   /(^|\/)migrations\//,
@@ -332,7 +344,12 @@ function entryPoints(root) {
     if (!dir) return rel
     return rel.startsWith(`${dir}/`) ? rel.slice(dir.length + 1) : null
   }
-  return (rel) => declared.has(rel) || cited.some(({ dir, text }) => inPart(rel, dir) && text.includes(inPart(rel, dir))) || ENTRY.some((re) => re.test(rel))
+  // Nuxt: componentes, composables, utils, layouts, plugins, middleware e server entram sozinhos, sem import.
+  const nuxtDirs = projectParts(root)
+    .filter(({ dir }) => ['nuxt.config.ts', 'nuxt.config.js', 'nuxt.config.mjs'].some((f) => read(root, path.join(dir, f)) !== null))
+    .map(({ dir }) => dir)
+  const nuxtAuto = (rel) => nuxtDirs.some((dir) => /^(src\/|app\/)?(components|composables|utils|layouts|plugins|middleware|server|stores)\//.test(inPart(rel, dir) ?? ''))
+  return (rel) => declared.has(rel) || cited.some(({ dir, text }) => inPart(rel, dir) && text.includes(inPart(rel, dir))) || ENTRY.some((re) => re.test(rel)) || nuxtAuto(rel)
 }
 
 // ---------- trechos duplicados ----------
@@ -344,7 +361,8 @@ const TRIVIAL = /^(\/\/|\/\*|\*|#|import\b|from\s+\S+\s+import\b|export \{|[)\]}
 
 /** Blocos de 8+ linhas iguais (ignorando espaços) em dois lugares do projeto. Um item por bloco. */
 function duplicates(texts) {
-  const files = [...texts].filter(([rel]) => !TEST_PATH.test(rel))
+  // Páginas HTML repetem cabeçalho e rodapé de propósito (site estático): ficam de fora.
+  const files = [...texts].filter(([rel]) => !TEST_PATH.test(rel) && !/\.html?$/.test(rel))
   const sig = new Map()
   for (const [rel, text] of files)
     sig.set(
@@ -452,6 +470,81 @@ function runEslint(eslint, { root, dir, cwd }, c, errors, ran) {
 
 // Pacotes de cada parte (a raiz e subpastas com package.json, como frontend/), cada uma com os próprios
 // arquivos; e as instruções da IA de cada parte, conferidas contra os scripts de todas as partes.
+/**
+ * Dockerfile: imagem sem versão fixa (sem tag ou :latest), RUN cd no lugar de WORKDIR e apt-get install que não
+ * limpa a lista de pacotes. Cada instrução é lida inteira (as linhas que terminam em \ continuam a mesma).
+ */
+function dockerfileRules(root, files, c) {
+  for (const rel of files.filter((f) => DOCKERFILE.test(f) && !TEST_PATH.test(f))) {
+    const text = read(root, rel)
+    if (!text) continue
+    const stages = new Set()
+    for (const { line, body } of dockerInstructions(text)) {
+      const from = body.match(/^FROM\s+(?:--\S+\s+)*(\S+)(?:\s+AS\s+(\S+))?/i)
+      if (from) {
+        const image = from[1]
+        const pinned = /@sha256:/.test(image) || /:(?!latest$)[^/:]+$/.test(image)
+        if (!pinned && image !== 'scratch' && !image.includes('$') && !stages.has(image.toLowerCase())) c.add('docker/imagem-sem-versao', rel, line, { image }, text)
+        if (from[2]) stages.add(from[2].toLowerCase())
+      }
+      if (/^RUN\s+cd\s/i.test(body)) c.add('docker/run-cd', rel, line, {}, text)
+      if (/^RUN\b.*\bapt-get\s+(-\S+\s+)*install\b/i.test(body) && !/\/var\/lib\/apt\/lists/.test(body)) c.add('docker/apt-sem-limpeza', rel, line, {}, text)
+    }
+  }
+}
+
+// Folhas de estilo do app (sem as geradas e as de bibliotecas).
+const STYLE_FILE = /\.(css|scss|sass|less)$/
+const IMPORTANT_LIMIT = 5
+const NESTING_LIMIT = 4
+
+/**
+ * CSS, Sass e Less: !important em excesso (mais de 5 no arquivo), regra vazia e, no Sass/Less, seletor aninhado
+ * mais de 4 níveis. Os comentários e os textos entre aspas não contam.
+ */
+function styleRules(root, files, c) {
+  for (const rel of files.filter((f) => STYLE_FILE.test(f) && !GENERATED.test(f) && !TEST_PATH.test(f) && !/\.min\.css$/.test(f))) {
+    const text = read(root, rel)
+    if (!text || text.length > MAX_FILE) continue
+    const clean = text.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:])\/\/[^\n]*/g, (m, pre) => pre + ' '.repeat(m.length - pre.length))
+    const lineAt = (index) => clean.slice(0, index).split('\n').length
+    const important = [...clean.matchAll(/!important\b/g)]
+    if (important.length > IMPORTANT_LIMIT) c.add('css/important-em-excesso', rel, lineAt(important[0].index), { count: important.length }, text)
+    for (const m of clean.matchAll(/([^{};\s][^{};]*)\{\s*\}/g)) c.add('css/regra-vazia', rel, lineAt(m.index), { selector: m[1].trim().slice(0, 60) }, text)
+    if (/\.(scss|sass|less)$/.test(rel)) {
+      // Pilha dos blocos abertos: true quando o bloco é de seletor (@media, @include e afins não contam como nível).
+      const open = []
+      let worst = null
+      for (const [i, ch] of [...clean].entries()) {
+        if (ch === '{') {
+          open.push(!/^\s*@/.test(clean.slice(clean.lastIndexOf('\n', i) + 1, i)))
+          const depth = open.filter(Boolean).length
+          if (depth > NESTING_LIMIT && !worst) worst = { index: i, depth }
+        } else if (ch === '}') open.pop()
+      }
+      if (worst) c.add('css/aninhamento-fundo', rel, lineAt(worst.index), { depth: worst.depth }, text)
+    }
+  }
+}
+
+// As instruções do Dockerfile, com a linha em que cada uma começa (sem comentários; \ no fim continua a linha).
+function dockerInstructions(text) {
+  const out = []
+  let current = null
+  for (const [i, raw] of text.split('\n').entries()) {
+    const l = raw.trim()
+    if (!current && (!l || l.startsWith('#'))) continue
+    current ??= { line: i + 1, body: '' }
+    current.body += ` ${l.replace(/\\$/, '')}`
+    if (!l.endsWith('\\')) {
+      out.push({ line: current.line, body: current.body.trim() })
+      current = null
+    }
+  }
+  if (current) out.push({ line: current.line, body: current.body.trim() })
+  return out
+}
+
 function projectRules(root, files, c) {
   const parts = projectParts(root)
   for (const { dir, pkg } of parts) {

@@ -28,8 +28,6 @@ export const SUPPORT_STATUS = {
   na: 'Não se aplica',
 }
 
-const CLAUDE = ['claude', 'o Claude revisa lendo o código (/faundr:quality --full)']
-const CLAUDE_SEC = ['claude', 'o Claude revisa lendo o código (/faundr:security)']
 const CLAUDE_DESIGN = ['claude', 'o Claude audita lendo as telas (/faundr:design)']
 const SECRETS = ['completo']
 const NA = ['na']
@@ -49,14 +47,14 @@ export const LANGUAGE_SUPPORT = [
     match: { tech: ['React Native', 'Expo'] },
     features: {
       mapa: ['completo'], qualidade: ['completo'], seguranca: ['completo'], dependencias: ['completo'], segredos: SECRETS,
-      erros: ['completo'], producao: ['completo'], testes: ['completo'], design: ['parcial', 'os estilos em StyleSheet ainda não são lidos'], stack: ['completo'],
+      erros: ['completo'], producao: ['completo'], testes: ['completo'], design: ['completo'], stack: ['completo'],
     },
   },
   {
     id: 'vue', name: 'Vue', examples: 'Nuxt',
     match: { languages: ['Vue'], tech: ['Vue', 'Nuxt'] },
     features: {
-      mapa: ['parcial', 'os arquivos .vue ainda não entram; .ts e .js sim'], qualidade: ['parcial', 'os arquivos .vue ainda não entram; .ts e .js sim'],
+      mapa: ['completo'], qualidade: ['completo'],
       seguranca: ['completo'], dependencias: ['completo'], segredos: SECRETS, erros: ['completo'], producao: ['completo'], testes: ['completo'], design: ['completo'], stack: ['completo'],
     },
   },
@@ -64,17 +62,15 @@ export const LANGUAGE_SUPPORT = [
     id: 'angular', name: 'Angular',
     match: { tech: ['Angular'] },
     features: {
-      mapa: ['parcial', 'os templates .html ainda não entram'], qualidade: ['parcial', 'os templates .html ainda não entram'],
-      seguranca: ['parcial', 'os templates .html ainda não entram'], dependencias: ['completo'], segredos: SECRETS,
-      erros: ['completo'], producao: ['completo'], testes: ['parcial', 'Jest e Vitest sim; Karma (ng test) ainda não'],
-      design: CLAUDE_DESIGN, stack: ['completo'],
+      mapa: ['completo'], qualidade: ['completo'], seguranca: ['completo'], dependencias: ['completo'], segredos: SECRETS,
+      erros: ['completo'], producao: ['completo'], testes: ['completo'], design: ['completo'], stack: ['completo'],
     },
   },
   {
     id: 'svelte-astro', name: 'Svelte e Astro',
     match: { languages: ['Svelte', 'Astro'] },
     features: {
-      mapa: ['parcial', 'os arquivos .svelte e .astro ainda não entram'], qualidade: ['parcial', 'os arquivos .svelte e .astro ainda não entram'],
+      mapa: ['completo'], qualidade: ['completo'],
       seguranca: ['completo'], dependencias: ['completo'], segredos: SECRETS, erros: ['completo'], producao: ['completo'], testes: ['completo'], design: ['completo'], stack: ['completo'],
     },
   },
@@ -148,7 +144,7 @@ export const LANGUAGE_SUPPORT = [
     match: { languages: ['C'] },
     features: {
       mapa: ['completo'], qualidade: ['completo'], seguranca: ['completo'], dependencias: ['parcial', 'só com Conan (conan.lock); o vcpkg não tem base pública de falhas conhecidas'], segredos: SECRETS,
-      erros: ['completo'], producao: ['completo'], testes: ['parcial', 'só projetos com CMake (CTest), sem cobertura; Makefile ainda não'], design: NA, stack: ['completo'],
+      erros: ['completo'], producao: ['completo'], testes: ['completo'], design: NA, stack: ['completo'],
     },
   },
   {
@@ -156,14 +152,15 @@ export const LANGUAGE_SUPPORT = [
     match: { languages: ['C++'] },
     features: {
       mapa: ['completo'], qualidade: ['completo'], seguranca: ['completo'], dependencias: ['parcial', 'só com Conan (conan.lock); o vcpkg não tem base pública de falhas conhecidas'], segredos: SECRETS,
-      erros: ['completo'], producao: ['completo'], testes: ['parcial', 'só projetos com CMake (CTest), sem cobertura; Makefile ainda não'], design: NA, stack: ['completo'],
+      erros: ['completo'], producao: ['completo'], testes: ['completo'], design: NA, stack: ['completo'],
     },
   },
   {
     id: 'docker', name: 'Docker',
     match: { languages: ['Docker'] },
     features: {
-      mapa: NA, qualidade: CLAUDE, seguranca: ['nao'], dependencias: ['nao', 'as imagens base ainda não são verificadas'], segredos: SECRETS,
+      mapa: NA, qualidade: ['completo'], seguranca: ['completo'],
+      dependencias: ['nao', 'as imagens base não têm base pública de falhas conhecidas (OSV); a Qualidade avisa imagem sem versão fixa'], segredos: SECRETS,
       erros: ['completo'], producao: NA, testes: NA, design: NA, stack: ['completo'],
     },
   },
@@ -171,15 +168,15 @@ export const LANGUAGE_SUPPORT = [
     id: 'html', name: 'HTML',
     match: { languages: ['HTML'] },
     features: {
-      mapa: NA, qualidade: CLAUDE, seguranca: ['parcial', 'só os cabeçalhos de segurança do index.html'], dependencias: NA, segredos: SECRETS,
-      erros: NA, producao: ['nao'], testes: NA, design: ['parcial', 'só o index.html; as outras páginas ainda não'], stack: ['completo'],
+      mapa: NA, qualidade: ['completo'], seguranca: ['completo'], dependencias: NA, segredos: SECRETS,
+      erros: NA, producao: ['completo'], testes: NA, design: ['completo'], stack: ['completo'],
     },
   },
   {
     id: 'css', name: 'CSS', examples: 'Sass, Less',
     match: { languages: ['CSS', 'SCSS', 'Less'] },
     features: {
-      mapa: NA, qualidade: CLAUDE, seguranca: NA, dependencias: NA, segredos: SECRETS,
+      mapa: NA, qualidade: ['completo'], seguranca: NA, dependencias: NA, segredos: SECRETS,
       erros: ['completo'], producao: NA, testes: NA, design: ['completo'], stack: ['completo'],
     },
   },

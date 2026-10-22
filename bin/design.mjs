@@ -13,8 +13,8 @@ import { extractTokens } from './design-tokens.mjs'
 import { detectThemes, runRules } from './design-rules.mjs'
 
 const SKIP = /(^|\/)(node_modules|\.git|\.faundr|dist|build|out|coverage|\.claude|\.remember|\.wrangler|\.next|\.nuxt|\.svelte-kit|\.tanstack|\.vercel|\.output)(\/|$)/
-// Templates Blade (Laravel) são HTML com classes: as mesmas regras da web valem.
-const UI_EXT = /\.(tsx|jsx|vue|svelte|astro)$|\.blade\.php$/
+// Templates Blade (Laravel), templates do Angular e páginas HTML são HTML com classes: as mesmas regras da web valem.
+const UI_EXT = /\.(tsx|jsx|vue|svelte|astro|html?)$|\.blade\.php$/
 // Flutter: as telas são os .dart de lib/ (menos os gerados).
 const isFlutterScreen = (rel) => /(^|\/)lib\/.*\.dart$/.test(rel) && !/\.(g|freezed|gr|mocks)\.dart$/.test(rel)
 const GENERATED = /\.gen\.|\.d\.ts$|\.test\.|\.spec\.|\.stories\./

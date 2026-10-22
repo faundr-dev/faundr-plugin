@@ -77,7 +77,7 @@
 //   faundr quality-rule "<nome>" --pattern …   cria uma regra da casa em .faundr-regras/ (padrão + mensagem)
 //   faundr quality-ladder on|off               liga/desliga o lembrete de qualidade no início das sessões
 //   faundr tests-scan                          inventário dos testes sem rodar nada (executores, arquivos, resultado no disco)
-//   faundr tests-run [--changed] [--coverage] [--files a,b] [--exclude a,b] [--runner vitest|jest|playwright|node|pytest|flutter|dart|phpunit|pest|go|maven|gradle|dotnet|cargo|ctest] [--python <caminho>] [--confirm-db]  roda os testes (só quando pedido)
+//   faundr tests-run [--changed] [--coverage] [--files a,b] [--exclude a,b] [--runner vitest|jest|playwright|node|pytest|flutter|dart|phpunit|pest|go|maven|gradle|dotnet|cargo|ctest|make|karma] [--python <caminho>] [--confirm-db]  roda os testes (só quando pedido)
 //   faundr tests-show                          última rodada, testes falhando e instáveis
 //   faundr tests-context [--fix]               contexto para o agente escrever ou consertar testes (skills "tests" e "tests-fix")
 //   faundr tests-map "<funcionalidade>" …      mapa testes × funcionalidades (--status, --tests, --critical)
@@ -3269,8 +3269,16 @@ function coverageReady(runner, info) {
     console.log('  Cobertura: no Rust ela vem do cargo-llvm-cov, que não está instalado. Peça ao usuário para aprovar: cargo install cargo-llvm-cov. Rodando sem cobertura.')
     return false
   }
-  if (runner === 'ctest') {
-    console.log('  Cobertura: no C/C++ o Faundr ainda não lê a cobertura (gcov/llvm-cov); rodando sem.')
+  if (runner === 'ctest' && !info?.coverage) {
+    console.log('  Cobertura: no C/C++ ela vem do gcovr, que não está instalado. Peça ao usuário para aprovar: pip install gcovr (precisa do GCC ou do Clang; no MSVC não funciona). Rodando sem cobertura.')
+    return false
+  }
+  if (runner === 'karma') {
+    console.log('  Cobertura: no ng test (Karma) o Faundr ainda não lê a cobertura; rodando sem.')
+    return false
+  }
+  if (runner === 'make') {
+    console.log('  Cobertura: no make o Faundr não muda os flags de compilação do Makefile; rodando sem.')
     return false
   }
   if (runner === 'vitest' && !info?.coverage) {
@@ -3324,6 +3332,8 @@ const NOT_INSTALLED = {
   dotnet: () => 'o .NET SDK (dotnet) não está no PATH deste computador',
   cargo: () => 'o Rust (cargo) não está no PATH deste computador',
   ctest: () => 'o CMake (cmake e ctest) não está no PATH deste computador',
+  make: () => 'o make não está no PATH deste computador',
+  karma: (r) => `rode npm install${r.dir ? ` em ${r.dir}/` : ''} (o ng test precisa do @angular/cli do projeto)`,
 }
 const notInstalled = (r) => NOT_INSTALLED[r.runner]?.(r) ?? `não instalado: rode npm install${r.dir ? ` em ${r.dir}/` : ''}`
 const listArg = (args, name) => flag(args, name)?.split(',').map((f) => f.trim().replace(/\\/g, '/').replace(/^\.\//, '')).filter(Boolean) ?? null

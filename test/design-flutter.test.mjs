@@ -89,3 +89,67 @@ test('Laravel: os templates Blade passam pelas regras da web', () => {
   assert.deepEqual(rules, ['acessibilidade/botao-sem-nome', 'acessibilidade/imagem-sem-alt', 'responsivo/grid-sem-celular'])
   assert.ok(uiFiles(dir).includes('resources/views/pedidos.blade.php'))
 })
+
+test('Angular e HTML: os templates .html e as páginas entram no design, com o clique de cada framework', () => {
+  const dir = project({
+    'angular.json': '{}',
+    'src/index.html': '<!doctype html>\n<html lang="pt-BR">\n<head><title>Loja</title></head>\n<body><app-root></app-root></body>\n</html>\n',
+    'src/app/carrinho/carrinho.component.html':
+      '<div class="w-[720px]" (click)="abrir()">Abrir</div>\n<button class="outline-none"><mat-icon>delete</mat-icon></button>\n<img src="logo.png">\n',
+    'site/contato.html': '<!doctype html>\n<html><body>\n<span onclick="enviar()">Enviar</span>\n<img src="mapa.png">\n</body></html>\n',
+    'src/app/ok.vue': '<template><div @click="abrir">Abrir</div></template>\n',
+  })
+  const uiExt = /\.(tsx|jsx|vue|svelte|astro|html?)$|\.blade\.php$/
+  const { findings } = runRules(dir, { uiExt, designMdPath: null, designMd: '', tokens: null })
+  const rules = (file) => [...new Set(findings.filter((f) => f.file === file).map((f) => f.rule))].sort()
+  assert.deepEqual(rules('src/app/carrinho/carrinho.component.html'), [
+    'acessibilidade/botao-sem-nome',
+    'acessibilidade/elemento-clicavel-sem-teclado',
+    'acessibilidade/foco-removido',
+    'acessibilidade/imagem-sem-alt',
+    'responsivo/largura-fixa',
+  ])
+  assert.deepEqual(rules('site/contato.html'), ['acessibilidade/elemento-clicavel-sem-teclado', 'acessibilidade/imagem-sem-alt'])
+  assert.deepEqual(rules('src/app/ok.vue'), ['acessibilidade/elemento-clicavel-sem-teclado'])
+  assert.ok(uiFiles(dir).includes('src/app/carrinho/carrinho.component.html'), 'o template do Angular é tela')
+  assert.ok(isUiFile('site/contato.html'))
+})
+
+test('React Native: cor e fonte fixas no StyleSheet, largura fixa, botão só com ícone, imagem sem descrição, onPress vazio e animação longa', () => {
+  const dir = project({
+    'package.json': JSON.stringify({ dependencies: { 'react-native': '0.74.0', expo: '^51.0.0' } }),
+    'src/screens/Carrinho.tsx': [
+      "import { StyleSheet, View, Text, Image, Pressable, Animated } from 'react-native'",
+      "import { Ionicons } from '@expo/vector-icons'",
+      'export function Carrinho() {',
+      '  Animated.timing(valor, { toValue: 1, duration: 900, useNativeDriver: true }).start()',
+      '  return (',
+      '    <View style={styles.caixa}>',
+      "      <Image source={require('./logo.png')} />",
+      '      <Pressable onPress={() => {}}><Ionicons name="trash" size={20} /></Pressable>',
+      '      <Pressable onPress={apagar} accessibilityLabel="Apagar"><Ionicons name="trash" size={20} /></Pressable>',
+      '      <Text style={styles.titulo}>Carrinho</Text>',
+      '    </View>',
+      '  )',
+      '}',
+      'const styles = StyleSheet.create({',
+      "  caixa: { width: 420, backgroundColor: '#E91E63' },",
+      '  titulo: { fontSize: 13, color: theme.colors.text },',
+      '})',
+    ].join('\n'),
+    'src/theme/colors.ts': "export const colors = { rosa: '#E91E63', texto: '#111111' }\n",
+  })
+  const { findings } = runRules(dir, { uiExt: /\.(tsx|jsx|vue|svelte|astro|html?)$|\.blade\.php$/, designMdPath: null, designMd: '', tokens: null })
+  const rules = (file) => [...new Set(findings.filter((f) => f.file === file).map((f) => f.rule))].sort()
+  assert.deepEqual(rules('src/screens/Carrinho.tsx'), [
+    'acessibilidade/botao-sem-nome-native',
+    'acessibilidade/imagem-sem-descricao-native',
+    'design/cor-fixa-native',
+    'design/fonte-fixa-native',
+    'movimento/duracao-longa-native',
+    'pratica/botao-sem-acao',
+    'responsivo/largura-fixa-native',
+  ])
+  assert.deepEqual(rules('src/theme/colors.ts'), [], 'o arquivo do tema é o lugar das cores')
+  assert.equal(findings.filter((f) => f.rule === 'acessibilidade/botao-sem-nome-native').length, 1, 'o botão com accessibilityLabel passa')
+})

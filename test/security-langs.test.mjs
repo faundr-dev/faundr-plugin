@@ -265,3 +265,62 @@ test('Revisão com IA: Rust, C/C++, Go, Java e C# puxam o tema do catálogo de c
   for (const t of ['rust', 'c-cpp', 'go', 'java-spring', 'dotnet']) assert.ok(topics.includes(t), t)
   for (const t of topics) assert.ok(fs.existsSync(new URL(`../skills/security/catalog/${t}.md`, import.meta.url)), `catálogo ${t}.md existe`)
 })
+
+test('Angular: bypassSecurityTrust com variável e [innerHTML] com pipe que desliga a proteção', async () => {
+  const found = await scan({
+    'src/app/post.component.ts': [
+      "import { DomSanitizer } from '@angular/platform-browser'",
+      'export class PostComponent {',
+      '  html = this.sanitizer.bypassSecurityTrustHtml(this.post.corpo)',
+      "  fixo = this.sanitizer.bypassSecurityTrustHtml('<b>oi</b>')",
+      '}',
+    ].join('\n'),
+    'src/app/post.component.html': '<div [innerHTML]="post.corpo | safeHtml"></div>\n<div [innerHTML]="resumo"></div>\n',
+  })
+  assert.deepEqual(found('src/app/post.component.ts'), ['angular-bypass-sanitizer'])
+  assert.deepEqual(found('src/app/post.component.html'), ['angular-unsafe-html-pipe'])
+})
+
+test('HTML: script de CDN sem integrity, formulário por http e recurso por http, em qualquer página', async () => {
+  const found = await scan({
+    'site/contato.html': [
+      '<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>',
+      '<form action="http://loja.com/enviar" method="post"></form>',
+      '<img src="http://loja.com/logo.png" alt="Logo">',
+      '<script>document.getElementById("x").innerHTML = location.hash</script>',
+    ].join('\n'),
+    'site/ok.html': [
+      '<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js" integrity="sha384-abc" crossorigin="anonymous"></script>',
+      '<script src="/js/app.js"></script>',
+      '<form action="/enviar" method="post"></form>',
+      '<a href="http://localhost:3000">local</a>',
+    ].join('\n'),
+  })
+  assert.deepEqual(found('site/contato.html'), ['html-form-insecure', 'html-mixed-content', 'html-script-without-integrity', 'xss-inner-html'])
+  assert.deepEqual(found('site/ok.html'), [])
+})
+
+test('Docker: contêiner como root, segredo no ENV/ARG, curl | sh e ADD de URL', async () => {
+  const found = await scan({
+    'Dockerfile': [
+      'FROM node:20-alpine',
+      'ARG NPM_TOKEN=npm_abc123',
+      'ENV DB_PASSWORD=supersecreta',
+      'RUN curl -fsSL https://get.exemplo.sh | sh',
+      'ADD https://exemplo.com/app.tar.gz /app/',
+      'CMD ["node", "server.js"]',
+    ].join('\n'),
+    'api/Dockerfile': [
+      'FROM golang:1.22 AS build',
+      'RUN go build -o /app',
+      'FROM gcr.io/distroless/static:nonroot',
+      'ENV PORT=8080',
+      'ARG API_KEY',
+      'COPY --from=build /app /app',
+      'USER nonroot',
+      'CMD ["/app"]',
+    ].join('\n'),
+  })
+  assert.deepEqual(found('Dockerfile'), ['docker-add-remote-url', 'docker-curl-pipe-shell', 'docker-runs-as-root', 'docker-secret-in-image'])
+  assert.deepEqual(found('api/Dockerfile'), [], 'USER no fim, ARG sem valor e build em etapas')
+})

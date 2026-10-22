@@ -1,12 +1,13 @@
 // Executores de teste fora do Node e do Python: Flutter (flutter test), Dart (dart test), PHPUnit, Pest, Go
-// (go test), Maven e Gradle (JUnit), .NET (dotnet test), Rust (cargo test) e C/C++ (CTest). Detecta pela pasta
-// (pubspec.yaml, composer.json, go.mod, pom.xml, build.gradle, .sln/.csproj, Cargo.toml, CMakeLists.txt), conta os
-// testes sem rodar e, quando pedido, roda e lê o relatório: o JSON por linha do package:test (Flutter e Dart) e do
-// go test, o JUnit do PHPUnit/Pest/Maven/Gradle/CTest, o TRX do .NET e o texto do cargo test.
+// (go test), Maven e Gradle (JUnit), .NET (dotnet test), Rust (cargo test) e C/C++ (CTest ou make test). Detecta
+// pela pasta (pubspec.yaml, composer.json, go.mod, pom.xml, build.gradle, .sln/.csproj, Cargo.toml, CMakeLists.txt,
+// Makefile), conta os testes sem rodar e, quando pedido, roda e lê o relatório: o JSON por linha do package:test
+// (Flutter e Dart) e do go test, o JUnit do PHPUnit/Pest/Maven/Gradle/CTest/GoogleTest, o TRX do .NET e o texto do cargo test.
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { COVERAGE_DIR } from './coverage.mjs'
+import { karmaRunner, runKarma } from './tests-karma.mjs'
 
 export const DART_TEST_FILE = /_test\.dart$/
 export const PHP_TEST_FILE = /(^|\/)tests?\/.*\.php$/
@@ -47,7 +48,7 @@ const onPath = (cmd) => spawnSync(WIN ? 'where' : 'which', [cmd], { encoding: 'u
 
 /** Pasta com projeto de outra linguagem (para procurar executores nas subpastas). */
 export const isLangProjectDir = (root, dir) =>
-  ['pubspec.yaml', 'composer.json', 'go.mod', 'pom.xml', 'build.gradle', 'build.gradle.kts', 'Cargo.toml', 'CMakeLists.txt'].some((f) => fs.existsSync(path.join(root, dir, f))) ||
+  ['pubspec.yaml', 'composer.json', 'go.mod', 'pom.xml', 'build.gradle', 'build.gradle.kts', 'Cargo.toml', 'CMakeLists.txt', 'Makefile'].some((f) => fs.existsSync(path.join(root, dir, f))) ||
   list(path.join(root, dir)).some((e) => e.isFile() && /\.(slnx?|csproj)$/.test(e.name))
 
 /** Executores numa pasta (raiz = ''). */
@@ -78,7 +79,24 @@ export function langRunnersIn(root, dir) {
   if (cargo) found.push(cargo)
   const ctest = ctestRunner(root, dir)
   if (ctest) found.push(ctest)
+  const make = makeRunner(root, dir)
+  if (make) found.push(make)
+  const karma = karmaRunner(root, dir)
+  if (karma) found.push(karma)
   return found
+}
+
+// Makefile de C/C++: compila com $(CC)/$(CXX), gcc, g++ ou clang, ou fala de arquivos .c/.cpp.
+const C_MAKEFILE = /\$\((CC|CXX)\)|\b(gcc|g\+\+|clang\+\+|clang|cc)\b|\.(c|cc|cpp|cxx)\b/
+
+/** make test (ou make check): projeto C/C++ só com Makefile. Com CMake, quem roda é o CTest. */
+function makeRunner(root, dir) {
+  const file = ['Makefile', 'makefile', 'GNUmakefile'].find((f) => fs.existsSync(path.join(root, dir, f)))
+  if (!file || fs.existsSync(path.join(root, dir, 'CMakeLists.txt'))) return null
+  const text = read(path.join(root, dir, file))
+  const target = ['test', 'check'].find((t) => new RegExp(`^${t}\\s*:`, 'm').test(text))
+  if (!target || !C_MAKEFILE.test(text)) return null
+  return { runner: 'make', dir, config: file, script: null, target, installed: onPath('make'), coverage: false }
 }
 
 /** cargo test: pelo Cargo.toml da pasta; membro de um workspace fica com a raiz do workspace. Cobertura com o cargo-llvm-cov. */
@@ -97,7 +115,7 @@ function ctestRunner(root, dir) {
   if (ancestors(dir).some((d) => fs.existsSync(path.join(root, d, 'CMakeLists.txt')))) return null
   const lists = [path.join(dir, 'CMakeLists.txt'), ...['test', 'tests', 'unittests'].map((t) => path.join(dir, t, 'CMakeLists.txt'))]
   if (!lists.some((f) => CTEST_SIGNS.test(read(path.join(root, f))))) return null
-  return { runner: 'ctest', dir, config: 'CMakeLists.txt', script: null, installed: onPath('cmake') && onPath('ctest'), coverage: false }
+  return { runner: 'ctest', dir, config: 'CMakeLists.txt', script: null, installed: onPath('cmake') && onPath('ctest'), coverage: onPath('gcovr') }
 }
 
 // As pastas acima de `dir`, até a raiz ('a/b' → ['', 'a']).
@@ -160,7 +178,9 @@ export function countLangCases(rel, text) {
 export function runLangTests(root, runner, { dir = '', files = null, out, timeout, coverageArgs = [] }) {
   const cwd = path.join(root, dir)
   const started = Date.now()
-  if (runner === 'ctest') return runCtest(root, cwd, { out, timeout, started })
+  if (runner === 'ctest') return runCtest(cwd, { out, timeout, started, coverageArgs })
+  if (runner === 'karma') return runKarma(root, dir, { out, timeout })
+  if (runner === 'make') return runMake(cwd, { out, timeout, started, target: makeRunner(root, dir)?.target ?? 'test' })
   const { cmd, args, shell } = commandFor(root, runner, cwd, { files, out, coverageArgs })
   // flutter, dart, mvnw.cmd e gradlew.bat são .bat/.cmd no Windows: precisam do shell para abrir.
   const r = spawnSync(cmd, args, { cwd, encoding: 'utf8', windowsHide: true, timeout, maxBuffer: 64 * 1024 * 1024, shell, env: { ...process.env, CI: '1', NO_COLOR: '1' } })
@@ -199,22 +219,77 @@ function ctestBuildDir(cwd) {
   return candidates.find((d) => fs.existsSync(path.join(cwd, d, 'CTestTestfile.cmake'))) ?? 'build'
 }
 
-/** CTest: configura (se ainda não tem build), compila e roda, com o resultado em JUnit (CMake 3.21 ou mais novo). */
-function runCtest(root, cwd, { out, timeout, started }) {
-  const build = ctestBuildDir(cwd)
+// Com cobertura, o CTest compila com --coverage numa pasta dentro da do Faundr (ao lado do relatório): o build do
+// projeto fica como está e nada sobra na pasta do projeto.
+const coverageBuild = (out) => path.join(path.dirname(out), 'cmake-cobertura').split(path.sep).join('/')
+const COVERAGE_FLAGS = ['-DCMAKE_C_FLAGS=--coverage', '-DCMAKE_CXX_FLAGS=--coverage', '-DCMAKE_EXE_LINKER_FLAGS=--coverage', '-DCMAKE_BUILD_TYPE=Debug']
+
+// Um passo de um executor em várias etapas (cmake, ctest, gcovr, make), com o tempo que sobra da rodada.
+function stepper(cwd, timeout, started, env = {}) {
   const left = () => Math.max(1000, timeout - (Date.now() - started))
-  const step = (cmd, args) => spawnSync(cmd, args, { cwd, encoding: 'utf8', windowsHide: true, timeout: left(), maxBuffer: 64 * 1024 * 1024, env: { ...process.env, CI: '1', NO_COLOR: '1' } })
-  const failed = (what, r) => ({ runner: 'ctest', durationMs: Date.now() - started, error: r.error?.code === 'ETIMEDOUT' ? `passou do tempo limite (${Math.round(timeout / 60000)} min)` : r.error?.code === 'ENOENT' ? 'não consegui abrir o cmake (ele está instalado e no PATH?)' : `${what} falhou: ${lastLine(r.stderr) || lastLine(r.stdout)}` })
+  return (cmd, args) => spawnSync(cmd, args, { cwd, encoding: 'utf8', windowsHide: true, timeout: left(), maxBuffer: 64 * 1024 * 1024, env: { ...process.env, CI: '1', NO_COLOR: '1', ...env } })
+}
+
+function stepFailed(runner, what, r, { timeout, started }) {
+  const tool = runner === 'make' ? 'make' : 'cmake'
+  const error =
+    r.error?.code === 'ETIMEDOUT'
+      ? `passou do tempo limite (${Math.round(timeout / 60000)} min)`
+      : r.error?.code === 'ENOENT'
+        ? `não consegui abrir o ${tool} (ele está instalado e no PATH?)`
+        : `${what} falhou: ${lastLine(r.stderr) || lastLine(r.stdout)}`
+  return { runner, durationMs: Date.now() - started, error }
+}
+
+/**
+ * CTest: configura (se ainda não tem build), compila e roda, com o resultado em JUnit (CMake 3.21 ou mais novo).
+ * Com cobertura (coverageArgs = argumentos do gcovr), usa a pasta própria compilada com --coverage e grava o lcov.
+ */
+function runCtest(cwd, { out, timeout, started, coverageArgs = [] }) {
+  const ctx = { timeout, started }
+  const build = coverageArgs.length ? coverageBuild(out) : ctestBuildDir(cwd)
+  const step = stepper(cwd, timeout, started)
   if (!fs.existsSync(path.join(cwd, build, 'CMakeCache.txt'))) {
-    const conf = step('cmake', ['-S', '.', '-B', build])
-    if (conf.status !== 0) return failed('a configuração do CMake', conf)
+    const conf = step('cmake', ['-S', '.', '-B', build, ...(coverageArgs.length ? COVERAGE_FLAGS : [])])
+    if (conf.status !== 0) return stepFailed('ctest', 'a configuração do CMake', conf, ctx)
   }
   const compiled = step('cmake', ['--build', build])
-  if (compiled.status !== 0) return failed('a compilação', compiled)
+  if (compiled.status !== 0) return stepFailed('ctest', 'a compilação', compiled, ctx)
   const r = step('ctest', ['--test-dir', build, '--output-junit', out, '--output-on-failure'])
-  if (r.error) return failed('o ctest', r)
+  if (r.error) return stepFailed('ctest', 'o ctest', r, ctx)
+  // Cobertura: o gcovr junta os .gcda da pasta de build e grava o lcov; se falhar, os testes valem sem ela.
+  if (coverageArgs.length) step('gcovr', ['--root', '.', '--object-directory', build, ...coverageArgs])
   const xml = read(out)
-  return xml ? { runner: 'ctest', durationMs: Date.now() - started, cases: null, junit: xml, error: null } : failed('o ctest', r)
+  return xml ? { runner: 'ctest', durationMs: Date.now() - started, cases: null, junit: xml, error: null } : stepFailed('ctest', 'o ctest', r, ctx)
+}
+
+/**
+ * make test (ou check): roda com GTEST_OUTPUT, para o GoogleTest gravar o XML de cada programa de teste (com o
+ * arquivo de cada teste). Sem XML (testes próprios, Unity, Check…), a rodada inteira vira um teste só.
+ */
+function runMake(cwd, { out, timeout, started, target }) {
+  const xmlDir = out.replace(/\.\w+$/, '-gtest')
+  fs.rmSync(xmlDir, { recursive: true, force: true })
+  fs.mkdirSync(xmlDir, { recursive: true })
+  const r = stepper(cwd, timeout, started, { GTEST_OUTPUT: `xml:${xmlDir}/` })('make', [target])
+  if (r.error) return stepFailed('make', `o make ${target}`, r, { timeout, started })
+  const xml = freshReports(xmlDir, /\.xml$/, started)
+  if (xml) return { runner: 'make', durationMs: Date.now() - started, cases: null, junit: xml, error: null }
+  return { runner: 'make', durationMs: Date.now() - started, cases: makeCases({ status: r.status, output: `${r.stdout}\n${r.stderr}`, target }), error: null }
+}
+
+/** A rodada do make sem relatório: um teste só, que passou se o make terminou bem; na falha, o fim da saída. */
+export function makeCases({ status, output, target }) {
+  const lines = String(output ?? '').split('\n').map((l) => l.trimEnd()).filter(Boolean)
+  return [
+    {
+      file: null,
+      name: `make ${target}`,
+      status: status === 0 ? 'passed' : 'failed',
+      durationMs: 0,
+      message: status === 0 ? null : lines.slice(-15).join('\n').slice(0, 2000) || 'falhou',
+    },
+  ]
 }
 
 /** O comando de cada executor. `files`: só esses arquivos de teste (relativos à pasta do executor). */

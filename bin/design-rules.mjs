@@ -9,6 +9,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { FLUTTER_RULES, FLUTTER_TEXT, flutterFileRules } from './design-flutter.mjs'
+import { isNativeProject, NATIVE_RULES, NATIVE_TEXT, nativeFileRules } from './design-native.mjs'
 import { allDeps, isClaudePlugin } from './parts.mjs'
 
 const SKIP = /(^|\/)(node_modules|\.git|\.faundr|dist|build|out|coverage|\.claude|\.remember|\.wrangler|\.next|\.nuxt|\.svelte-kit|\.tanstack|\.vercel|\.output)(\/|$)/
@@ -64,7 +65,7 @@ export const RULES = {
 }
 
 // Telas Flutter: regras e textos em design-flutter.mjs.
-Object.assign(RULES, FLUTTER_RULES)
+Object.assign(RULES, FLUTTER_RULES, NATIVE_RULES)
 
 // ---------- leitura do projeto ----------
 
@@ -108,6 +109,7 @@ const HEAD_FILES = [
   /^(src\/)?app\/root\.(tsx|jsx)$/,
   /^(src\/)?pages\/_document\.(tsx|jsx|js)$/,
   /^src\/app\.html$/,
+  /^src\/index\.html$/, // Angular
   /^src\/layouts\/[^/]+\.astro$/,
   /^nuxt\.config\.(ts|js)$/,
   /^app\.vue$/,
@@ -327,7 +329,7 @@ const TEXT = {
   'identidade/theme-color-unico': () => ['Uma cor de barra do navegador para os dois temas', 'O theme-color pinta a barra do navegador no celular. Com uma cor só, no outro tema a barra fica destoando da página. Use duas tags theme-color com media="(prefers-color-scheme: light)" e "(prefers-color-scheme: dark)", ou troque a cor junto com o tema.'],
   'design/emoji-como-icone': (c, n) => [`Emoji usado como ícone ou enfeite (${c.token})${n > 1 ? `, ${n} lugares` : ''}`, 'Emoji muda de cara em cada sistema e não segue o traço dos ícones do app. Use a biblioteca de ícones do projeto.'],
 }
-Object.assign(TEXT, FLUTTER_TEXT)
+Object.assign(TEXT, FLUTTER_TEXT, NATIVE_TEXT)
 
 const lineList = (lines) => (lines.length ? ` Linhas: ${lines.slice(0, 12).join(', ')}${lines.length > 12 ? '…' : ''}.` : '')
 
@@ -397,8 +399,15 @@ function isIconOnlyButton(t, text) {
   if (close <= 0 || close - t.end >= 1500) return false
   const inner = text.slice(t.end, close)
   const bare = inner.replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, '').replace(/<[^>]*>/g, '').trim()
-  return !bare && /<([A-Z][\w.]*|svg)\b/.test(inner) && !/sr-only|aria-label/.test(inner)
+  // Ícone: componente (<Icon />), <svg>, ou o ícone do Angular Material e do Ionic, cujo texto é o nome do ícone.
+  const iconText = /^<(mat-icon|ion-icon)\b/.test(inner.trim()) && !/<\/(mat-icon|ion-icon)>\s*\S/.test(inner)
+  return (!bare || iconText) && /<([A-Z][\w.]*|svg|mat-icon|ion-icon)\b/.test(inner) && !/sr-only|aria-label/.test(inner)
 }
+
+// Clique no jeito de cada framework: onClick (React), (click) (Angular), @click/v-on:click (Vue), on:click/onclick (Svelte e HTML).
+const CLICK = /(^|\s)(onClick|onclick|on:click)\s*=|\(click\)\s*=|@click\b|v-on:click\b/
+// E o teclado, também em cada jeito.
+const KEYS = /\brole\s*=|onKey(Down|Up|Press)\s*=|\(key(down|up)[\w.]*\)\s*=|@key(down|up)|on:key(down|up)|onkey(down|up)\s*=/i
 
 function a11yTagRules({ t, text, cls, has, add }) {
   const outline = cls.find((x) => /^(outline-none|outline-0|outline-hidden)$/.test(base(x)) && !/^(focus-visible|focus-within):/.test(x))
@@ -408,7 +417,7 @@ function a11yTagRules({ t, text, cls, has, add }) {
   if ((t.name === 'img' || (t.name === 'Image' && /\bsrc\s*=/.test(t.attrs))) && !/\balt\s*=/.test(t.attrs))
     add('acessibilidade/imagem-sem-alt', t.start, {})
   if (/\bonPaste\s*=/.test(t.attrs) && /preventDefault/.test(t.attrs)) add('acessibilidade/colar-bloqueado', t.start, {})
-  if (/^(div|span|li|td|tr|p|section|article|img)$/.test(t.name) && /\bonClick\s*=/.test(t.attrs) && !/\brole\s*=|onKey(Down|Up|Press)\s*=/.test(t.attrs))
+  if (/^(div|span|li|td|tr|p|section|article|img)$/.test(t.name) && CLICK.test(t.attrs) && !KEYS.test(t.attrs))
     add('acessibilidade/elemento-clicavel-sem-teclado', t.start, { tag: t.name })
   if (/\btabIndex\s*=\s*\{?\s*["']?[1-9]/.test(t.attrs)) add('acessibilidade/tabindex-positivo', t.start, {})
 }
@@ -480,6 +489,11 @@ function uiFileRules({ rel, text }, c, designText, stats) {
 }
 
 // Um arquivo de tela do Flutter: as regras de design-flutter.mjs e as de texto (dado de enchimento, emoji).
+function nativeRules({ rel, text }, c, stats) {
+  const ign = ignoreSet(text)
+  nativeFileRules({ rel, text }, tags(text), (rule, line, ctx) => (ign.ignored(rule, line) ? stats.ignored++ : c.add(rule, rel, line, ctx)))
+}
+
 function dartFileRules({ rel, text }, c, stats) {
   const ign = ignoreSet(text)
   const add = (rule, line, ctx) => (ign.ignored(rule, line) ? stats.ignored++ : c.add(rule, rel, line, ctx))
@@ -652,6 +666,8 @@ export function runRules(root, { uiExt, designMdPath, designMd, tokens }) {
   for (const f of p.ui) uiFileRules(f, c, designText, stats)
   for (const f of p.css) cssFileRules(f, c, stats)
   for (const f of p.dart) dartFileRules(f, c, stats)
+  // React Native: o estilo vive no StyleSheet e nas props, não em classes.
+  if (isNativeProject(p.deps)) for (const f of p.ui.filter((u) => /\.[jt]sx$/.test(u.rel))) nativeRules(f, c, stats)
 
   const headText = p.head.map((h) => h.text).join('\n')
   const code = [...p.ui, ...p.css].map((f) => f.text).join('\n')

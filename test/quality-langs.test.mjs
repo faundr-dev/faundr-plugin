@@ -142,3 +142,62 @@ test('C e C++: catch vazio e que só loga, função complexa; GoogleTest sem EXP
   assert.deepEqual(found('src/nota.c'), ['complexidade/funcao'])
   assert.deepEqual(found('tests/pedido_test.cpp').sort(), ['testes/pulado', 'testes/sem-conferencia'])
 })
+
+test('Vue, Svelte e Astro: catch vazio, console.log e função complexa dentro do <script>, na linha do arquivo', async () => {
+  const { result, found } = await check({
+    'package.json': '{"dependencies":{"vue":"^3.4.0"}}',
+    'src/main.ts': 'import App from "./App.vue"\nexport default App\n',
+    'src/App.vue': `<template>\n  <p>{{ nota(1) }}</p>\n</template>\n\n<script setup lang="ts">\nfunction salva() {\n  try {\n    fetch("/api")\n  } catch (e) {}\n  console.log("salvo")\n}\nfunction nota(x: number) {\n${ifs((i) => `  if (x === ${i}) return ${i}`)}\n  return -1\n}\n</script>\n`,
+    'src/routes/+page.svelte': '<script>\n  async function carrega() {\n    try {\n      await fetch("/api")\n    } catch (e) {\n      console.error(e)\n    }\n  }\n</script>\n\n<button on:click={carrega}>Carregar</button>\n',
+    'src/pages/index.astro': '---\nconst dados = await fetch("/api").catch(() => null)\n---\n<h1>Oi</h1>\n',
+  })
+  assert.deepEqual(found('src/App.vue').sort(), ['complexidade/funcao', 'falha/catch-vazio', 'limpeza/console-log'])
+  assert.equal(result.findings.find((f) => f.file === 'src/App.vue' && f.rule_id === 'falha/catch-vazio').line, 9, 'linha do catch no .vue')
+  assert.deepEqual(found('src/routes/+page.svelte'), ['falha/catch-so-loga'])
+  assert.deepEqual(found('src/pages/index.astro'), ['falha/catch-devolve-nulo'])
+})
+
+test('Nuxt: componentes, composables e layouts entram sozinhos (sem import), então não viram arquivo sem uso', async () => {
+  const { found } = await check({
+    'package.json': '{"dependencies":{"nuxt":"^3.12.0"}}',
+    'nuxt.config.ts': 'export default defineNuxtConfig({})\n',
+    'components/BotaoComprar.vue': '<script setup lang="ts">\nconst x = 1\n</script>\n<template><button>Comprar</button></template>\n',
+    'composables/useCarrinho.ts': 'export function useCarrinho() {\n  return 1\n}\n',
+    'layouts/default.vue': '<template><slot /></template>\n',
+  })
+  assert.deepEqual(found('components/BotaoComprar.vue'), [])
+  assert.deepEqual(found('composables/useCarrinho.ts'), [])
+  assert.deepEqual(found('layouts/default.vue'), [])
+})
+
+test('HTML: o <script> da página entra na qualidade, e a página não vira arquivo sem uso', async () => {
+  const { found } = await check({
+    'site/index.html': '<!doctype html>\n<html>\n<body>\n<script>\n  function envia() {\n    try {\n      fetch("/api")\n    } catch (e) {}\n    console.log("ok")\n  }\n</script>\n</body>\n</html>\n',
+    'site/sobre.html': '<!doctype html>\n<html><body><p>Sobre</p></body></html>\n',
+  })
+  assert.deepEqual(found('site/index.html').sort(), ['falha/catch-vazio', 'limpeza/console-log'])
+  assert.deepEqual(found('site/sobre.html'), [])
+})
+
+test('Docker: imagem sem versão fixa, RUN cd no lugar de WORKDIR e apt-get sem limpar o cache', async () => {
+  const { found } = await check({
+    'Dockerfile': 'FROM python\nRUN cd /app && pip install -r requirements.txt\nRUN apt-get update && apt-get install -y curl\nCMD ["python", "main.py"]\n',
+    'api/Dockerfile': 'FROM python:3.12-slim\nWORKDIR /app\nRUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*\nCMD ["python", "main.py"]\n',
+    'web/Dockerfile.prod': 'FROM node:latest AS build\nFROM nginx:1.27\n',
+  })
+  assert.deepEqual(found('Dockerfile').sort(), ['docker/apt-sem-limpeza', 'docker/imagem-sem-versao', 'docker/run-cd'])
+  assert.deepEqual(found('api/Dockerfile'), [])
+  assert.deepEqual(found('web/Dockerfile.prod'), ['docker/imagem-sem-versao'])
+})
+
+test('CSS: !important em excesso, regra vazia e aninhamento fundo no Sass', async () => {
+  const important = Array.from({ length: 6 }, (_, i) => `.b${i} { color: red !important; }`).join('\n')
+  const { found } = await check({
+    'src/estilos/botoes.css': `${important}\n.vazia {\n}\n`,
+    'src/estilos/menu.scss': '.menu {\n  .lista {\n    .item {\n      .link {\n        .icone {\n          color: blue;\n        }\n      }\n    }\n  }\n}\n',
+    'src/estilos/ok.css': ':root { --cor: #111; }\n.titulo { font-size: 2rem; }\n@media (max-width: 600px) {\n  .titulo { font-size: 1.5rem; }\n}\n',
+  })
+  assert.deepEqual(found('src/estilos/botoes.css').sort(), ['css/important-em-excesso', 'css/regra-vazia'])
+  assert.deepEqual(found('src/estilos/menu.scss'), ['css/aninhamento-fundo'])
+  assert.deepEqual(found('src/estilos/ok.css'), [])
+})

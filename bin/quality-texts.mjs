@@ -259,6 +259,42 @@ export const TEXT = {
     'Atalho sem prazo vira dívida esquecida: ninguém sabe quando ele deixa de servir.',
     'Complete no formato // faundr: <o limite>, <quando melhorar> (ex.: "// faundr: busca tudo de uma vez, paginar quando passar de 500 itens").',
   ],
+  'docker/imagem-sem-versao': (c, n, all) => [
+    n > 1 ? `${n} imagens do Docker sem versão fixa` : `Imagem do Docker sem versão fixa (${c.image})`,
+    `O FROM usa ${(all ?? [c]).map((x) => x.image).join(', ')} sem tag ou com :latest.`,
+    'A cada build vem a versão mais nova que existir: um dia o app quebra (ou muda de comportamento) sem ninguém ter mexido no código.',
+    'Fixe a versão no FROM, por exemplo node:20-alpine ou python:3.12-slim, e atualize de propósito quando quiser.',
+  ],
+  'docker/run-cd': (c, n) => [
+    `${n} RUN cd no Dockerfile`,
+    'O Dockerfile usa RUN cd pasta && … para mudar de pasta.',
+    'O cd vale só para aquele RUN: as instruções seguintes voltam para a pasta anterior, e é fácil rodar algo no lugar errado.',
+    'Use WORKDIR /pasta antes dos comandos (ele cria a pasta e vale para tudo o que vem depois).',
+  ],
+  'docker/apt-sem-limpeza': (c, n) => [
+    `${n} apt-get install sem limpar a lista de pacotes`,
+    'O RUN instala pacotes com apt-get mas não apaga /var/lib/apt/lists no mesmo comando.',
+    'A lista de pacotes (dezenas de MB) fica dentro da imagem: ela fica maior, demora mais para subir e ocupa mais espaço no servidor.',
+    'No mesmo RUN: apt-get update && apt-get install -y --no-install-recommends <pacotes> && rm -rf /var/lib/apt/lists/*',
+  ],
+  'css/important-em-excesso': (c) => [
+    `${c.count} !important no mesmo arquivo de estilo`,
+    `O arquivo usa !important ${c.count} vezes para ganhar das outras regras.`,
+    'Cada !important obriga o próximo ajuste a usar outro !important: o estilo vira uma briga, e mudar uma cor passa a quebrar outra tela.',
+    'Tire os !important e deixe a regra mais específica (ou mude a ordem dos arquivos). Se for para vencer uma biblioteca, use @layer ou um seletor da própria biblioteca.',
+  ],
+  'css/regra-vazia': (c, n, all) => [
+    n > 1 ? `${n} regras de estilo vazias` : `Regra de estilo vazia (${c.selector})`,
+    `Seletores sem nenhuma propriedade: ${(all ?? [c]).slice(0, 6).map((x) => `${x.selector} (linha ${x.line})`).join(', ')}.`,
+    'Não fazem nada, mas fazem quem lê procurar onde aquilo é usado.',
+    'Apague as regras vazias.',
+  ],
+  'css/aninhamento-fundo': (c) => [
+    `Seletor aninhado ${c.depth} níveis no Sass/Less`,
+    `Um seletor fica ${c.depth} níveis dentro de outros.`,
+    'O CSS gerado vira um seletor longo e específico demais: difícil de sobrescrever, e ele quebra quando o HTML muda de estrutura.',
+    'Aninhe no máximo 3 ou 4 níveis: dê uma classe própria ao elemento de dentro (ex.: .menu-icone) e use direto.',
+  ],
   'morto/arquivo-orfao': () => [
     'Arquivo que ninguém usa',
     'Nenhum outro arquivo importa este, e o nome dele não aparece em nenhum outro lugar do projeto. Confira antes de apagar: pode ser chamado de um jeito que a checagem não enxerga.',

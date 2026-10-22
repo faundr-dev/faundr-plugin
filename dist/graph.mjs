@@ -7179,6 +7179,8 @@ var LANGUAGES = [
     functionTypes: S("function_declaration", "generator_function_declaration", "method_definition"),
     callTypes: S("call_expression", "new_expression", "jsx_opening_element", "jsx_self_closing_element")
   },
+  // Vue, Svelte e Astro: só o <script> (e o frontmatter do Astro), lido como TypeScript (sfc.ts).
+  { name: "sfc", grammar: "typescript", extensions: [".vue", ".svelte", ".astro"], ...TS_BASE },
   {
     name: "python",
     grammar: "python",
@@ -12088,7 +12090,7 @@ function collectFiles(root) {
 }
 
 // engine/src/resolve-paths.ts
-var JS_EXTS = [".ts", ".tsx", ".mts", ".cts", ".svelte", ".js", ".jsx", ".mjs", ".cjs"];
+var JS_EXTS = [".ts", ".tsx", ".mts", ".cts", ".svelte", ".vue", ".astro", ".js", ".jsx", ".mjs", ".cjs"];
 var JS_INDEX = ["index.ts", "index.tsx", "index.svelte", "index.js", "index.jsx", "index.mjs"];
 function readJsonc(file) {
   try {
@@ -12194,6 +12196,9 @@ var PathResolver = class {
       if (viaPkg) return viaPkg;
     }
     if (!this.hasTsconfig && raw.startsWith("@/")) return this.tryJs(`src/${raw.slice(2)}`) ?? this.tryJs(raw.slice(2));
+    if (raw.startsWith("$lib/")) return this.tryJs(`src/lib/${raw.slice(5)}`);
+    const nuxt = raw.match(/^~~?\/(.+)$/);
+    if (nuxt) return this.tryJs(nuxt[1]) ?? this.tryJs(`src/${nuxt[1]}`);
     return null;
   }
   /** Python: `from ..a.b import x` (level = nº de pontos) ou `import a.b`. */
@@ -12215,6 +12220,11 @@ var PathResolver = class {
       if (hit) return hit;
     }
     return null;
+  }
+  /** Texto de um arquivo do projeto (ex.: o template .html de um componente Angular); '' se não existe. */
+  readFile(rel) {
+    const norm = path8.posix.normalize(rel);
+    return this.exists(norm) === "file" ? readText(path8.join(this.root, norm)) : "";
   }
   resolveRelativeFile(raw, fromRel) {
     const rel = path8.posix.normalize(path8.posix.join(path8.posix.dirname(fromRel), raw));
@@ -12380,6 +12390,34 @@ function packageRoot(raw) {
   return raw.startsWith("@") ? parts2.slice(0, 2).join("/") : parts2[0];
 }
 
+// engine/src/sfc.ts
+var SFC_EXT = /\.(vue|svelte|astro|html?)$/i;
+var NOT_CODE = /\bsrc\s*=|\btype\s*=\s*["']?(?!module\b|text\/(java|type)script\b|application\/(java|type)script\b)[\w/+.-]+/i;
+function sfcScript(rel, source) {
+  const keep = [];
+  if (/\.astro$/i.test(rel)) {
+    const front = source.match(/^\s*---[^\S\n]*\r?\n([\s\S]*?)\r?\n---/);
+    if (front) {
+      const start2 = (front.index ?? 0) + front[0].indexOf(front[1]);
+      keep.push([start2, start2 + front[1].length]);
+    }
+  }
+  for (const m of source.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)) {
+    if (NOT_CODE.test(m[1])) continue;
+    const start2 = (m.index ?? 0) + m[0].indexOf(">") + 1;
+    keep.push([start2, start2 + m[2].length]);
+  }
+  let out2 = "";
+  let at = 0;
+  for (const [from, to] of keep.sort((a, b) => a[0] - b[0])) {
+    if (from < at) continue;
+    out2 += blank(source.slice(at, from)) + source.slice(from, to);
+    at = to;
+  }
+  return out2 + blank(source.slice(at));
+}
+var blank = (text) => text.replace(/[^\r\n]/g, " ");
+
 // engine/src/extract-code.ts
 var JS_DESCEND = /* @__PURE__ */ new Set(["arrow_function", "function_expression", "function_declaration", "generator_function_declaration", "generator_function"]);
 var JS_FUNCTION_VALUES = /* @__PURE__ */ new Set(["arrow_function", "function_expression", "function", "generator_function"]);
@@ -12411,7 +12449,7 @@ function unwrap(v) {
   return v;
 }
 async function extractCode(rel, source, cfg, resolver) {
-  const tree = await parse(cfg.grammar, source);
+  const tree = await parse(cfg.grammar, SFC_EXT.test(rel) ? sfcScript(rel, source) : source);
   const out2 = new CodeExtractor(rel, cfg, resolver).run(tree.rootNode);
   tree.delete();
   return out2;
@@ -12804,6 +12842,30 @@ var CodeExtractor = class {
     }
     const body2 = this.bodyOf(n);
     if (body2) for (const c of body2.namedChildren) this.walk(c, nid);
+    if (this.cfg.js) this.angularTemplate(n, nid);
+  }
+  /**
+   * Angular: o template do componente vira um ponto do mapa — o arquivo .html (templateUrl) ou "template" (inline) —
+   * ligado ao componente e aos métodos dele que chama. (A ligação componente → método já existe como "method".)
+   */
+  angularTemplate(n, nid) {
+    const decorators = [...n.namedChildren, ...n.parent?.type === "export_statement" ? n.parent.namedChildren : []].filter((c) => c.type === "decorator");
+    const component = decorators.find((d) => /^@Component\s*\(/.test(d.text));
+    if (!component) return;
+    const url = component.text.match(/templateUrl\s*:\s*['"`]([^'"`]+)['"`]/)?.[1];
+    const htmlRel = url ? path9.posix.normalize(path9.posix.join(path9.posix.dirname(this.rel), url)) : null;
+    const template = htmlRel ? this.resolver.readFile(htmlRel) : component.text.match(/\btemplate\s*:\s*(['"`])([\s\S]*?)\1/)?.[2];
+    if (!template) return;
+    const tid = htmlRel ? makeId("template", htmlRel) : makeId(nid, "template");
+    if (htmlRel) {
+      this.seen.add(tid);
+      this.nodes.push({ id: tid, label: path9.posix.basename(htmlRel), file_type: "code", source_file: htmlRel, source_location: "L1" });
+    } else this.addNode(tid, "template", component);
+    this.addEdge(nid, tid, htmlRel ? "imports" : "contains", component, { context: "template" });
+    for (const name2 of templateCalls(template)) {
+      const mid = makeId(nid, name2);
+      if (this.seen.has(mid)) this.addEdge(tid, mid, "calls", component, { context: "template" });
+    }
   }
   walkFunction(n, parentClass) {
     const name2 = this.nameOf(n);
@@ -13068,6 +13130,16 @@ function phpCallee(n) {
   const obj = n.childForFieldName("object");
   const thisField = obj?.type === "member_access_expression" && obj.childForFieldName("object")?.text === "$this";
   return { name: name2, member: true, receiver: obj?.text === "$this" ? "this" : obj?.text.slice(0, 40), thisField };
+}
+function templateCalls(template) {
+  const exprs = [
+    ...[...template.matchAll(/\s(?:\([\w.-]+\)|\[[\w.@-]+\]|\[\([\w.-]+\)\]|\*ng\w+|(?:bind|on)-[\w-]+)\s*=\s*"([^"]*)"/g)].map((m) => m[1]),
+    ...[...template.matchAll(/\{\{([\s\S]*?)\}\}/g)].map((m) => m[1]),
+    ...[...template.matchAll(/@(?:if|else if|for|switch|case|defer)\s*\(([^)]*(?:\([^)]*\)[^)]*)*)\)/g)].map((m) => m[1])
+  ];
+  const names = /* @__PURE__ */ new Set();
+  for (const e of exprs) for (const m of e.matchAll(/(?<![\w$.])([A-Za-z_$][\w$]*)\s*\(/g)) names.add(m[1]);
+  return names;
 }
 function rustUsePaths(text, prefix = []) {
   const s = text.trim();
@@ -14548,6 +14620,13 @@ var GRAMMAR = {
   ".jsx": "javascript",
   ".mjs": "javascript",
   ".cjs": "javascript",
+  // Vue, Svelte e Astro: o <script> lido como TypeScript.
+  ".vue": "typescript",
+  ".svelte": "typescript",
+  ".astro": "typescript",
+  // Páginas HTML: os <script> da página.
+  ".html": "typescript",
+  ".htm": "typescript",
   ".py": "python",
   ".dart": "dart",
   ".php": "php",
@@ -14592,8 +14671,9 @@ function qualityGrammar(rel) {
   const ext = rel.slice(rel.lastIndexOf(".")).toLowerCase();
   return GRAMMAR[ext] ?? null;
 }
-async function analyzeQuality(rel, source, { test = false } = {}) {
+async function analyzeQuality(rel, original, { test = false } = {}) {
   const grammar = qualityGrammar(rel);
+  const source = SFC_EXT.test(rel) ? sfcScript(rel, original) : original;
   const module2 = { imports: [], exports: [], commonjs: false };
   if (!grammar) return { hits: [], functions: [], module: module2 };
   if (grammar === "python") return analyzePython(source, { test });

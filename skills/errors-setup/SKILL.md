@@ -35,6 +35,7 @@ Leia o `package.json` (e os arquivos de configuração) e escolha **um** pacote:
 | Node (Express, Fastify, scripts) | `@sentry/node` | um `instrument.mjs` importado antes de tudo |
 | Expo / React Native | `@sentry/react-native` | `App.tsx` |
 | Angular | `@sentry/angular` | `main.ts`, antes do `bootstrapApplication`, e o `ErrorHandler` do Sentry nos providers |
+| Site em HTML puro (sem framework) | o Loader Script do Sentry (sem instalar nada) | `<script src="https://js.sentry-cdn.com/<chave>.min.js" crossorigin="anonymous"></script>` no `<head>` de cada página, antes dos outros scripts; a chave é a parte do DSN antes do @ |
 | Python (FastAPI, Django, Flask, scripts) | `sentry-sdk` (no requirements/pyproject) | `sentry_sdk.init(...)` no começo do `main.py`/`app.py`, ou no `settings.py` do Django; as integrações de FastAPI, Django e Flask ligam sozinhas |
 | Flutter | `sentry_flutter` (`flutter pub add sentry_flutter`) | `main()`: `await SentryFlutter.init((o) {…}, appRunner: () => runApp(const App()))` |
 | Dart no servidor | `sentry` (`dart pub add sentry`) | `main()`: `await Sentry.init((o) {…}, appRunner: …)` |

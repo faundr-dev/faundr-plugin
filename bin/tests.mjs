@@ -70,7 +70,7 @@ const readJson = (root, rel) => {
 // go.mod, pom.xml, build.gradle, .sln/.csproj): cada parte pode ter o seu executor.
 const projectDirs = (root) => subDirs(root, (d) => fs.existsSync(path.join(root, d, 'package.json')) || PYTEST_CONFIG(root, d) || isLangProjectDir(root, d))
 // Executores que o Faundr roda fora do Node e do Python (tests-langs.mjs).
-export const LANG_RUNNERS = ['flutter', 'dart', 'phpunit', 'pest', 'go', 'maven', 'gradle', 'dotnet', 'cargo', 'ctest']
+export const LANG_RUNNERS = ['flutter', 'dart', 'phpunit', 'pest', 'go', 'maven', 'gradle', 'dotnet', 'cargo', 'ctest', 'make', 'karma']
 // pytest-cov declarado no projeto: dá para medir a cobertura do pytest.
 const hasPytestCov = (root, dir) =>
   ['requirements.txt', 'requirements-dev.txt', 'requirements_dev.txt', 'pyproject.toml', 'Pipfile', 'setup.cfg'].some((f) => /pytest-cov/.test(read(root, path.join(dir, f)) ?? ''))

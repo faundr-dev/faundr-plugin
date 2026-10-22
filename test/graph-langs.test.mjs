@@ -145,3 +145,39 @@ test('C e C++: #include acha o cabeçalho nas pastas de include; funções de ou
   assert.ok(edges.some((e) => e.fromFile === 'app/app.cpp' && e.toFile === 'libs/core/include/core/repo.hpp' && e.relation === 'imports'), 'pasta de include de uma biblioteca do projeto')
   assert.ok(edges.some((e) => e.from === 'main()' && e.to === 'soma()' && e.toFile === 'src/calc.c'), 'soma() definida em outro .c')
 })
+
+test('Vue, Svelte e Astro: o script do componente entra no mapa (imports, funções e chamadas) com a linha certa', async () => {
+  const { graph, edges } = await graphOf({
+    'package.json': '{"dependencies":{"vue":"^3.4.0"}}',
+    'src/lib/preco.ts': 'export function formata(v: number) {\n  return `R$ ${v}`\n}\n',
+    'src/components/Carrinho.vue':
+      '<template>\n  <div>{{ total }}</div>\n</template>\n\n<script setup lang="ts">\nimport { formata } from "../lib/preco"\n\nfunction total(v: number) {\n  return formata(v)\n}\n</script>\n',
+    'src/routes/+page.svelte': '<script lang="ts">\n  import Carrinho from "../components/Carrinho.vue"\n  import { formata } from "$lib/preco"\n\n  function mostra(v: number) {\n    return formata(v)\n  }\n</script>\n\n<p>{mostra(1)}</p>\n',
+    'src/pages/index.astro': '---\nimport { formata } from "../lib/preco"\nfunction titulo() {\n  return formata(2)\n}\n---\n<h1>{titulo()}</h1>\n',
+  })
+  const total = graph.nodes.find((n) => n.label === 'total()')
+  assert.ok(total, 'função do <script setup> do Vue')
+  assert.equal(total.source_location, 'L8', 'linha igual à do arquivo .vue')
+  assert.ok(edges.some((e) => e.fromFile === 'src/components/Carrinho.vue' && e.toFile === 'src/lib/preco.ts' && /import/.test(e.relation)), 'import do .vue')
+  assert.ok(edges.some((e) => e.from === 'total()' && e.to === 'formata()' && e.relation === 'calls'), 'chamada no .vue')
+  assert.ok(edges.some((e) => e.fromFile === 'src/routes/+page.svelte' && e.toFile === 'src/components/Carrinho.vue'), 'o .svelte importa o .vue')
+  assert.ok(edges.some((e) => e.from === 'mostra()' && e.to === 'formata()'), 'chamada no .svelte')
+  assert.ok(edges.some((e) => e.from === 'titulo()' && e.to === 'formata()' && e.fromFile === 'src/pages/index.astro'), 'frontmatter do .astro')
+})
+
+test('Angular: os métodos chamados no template (templateUrl ou template) viram ligação do componente', async () => {
+  const { edges } = await graphOf({
+    'angular.json': '{"projects":{}}',
+    'src/app/carrinho/carrinho.component.ts':
+      "import { Component } from '@angular/core'\n\n@Component({\n  selector: 'app-carrinho',\n  templateUrl: './carrinho.component.html',\n})\nexport class CarrinhoComponent {\n  itens: number[] = []\n  total() {\n    return 1\n  }\n  salvar() {}\n  limpar() {}\n  interno() {}\n}\n",
+    'src/app/carrinho/carrinho.component.html': '<p>Total (R$): {{ total() }}</p>\n<button (click)="salvar()">Salvar</button>\n@if (itens.length) {\n  <button (click)="limpar(); itens = []">Limpar</button>\n}\n',
+    'src/app/aviso.component.ts': "import { Component } from '@angular/core'\n\n@Component({\n  selector: 'app-aviso',\n  template: `<span [title]=\"texto()\">!</span>`,\n})\nexport class AvisoComponent {\n  texto() {\n    return 'oi'\n  }\n}\n",
+  })
+  const fromTemplate = (to) => edges.some((e) => e.from === 'carrinho.component.html' && e.to === to && e.relation === 'calls')
+  assert.ok(edges.some((e) => e.from === 'CarrinhoComponent' && e.to === 'carrinho.component.html'), 'o componente liga ao template')
+  assert.ok(fromTemplate('.total()'), '{{ total() }}')
+  assert.ok(fromTemplate('.salvar()'), '(click)="salvar()"')
+  assert.ok(fromTemplate('.limpar()'), 'dentro do @if')
+  assert.ok(!fromTemplate('.interno()'), 'método que o template não usa')
+  assert.ok(edges.some((e) => e.from === 'template' && e.fromFile === 'src/app/aviso.component.ts' && e.to === '.texto()' && e.relation === 'calls'), 'template inline')
+})

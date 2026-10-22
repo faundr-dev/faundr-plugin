@@ -5,7 +5,7 @@ import path from 'node:path'
 import { test } from 'node:test'
 import { coverageArgs, fromClover, fromCobertura, fromGoCover, fromJacoco } from '../bin/coverage.mjs'
 import { detectRunners, fromJUnit, inventory } from '../bin/tests.mjs'
-import { ctestCaseFiles, fromCargoTest, fromDartJson, fromGoJson, fromTrx, jvmCaseFiles } from '../bin/tests-langs.mjs'
+import { ctestCaseFiles, fromCargoTest, fromDartJson, fromGoJson, fromTrx, jvmCaseFiles, makeCases } from '../bin/tests-langs.mjs'
 
 function project(files) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-tl-'))
@@ -325,5 +325,40 @@ test('cargo: com cobertura roda o cargo llvm-cov gravando o lcov na pasta do Fau
   const args = coverageArgs('cargo', root)
   assert.deepEqual(args.slice(0, 2), ['--lcov', '--output-path'])
   assert.ok(args[2].endsWith(path.join('lcov.info')) && path.isAbsolute(args[2]), 'caminho completo do lcov')
-  assert.equal(coverageArgs('ctest', root), null, 'CTest ainda sem cobertura')
+  assert.deepEqual(coverageArgs('ctest', root).slice(0, 1), ['--lcov'], 'CTest: o gcovr grava o lcov')
+  assert.equal(coverageArgs('make', root), null, 'make: sem cobertura')
+})
+
+test('acha o make test/check em projeto C/C++ só com Makefile; Makefile de outro tipo de projeto e projeto CMake ficam de fora', () => {
+  const dir = project({
+    'calc/Makefile': 'CC=gcc\n\ncalc: calc.c\n\t$(CC) -o calc calc.c\n\ncheck: tests/test_calc\n\t./tests/test_calc\n',
+    'calc/calc.c': 'int soma(int a, int b) { return a + b; }\n',
+    'calc/tests/test_calc.c': 'int main(void) { return 0; }\n',
+    'web/Makefile': 'test:\n\tnpm test\n',
+    'web/package.json': '{}',
+    'motor/Makefile': 'test:\n\tctest\n',
+    'motor/CMakeLists.txt': 'project(motor)\nenable_testing()\n',
+    'motor/main.cpp': 'int main() {}\n',
+  })
+  const { runners } = detectRunners(dir, { files: [] })
+  const make = runners.filter((r) => r.runner === 'make')
+  assert.deepEqual(make.map((r) => `${r.dir}:${r.target}`), ['calc:check'])
+})
+
+test('make: lê o XML que o GoogleTest grava (com o arquivo de cada teste); sem ele, a rodada vira um teste só', () => {
+  const root = project({ 'calc/tests/calc_test.cc': 'TEST(Calc, Soma) {}\n' })
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="2" failures="1" name="AllTests">
+  <testsuite name="Calc" tests="2" failures="1">
+    <testcase name="Soma" file="${path.join(root, 'calc/tests/calc_test.cc').replace(/\\/g, '/')}" line="1" status="run" time="0.001" classname="Calc" />
+    <testcase name="Divide" file="${path.join(root, 'calc/tests/calc_test.cc').replace(/\\/g, '/')}" line="5" status="run" time="0.002" classname="Calc">
+      <failure message="Expected equality of these values:&#x0A;  divide(4, 2)&#x0A;    Which is: 3&#x0A;  2" type=""></failure>
+    </testcase>
+  </testsuite>
+</testsuites>`
+  const cases = fromJUnit(xml, root)
+  assert.deepEqual(cases.map((c) => [c.file, c.name, c.status]), [['calc/tests/calc_test.cc', 'Calc › Soma', 'passed'], ['calc/tests/calc_test.cc', 'Calc › Divide', 'failed']])
+  const plain = makeCases({ status: 2, output: 'cc -o t t.c\n./t\nFALHOU: soma(1,1) deu 3\nmake: *** [Makefile:9: check] Error 1\n', target: 'check' }, root, 'calc')
+  assert.deepEqual(plain.map((c) => [c.file, c.name, c.status]), [[null, 'make check', 'failed']])
+  assert.match(plain[0].message, /FALHOU: soma\(1,1\) deu 3/)
 })
