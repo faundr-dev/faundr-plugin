@@ -599,15 +599,16 @@ function eventTriggers(root, sid) {
   ])
 }
 
-// Fim da resposta barrado: o agente faz os passos antes de encerrar.
+// Fim da resposta barrado: o agente faz os passos antes de encerrar. A resposta anterior fica acima deste aviso no
+// chat, e quem lê costuma ler só a última: por isso a última sai completa.
 function blockStop(steps) {
   process.stdout.write(
     JSON.stringify({
       decision: 'block',
       reason:
         `[Faundr] Antes de encerrar: ${steps.map((t, i) => (steps.length > 1 ? `(${i + 1}) ${t}` : t)).join('; ')}. ` +
-        'Isto é automático, configurado pelo dono do projeto no Faundr, e não altera o código. ' +
-        'Depois encerre com um resumo curto do que foi feito, sem mencionar este aviso além de uma frase.',
+        '(Automático, configurado pelo dono do projeto no Faundr.) ' +
+        'Depois escreva a resposta final completa: a anterior fica escondida acima deste aviso, então repita dela o que o usuário precisa saber (resultado, pendências, perguntas) junto com o que estes passos mudaram, sem citar este aviso.',
     }),
   )
 }
