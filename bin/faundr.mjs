@@ -155,7 +155,7 @@ import { anonReads, dbFindings, dbSummary, exposedTables, migrationTables, parse
 import { lang, LANGS, locale, setLang, t } from './i18n.mjs'
 import { contentLangLine, ensureContentLang, languageGuidance, validContentLang } from './content-lang.mjs'
 import { agentSessionId, currentAgent, toolEdits } from './agent.mjs'
-import { codexRulesFile, syncCodexRules } from './codex-rules.mjs'
+import { codexLauncher, codexRulesFile, syncCodexRules } from './codex-rules.mjs'
 import { changesSince, createCheckpoint, currentTree, describeChanges, ensureSessionCheckpoint, findCheckpoint, gitRoot, listCheckpoints, restoreCheckpoint, restoreSummary } from './checkpoints.mjs'
 
 const CONFIG_DIR = path.join(os.homedir(), '.faundr')
@@ -664,7 +664,7 @@ async function hook(agent) {
   const event = payload.hook_event_name
   const cwd = payload.cwd ?? process.cwd()
 
-  // Regra do Codex que o setup criou: o caminho do plugin muda a cada versão.
+  // Atalho do Codex para a versão atual do plugin (o caminho muda a cada versão; a regra libera só o atalho).
   if (agent === 'codex' && event === 'SessionStart') {
     try {
       syncCodexRules(PLUGIN_ROOT)
@@ -909,11 +909,12 @@ function sessionStartContext(answer, root, sid, additionalContext, contentLang) 
 // As skills e os avisos do Faundr foram escritos para o Claude Code: no Codex, o comando faundr não está no PATH e
 // a skill não roda as linhas !`...` nem troca ${CLAUDE_PLUGIN_ROOT} e $ARGUMENTS sozinha.
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+// O comando passa pelo atalho de caminho fixo, o único que a regra do Codex libera para a rede (ver codex-rules.mjs).
 const CODEX_GUIDANCE = () => {
-  const cli = `node "${path.join(PLUGIN_ROOT, 'bin', 'faundr.mjs')}"`
+  const cli = `node "${codexLauncher()}"`
   return `[Faundr] You are running in Codex. How to read Faundr's notes and skills here:
-- "faundr <args>" means: ${cli} <args> (the faundr command is not on the PATH).
-- In Faundr's skills, \${CLAUDE_PLUGIN_ROOT} is ${PLUGIN_ROOT}; a line like !\`command\` is a command to run first with the shell, using its output as the text that would be there; $ARGUMENTS is what the user wrote after the skill name (empty if nothing).
+- "faundr <args>" means: ${cli} <args> (the faundr command is not on the PATH). In Faundr's skills, node "\${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" <args> means the same command.
+- Elsewhere in Faundr's skills, \${CLAUDE_PLUGIN_ROOT} is ${PLUGIN_ROOT}; a line like !\`command\` is a command to run first with the shell, using its output as the text that would be there; $ARGUMENTS is what the user wrote after the skill name (empty if nothing).
 - "/faundr:<name>" is the Faundr skill <name> (faundr:<name>): open its SKILL.md and follow it. "AskUserQuestion" means asking the user in chat, with numbered options and the recommended one first.
 - Faundr's commands talk to the dashboard over the network: if one fails for lack of network in the sandbox, ask to run it again with network access.`
 }
@@ -5313,7 +5314,8 @@ async function setupItems({ apply, skip, refresh }) {
   // Codex: os comandos do agente rodam sem rede na área protegida; a regra deixa só os do Faundr falarem com o painel.
   const rulesTitle = t('Codex rule', 'Regra do Codex')
   if (AGENT === 'codex' && !declined('codex-rules', rulesTitle)) {
-    if (fs.existsSync(codexRulesFile())) add({ title: rulesTitle, status: 'ok', detail: t('Faundr commands can reach the dashboard', 'os comandos do Faundr falam com o painel') })
+    // Já aprovada antes: só reescreve se o texto mudou.
+    if (fs.existsSync(codexRulesFile()) && syncCodexRules(PLUGIN_ROOT, { create: true })) add({ title: rulesTitle, status: 'ok', detail: t('Faundr commands can reach the dashboard', 'os comandos do Faundr falam com o painel') })
     else if (apply.has('codex-rules')) {
       syncCodexRules(PLUGIN_ROOT, { create: true })
       add({ title: rulesTitle, status: 'feito', detail: t(`created ${codexRulesFile()} (takes effect in the next Codex session)`, `criada em ${codexRulesFile()} (vale a partir da próxima sessão do Codex)`) })
