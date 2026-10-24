@@ -75,7 +75,7 @@ test('mede o contexto do Faundr (enviado x o que entrou) e o custo do aviso do f
 })
 
 test('consultas ao grafo: conta e lê o rodapé', () => {
-  const footer = '[Faundr] Grafo: resposta ~300 tokens; arquivos citados: 2, ~9000 tokens se lidos inteiros.'
+  const footer = '[Faundr] Graph: answer ~300 tokens; files cited: 2, ~9000 tokens if read in full.'
   const file = writeTranscript([
     assistant('g1', usage(1, 5), [{ type: 'tool_use', id: 'q', name: 'Bash', input: { command: 'faundr graph-query "como funciona o login"' } }]),
     toolResult('q', [{ type: 'text', text: `NODE x [src=a.ts]\n\n${footer}` }]),
@@ -93,7 +93,7 @@ test('rodapé do grafo: soma os arquivos citados que existem (até 2000 linhas c
   fs.writeFileSync(path.join(dir, 'src', 'a.ts'), 'a'.repeat(400))
   fs.writeFileSync(path.join(dir, 'src', 'big.ts'), 'linha\n'.repeat(5000))
   const out = 'NODE f() [src=src/a.ts loc=L1]\n  --> g() [calls] src/big.ts:L10\nNODE h [src=sumiu.ts]'
-  assert.match(graphFooter(out, dir), /arquivos citados: 2, ~3100 tokens/)
+  assert.match(graphFooter(out, dir), /files cited: 2, ~3100 tokens/)
   assert.equal(graphFooter('nada citado', dir), '')
 })
 

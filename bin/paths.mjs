@@ -3,6 +3,7 @@
 // O motor do mapa (engine/src/pipeline.ts e cache.ts) repete os caminhos de mapa/ e cache/.
 import fs from 'node:fs'
 import path from 'node:path'
+import { t } from './i18n.mjs'
 
 export const FAUNDR_DIR = '.faundr'
 
@@ -33,7 +34,7 @@ export const FILES = {
   inbox: 'cache/inbox.json',
   // Contexto e janelas de uso que o Claude Code mandou para a barra (vão ao painel no fim da resposta).
   meters: 'cache/meters.json',
-  // Prints dos pedidos da extensão do Chrome (faundr fila --print).
+  // Prints dos pedidos da extensão do Chrome (faundr inbox --print).
   requestShots: 'pedidos',
 }
 
@@ -69,10 +70,29 @@ const OLD_NAMES = {
   fingerprints: 'fingerprints.json',
 }
 
-export const README_VERSION = 2
+// v3: o LEIA-ME passou a sair na língua da pessoa (t()).
+export const README_VERSION = 3
 
-const README = `<!-- faundr-leia-me v${README_VERSION} -->
-# Pasta do Faundr
+const readmeText = () =>
+  `<!-- faundr-leia-me v${README_VERSION} -->
+${t(
+    `# Faundr folder
+
+Faundr keeps here what it needs on this computer. The folder stays out of git: the team follows everything on the dashboard.
+Do not edit by hand; Faundr rebuilds whatever is missing.
+
+| Folder | What it has | Who uses it |
+|---|---|---|
+| \`painel/\` | Local copies of the dashboard: Project overview (\`overview.json\`), feature diagram (\`diagram.json\`), architecture (\`architecture.json\`), Project stack (\`stack.json\`), Showcase (\`showcase.json\`), memory (\`memory.json\`) and per-file rules (\`rules.json\`) | The skills write the overview, the diagram, the stack and the showcase here before sending; memory and rules come from the dashboard at the start of the session |
+| \`relatorios/\` | Handoff package (\`PASSAGEM.md\`) and security report (\`relatorio-seguranca.md\`) | To read or send to someone |
+| \`mapa/\` | Code map (\`graph.json\`) and the architecture summary (\`GRAPH_REPORT.md\`) | The \`faundr graph-*\` queries; the summary only when they are not enough |
+| \`verificacoes/\` | Results of database tests, hosting variables and project tests (\`testes/\`) | The launch checklist and the quality dashboard |
+| \`cache/\` | Shortcuts to rebuild the map faster | Only Faundr; safe to delete |
+| \`state.json\` | Session state (status line, notes) | Only Faundr |
+
+The design guide (\`DESIGN.md\`) lives at the project root, next to the code.
+`,
+    `# Pasta do Faundr
 
 O Faundr guarda aqui o que precisa neste computador. A pasta fica fora do git: o time acompanha tudo pelo painel.
 Não edite à mão; o Faundr refaz o que faltar.
@@ -87,7 +107,8 @@ Não edite à mão; o Faundr refaz o que faltar.
 | \`state.json\` | Estado da sessão (barra de status, avisos) | Só o Faundr |
 
 O guia de design (\`DESIGN.md\`) fica na raiz do projeto, junto do código.
-`
+`,
+  )}`
 
 /**
  * Passa os arquivos soltos de .faundr/ (plugin antigo) para as subpastas e escreve o LEIA-ME.md. Rápido quando já
@@ -116,7 +137,7 @@ export function organizeFaundrDir(root) {
   const readme = path.join(dir, 'LEIA-ME.md')
   try {
     const cur = fs.existsSync(readme) ? fs.readFileSync(readme, 'utf8') : ''
-    if (!cur.startsWith(`<!-- faundr-leia-me v${README_VERSION} -->`)) fs.writeFileSync(readme, README)
+    if (!cur.startsWith(`<!-- faundr-leia-me v${README_VERSION} -->`)) fs.writeFileSync(readme, readmeText())
   } catch {
     // O LEIA-ME é só explicação: sem gravar, a pasta funciona igual.
   }

@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
 import { configuredHosting, envMatrix, hostingFromCli } from '../bin/env-matrix.mjs'
+import { setLang } from '../bin/i18n.mjs'
 import { publicSecretValueFindings } from '../bin/security.mjs'
 
 function project(files) {
@@ -42,6 +43,11 @@ test('sem a CLI da hospedagem, "no ar" fica como não sei', () => {
   const m = envMatrix(d, files, { cache: null })
   assert.equal(m.rows[0].hosting, null)
   assert.deepEqual(m.problems.map((p) => p.kind), ['fora-do-exemplo'])
+  setLang('pt')
+  assert.match(envMatrix(d, files, { cache: null }).problems[0].text, /não está no arquivo de exemplo/)
+  setLang('en')
+  assert.match(envMatrix(d, files, { cache: null }).problems[0].text, /is not in the example file/)
+  setLang(null)
 })
 
 test('hospedagem na configuração: wrangler, vercel, netlify e GitHub Actions de deploy', () => {

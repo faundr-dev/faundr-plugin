@@ -1,26 +1,26 @@
 ---
-description: 'Registra no Faundr um problema de design que o usuário viu (ex.: "o menu da lista abre escondido"). Vira um achado D-n na seção Design do painel.'
-argument-hint: '<o que você viu e onde>'
+description: 'Records in Faundr a design problem the user saw (e.g. "the list menu opens hidden"). It becomes a D-n finding in the Design section of the dashboard.'
+argument-hint: '<what you saw and where>'
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *)
 ---
 
-Problema relatado pelo usuário: $ARGUMENTS
+Problem reported by the user: $ARGUMENTS
 
-1. Descubra onde está no código: procure a tela/componente citado (use `faundr graph-query "<tela>"` se o projeto tiver grafo, ou busque pelo texto que aparece na tela). Se não der para saber qual tela é, pergunte ao usuário em uma frase.
-2. Classifique:
-   - `visual`: algo quebrado na tela (cortado, escondido, sobreposto, fora do centro, estourando).
-   - `responsive`: quebra no celular ou em telas menores (passa da borda, não cabe, toque difícil).
-   - `a11y`: acessibilidade (contraste baixo, foco invisível, botão sem nome para leitor de tela).
-   - `off_spec`: diferente do design.md (cor, fonte, forma, tela fora do padrão).
-   - `duplicate`: o mesmo elemento recriado em vez de reutilizar um componente.
-   - `motion`: animação lenta, estranha ou demais.
-   - `content`: texto da tela, estados vazio/carregando/erro faltando ou ruins.
-   - `identity`: ícone da aba (favicon), título da página, descrição, imagem de compartilhamento.
-   - `practice`: falta algo que deveria existir (componente base, controle que não faz nada).
-   Gravidade: `high` se impede o uso, falha acessibilidade básica ou quebra no celular; `medium` se é erro visível com contorno; `low` se é detalhe.
-   Regra: o tema do tipo + nome curto (ex.: `responsivo/largura-fixa`, `identidade/sem-favicon`).
-3. Registre com a ferramenta Bash, sem mudar o sentido do que o usuário disse; no `--detail`, o que ele viu + a causa provável que você achou no código:
-   `faundr design-finding "<título curto>" --kind <tipo> --rule <tema/nome> --severity <gravidade> --file <caminho> --line <n> --detail "<detalhes>" --manual`
+1. Find where it is in the code: look for the screen/component mentioned (use `faundr graph-query "<screen>"` if the project has a graph, or search for the text that appears on screen). If you cannot tell which screen it is, ask the user in one sentence.
+2. Classify:
+   - `visual`: something broken on screen (cut off, hidden, overlapping, off-center, overflowing).
+   - `responsive`: breaks on mobile or smaller screens (goes past the edge, does not fit, hard to tap).
+   - `a11y`: accessibility (low contrast, invisible focus, button without a name for screen readers).
+   - `off_spec`: different from design.md (color, font, shape, screen off the standard).
+   - `duplicate`: the same element recreated instead of reusing a component.
+   - `motion`: animation that is slow, odd or too much.
+   - `content`: screen text, empty/loading/error states missing or bad.
+   - `identity`: tab icon (favicon), page title, description, sharing image.
+   - `practice`: something that should exist is missing (base component, control that does nothing).
+   Severity: `high` if it prevents use, fails basic accessibility or breaks on mobile; `medium` if it is a visible error with a workaround; `low` if it is a detail.
+   Rule: the type's theme + short name (e.g. `responsivo/largura-fixa`, `identidade/sem-favicon`).
+3. Record it with the Bash tool, without changing the meaning of what the user said; in `--detail`, what they saw + the likely cause you found in the code (write it in the user's language):
+   `faundr design-finding "<short title>" --kind <type> --rule <theme/name> --severity <severity> --file <path> --line <n> --detail "<details>" --manual`
 
-Confirme em uma frase com o número D-n e diga que dá para corrigir com `/faundr:design-fix D-<n>`. Não comece a corrigir agora.
+Confirm in one sentence with the D-n number and say it can be fixed with `/faundr:design-fix D-<n>`. Do not start fixing now.

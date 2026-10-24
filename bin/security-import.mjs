@@ -4,6 +4,7 @@
 // - Security Advisor do Supabase (resposta da API /advisors/security ou do MCP get_advisors)
 // Cada ferramenta fecha só os próprios achados. Do Snyk ficam só título e link (os textos são deles).
 import { createHash } from 'node:crypto'
+import { t } from './i18n.mjs'
 
 const hash = (text) => createHash('sha256').update(text).digest('hex').slice(0, 16)
 const SEV = ['critical', 'high', 'medium', 'low']
@@ -15,14 +16,18 @@ export function parseImport(json, maskSecrets = (t) => t) {
   if (json?.runs && Array.isArray(json.runs)) return sarif(json, maskSecrets)
   const snyk = Array.isArray(json) ? json : [json]
   if (snyk.some((p) => Array.isArray(p?.vulnerabilities))) return snykOpenSource(snyk)
-  throw new Error('Formato não reconhecido. Aceito: JSON do "snyk test --json", SARIF (.sarif/.json) e o resultado do Security Advisor do Supabase.')
+  throw new Error('Unrecognized format. Accepted: JSON from "snyk test --json", SARIF (.sarif/.json) and the Supabase Security Advisor result.')
 }
 
 // Dica de correção do Snyk: o caminho de atualização sugerido, a versão corrigida ou nenhuma ainda.
 function snykFix(v, upgrade, fixed, chain) {
-  if (upgrade) return `Atualize para ${upgrade}${chain ? ` (o pacote vem de ${chain})` : ''}.`
-  if (fixed) return `Atualize ${v.packageName} para ${fixed} ou mais nova${chain ? ` (ele vem de ${chain}; atualize primeiro o ${chain.split(' > ')[0]})` : ''}.`
-  return 'Ainda não existe versão corrigida.'
+  if (upgrade) return t(`Update to ${upgrade}${chain ? ` (the package comes from ${chain})` : ''}.`, `Atualize para ${upgrade}${chain ? ` (o pacote vem de ${chain})` : ''}.`)
+  if (fixed)
+    return t(
+      `Update ${v.packageName} to ${fixed} or newer${chain ? ` (it comes from ${chain}; update ${chain.split(' > ')[0]} first)` : ''}.`,
+      `Atualize ${v.packageName} para ${fixed} ou mais nova${chain ? ` (ele vem de ${chain}; atualize primeiro o ${chain.split(' > ')[0]})` : ''}.`,
+    )
+  return t('There is no fixed version yet.', 'Ainda não existe versão corrigida.')
 }
 
 function snykOpenSource(projects) {
@@ -39,8 +44,13 @@ function snykOpenSource(projects) {
         severity: bySeverity(v.severity),
         confidence: 'high',
         title: `${v.packageName} ${v.version}: ${v.title}`,
-        detail: `O Snyk encontrou a falha ${v.id} na versão ${v.version} do pacote ${v.packageName}. Detalhes no aviso do Snyk (link abaixo).`,
-        impact: v.malicious ? 'O pacote foi marcado como malicioso.' : 'Depende de como o projeto usa o pacote; veja o aviso do Snyk.',
+        detail: t(
+          `Snyk found the flaw ${v.id} in version ${v.version} of the package ${v.packageName}. Details in the Snyk advisory (link below).`,
+          `O Snyk encontrou a falha ${v.id} na versão ${v.version} do pacote ${v.packageName}. Detalhes no aviso do Snyk (link abaixo).`,
+        ),
+        impact: v.malicious
+          ? t('The package was flagged as malicious.', 'O pacote foi marcado como malicioso.')
+          : t('Depends on how the project uses the package; see the Snyk advisory.', 'Depende de como o projeto usa o pacote; veja o aviso do Snyk.'),
         fix: snykFix(v, upgrade, fixed, chain),
         file,
         package: v.packageName,
@@ -94,10 +104,10 @@ function sarif(doc, maskSecrets) {
         rule_id: String(r.ruleId ?? rule.id ?? 'sarif').slice(0, 200),
         severity,
         confidence: 'medium',
-        title: title || 'Problema apontado pela ferramenta',
-        detail: `${run.tool?.driver?.name ?? 'A ferramenta'} apontou: ${message}`.slice(0, 3000),
+        title: title || t('Issue flagged by the tool', 'Problema apontado pela ferramenta'),
+        detail: t(`${run.tool?.driver?.name ?? 'The tool'} flagged: ${message}`, `${run.tool?.driver?.name ?? 'A ferramenta'} apontou: ${message}`).slice(0, 3000),
         impact: maskSecrets(String(rule.fullDescription?.text ?? rule.help?.text ?? '')).slice(0, 1500),
-        fix: maskSecrets(String(rule.help?.text ?? rule.help?.markdown ?? '')).slice(0, 3000) || 'Veja a regra na documentação da ferramenta.',
+        fix: maskSecrets(String(rule.help?.text ?? rule.help?.markdown ?? '')).slice(0, 3000) || t("See the rule in the tool's documentation.", 'Veja a regra na documentação da ferramenta.'),
         file,
         line,
         snippet: loc?.region?.snippet?.text ? maskSecrets(loc.region.snippet.text.trim()).slice(0, 240) : null,
@@ -129,9 +139,9 @@ export function supabaseAdvisors(lints) {
         severity: advisorSeverity(l.level),
         confidence: 'high',
         title: `${l.title}${obj ? `: ${obj}` : ''}`.slice(0, 280),
-        detail: `O Security Advisor do Supabase apontou: ${l.detail ?? l.description ?? l.title}`.slice(0, 3000),
+        detail: t(`The Supabase Security Advisor flagged: ${l.detail ?? l.description ?? l.title}`, `O Security Advisor do Supabase apontou: ${l.detail ?? l.description ?? l.title}`).slice(0, 3000),
         impact: String(l.description ?? '').slice(0, 1500),
-        fix: `Siga a orientação do Supabase: ${l.remediation ?? 'https://supabase.com/docs/guides/database/database-linter'}`,
+        fix: t(`Follow Supabase's guidance: ${l.remediation ?? 'https://supabase.com/docs/guides/database/database-linter'}`, `Siga a orientação do Supabase: ${l.remediation ?? 'https://supabase.com/docs/guides/database/database-linter'}`),
         file: null,
         line: null,
         advisory_url: l.remediation ?? null,

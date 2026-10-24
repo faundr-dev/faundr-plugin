@@ -21,6 +21,7 @@ test('medição vira um achado por regra, com a tela e a largura no título', ()
       borda: [],
     },
     'Projetos',
+    'pt',
   )
   assert.deepEqual(
     findings.map((f) => [f.rule, f.severity]),

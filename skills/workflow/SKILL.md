@@ -1,38 +1,38 @@
 ---
-description: Desenha um workflow do projeto no Faundr — como o time quer que o Claude trabalhe num tipo de pedido ("sempre que for de design, faça isto e aquilo"). Salva como rascunho para o dono aprovar e editar no canvas do painel. Use quando o usuário pedir, ou quando você perceber um jeito de trabalhar que se repete no projeto (o mesmo roteiro de passos em pedidos parecidos) ou que o usuário descreveu como "sempre faço assim".
-argument-hint: [o que o fluxo faz ou quando usar]
+description: Draws a project workflow in Faundr — how the team wants Claude to work on a type of request ("whenever it is about design, do this and that"). Saves it as a draft for the owner to approve and edit on the dashboard canvas. Use when the user asks, or when you notice a way of working that repeats in the project (the same sequence of steps on similar requests) or that the user described as "I always do it this way".
+argument-hint: [what the flow does or when to use it]
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *)
 ---
 
-Pedido do usuário: $ARGUMENTS
+User request: $ARGUMENTS
 
-Workflow é o roteiro que o Claude segue quando um pedido bate com um assunto. Você só **cria rascunho**: aprovar, editar, desligar e apagar ficam com o dono, no painel (Workflows). Nunca diga que o workflow já vale.
+A workflow is the script Claude follows when a request matches a topic. You only **create a draft**: approving, editing, turning off and deleting are up to the owner, in the dashboard (Workflows). Never say the workflow is already in effect.
 
-1. **Confira se já existe.** Rode `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" workflow list`. Se um deles já cobre o assunto, mostre qual (W-n) e pare; mudar um workflow é no painel.
-2. **Pergunte só se estiver vago.** Se não der para saber quando ele vale ou quais são os passos, faça uma pergunta curta (com opções). Se você está propondo por ter percebido um padrão, mostre os passos em uma lista e pergunte se pode salvar o rascunho.
-3. **Monte os passos** na ordem em que você seguiria. Cada passo é um `--step`, com o tipo na frente quando não for uma instrução comum:
-   - instrução: `"Buscar repositórios parecidos no GitHub — 3 a 5, com licença aberta"`
-   - skill do Faundr: `"skill: /faundr:design — auditar as telas mexidas"`
-   - agentes em paralelo: `"agentes 2: ler o código — um por área, cada um devolve o que vale copiar"`
-   - comando exato: `"comando: git clone --depth 1 <url> ../referencias/<nome>"`
-   - perguntar ao dono antes de seguir: `"perguntar: qual dos repositórios clonar?"`
-   - esperar algo acontecer: `"esperar: os testes passarem"`
-   - passos que rodam ao mesmo tempo: `"paralelo: skill: faundr:design | skill: faundr:browse | comando: npm test"`
-   O detalhe vai depois de ` — `. Para skills, use o nome como aparece em `faundr skills list` (ex.: `faundr:design`, `tdd`): elas viram a peça de skill com a origem certa no canvas. O rascunho já nasce com gatilho e fim; decisões (sim/não) o dono desenha no canvas. Passos curtos e verificáveis; de 3 a 8 costuma bastar.
-4. **Quando usar e assuntos.** `--when` é uma frase que o Claude lê no início de toda sessão. Cada `--topic` é uma palavra ou expressão que, aparecendo no pedido, traz os passos (ex.: `design`, `tela`, `copiar funcionalidade`). Use `--file` com uma pasta ou padrão (ex.: `src/components/**`) quando o workflow vale para quem edita aquela parte.
-5. Salve:
-   `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" workflow draft "<nome curto>" --when "<quando usar>" --topic "<assunto>" --topic "<assunto>" --step "<passo>" --step "<passo>"`
+1. **Check whether it already exists.** Run `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" workflow list`. If one of them already covers the topic, show which (W-n) and stop; changing a workflow is done in the dashboard.
+2. **Ask only if it is vague.** If you cannot tell when it applies or what the steps are, ask a short question (with options). If you are proposing it because you noticed a pattern, show the steps in a list and ask whether you can save the draft.
+3. **Build the steps** in the order you would follow them. Each step is a `--step`, with the type in front when it is not a plain instruction (write the step text in the user's language; keep the type prefixes exactly as shown):
+   - instruction: `"Search GitHub for similar repositories — 3 to 5, with an open license"`
+   - Faundr skill: `"skill: /faundr:design — audit the screens touched"`
+   - parallel agents: `"agentes 2: read the code — one per area, each returns what is worth copying"`
+   - exact command: `"comando: git clone --depth 1 <url> ../referencias/<nome>"`
+   - ask the owner before continuing: `"perguntar: which of the repositories to clone?"`
+   - wait for something to happen: `"esperar: the tests to pass"`
+   - steps that run at the same time: `"paralelo: skill: faundr:design | skill: faundr:browse | comando: npm test"`
+   The detail goes after ` — `. For skills, use the name as it appears in `faundr skills list` (e.g. `faundr:design`, `tdd`): they become the skill block with the right origin on the canvas. The draft is born with a trigger and an end; decisions (yes/no) the owner draws on the canvas. Short, verifiable steps; 3 to 8 is usually enough.
+4. **When to use and topics.** `--when` is a sentence Claude reads at the start of every session. Each `--topic` is a word or phrase that, appearing in the request, brings in the steps (e.g. `design`, `screen`, `copy feature`). Use `--file` with a folder or pattern (e.g. `src/components/**`) when the workflow applies to whoever edits that part.
+5. Save:
+   `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" workflow draft "<short name>" --when "<when to use>" --topic "<topic>" --topic "<topic>" --step "<step>" --step "<step>"`
 
-Confirme em uma frase: o rascunho W-n foi salvo e passa a valer quando o dono aprovar no painel, em Workflows, onde ele também pode mudar os passos e as ligações no canvas.
+Confirm in one sentence: draft W-n was saved and takes effect when the owner approves it in the dashboard, under Workflows, where they can also change the steps and the connections on the canvas.
 
-## Seguindo um workflow
+## Following a workflow
 
-Quando um workflow ativo chegar no seu contexto ("Este pedido bate com um workflow"), leia os passos com `faundr workflow show <W-n>` e siga na ordem. O time acompanha no canvas do painel, ao vivo, então marque o progresso:
+When an active workflow arrives in your context ("Este pedido bate com um workflow"), read the steps with `faundr workflow show <W-n>` and follow them in order. The team watches on the dashboard canvas, live, so mark the progress:
 
-- Ao começar: `faundr workflow run <W-n> --why "<o pedido em uma linha>"` (o passo 1 fica em andamento).
-- Ao entrar em cada passo: `faundr workflow step <W-n> <número>` (os anteriores ficam como feitos).
-- Passo "perguntar ao dono": `faundr workflow step <W-n> <número> --wait --note "<a pergunta>"`, faça a pergunta e espere. O canvas mostra que é a vez do dono.
-- Passo que não se aplica ao pedido: `faundr workflow step <W-n> <número> --skip --note "<por quê>"`. Nunca pule calado.
-- No fim: `faundr workflow done <W-n> --note "<o resultado em uma linha>"`. Se o dono mandar parar: `faundr workflow stop <W-n>`.
+- When starting: `faundr workflow run <W-n> --why "<the request in one line>"` (step 1 goes in progress).
+- When entering each step: `faundr workflow step <W-n> <number>` (the previous ones are marked done).
+- "Ask the owner" step: `faundr workflow step <W-n> <number> --wait --note "<the question>"`, ask the question and wait. The canvas shows it is the owner's turn.
+- Step that does not apply to the request: `faundr workflow step <W-n> <number> --skip --note "<why>"`. Never skip silently.
+- At the end: `faundr workflow done <W-n> --note "<the result in one line>"`. If the owner says to stop: `faundr workflow stop <W-n>`.
 
-Passos de skill, de comando e de agentes se marcam sozinhos quando você chama a skill, o comando termina bem ou abre os agentes; mesmo assim, marque os outros (tarefa, perguntar, esperar, decisão). Um comando por passo basta; não marque passos que não fez.
+Skill, command and agent steps mark themselves when you call the skill, the command finishes successfully or you open the agents; even so, mark the others (task, ask, wait, decision). One command per step is enough; do not mark steps you did not do.

@@ -187,15 +187,15 @@ export function showcaseStatus(root, showcase) {
 /** Prepara o envio: valida o formato, carimba a impressão digital de cada componente e junta CSS e fontes. */
 export function buildShowcase(root, showcase) {
   const problems = []
-  if (!showcase || !Array.isArray(showcase.components)) problems.push('o arquivo precisa ter "components": [...]')
+  if (!showcase || !Array.isArray(showcase.components)) problems.push('the file needs "components": [...]')
   const components = (showcase?.components ?? []).map((c, i) => {
     const where = `components[${i}]${c?.name ? ` (${c.name})` : ''}`
-    if (!c?.name) problems.push(`${where}: falta "name"`)
-    if (!Array.isArray(c?.variants) || !c.variants.length) problems.push(`${where}: falta "variants" com pelo menos uma`)
-    for (const [j, v] of (c?.variants ?? []).entries()) if (!v?.html?.trim()) problems.push(`${where}.variants[${j}]: falta "html"`)
+    if (!c?.name) problems.push(`${where}: missing "name"`)
+    if (!Array.isArray(c?.variants) || !c.variants.length) problems.push(`${where}: missing "variants" with at least one`)
+    for (const [j, v] of (c?.variants ?? []).entries()) if (!v?.html?.trim()) problems.push(`${where}.variants[${j}]: missing "html"`)
     const files = componentFiles(c ?? {})
-    for (const f of files) if (!fs.existsSync(path.join(root, f))) problems.push(`${where}: arquivo não existe: ${f}`)
-    if (/<script\b/i.test(JSON.stringify(c?.variants ?? []))) problems.push(`${where}: réplica não pode ter <script> (é só visual)`)
+    for (const f of files) if (!fs.existsSync(path.join(root, f))) problems.push(`${where}: file does not exist: ${f}`)
+    if (/<script\b/i.test(JSON.stringify(c?.variants ?? []))) problems.push(`${where}: a replica cannot have <script> (it is only visual)`)
     return { ...c, files, fingerprint: files.length ? fingerprint(root, files) : undefined }
   })
   const runtime = detectRuntime(root)

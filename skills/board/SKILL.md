@@ -1,9 +1,9 @@
 ---
-description: Mostra as funcionalidades do projeto no Faundr e o checklist de cada uma.
+description: Shows the project's features in Faundr and each one's checklist.
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *)
 ---
 
 !`node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" board --all`
 
-Resuma: qual funcionalidade está em andamento, quanto já foi feito e qual é a próxima tarefa.
+Summarize: which feature is in progress, how much has been done and what the next task is.

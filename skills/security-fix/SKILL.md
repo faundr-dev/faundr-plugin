@@ -1,68 +1,68 @@
 ---
-description: Corrige um problema de segurança registrado no Faundr (S-n, ou todos os de um pacote) e só dá como resolvido quando a checagem não encontra mais o problema. Sem argumento, corrige os críticos e altos abertos, um de cada vez; com --all, corrige todos os abertos, sem parar.
-argument-hint: '"[S-<n> | nome-do-pacote | --all]"'
+description: Fixes a security problem recorded in Faundr (S-n, or all of a package's) and only marks it resolved when the check no longer finds the problem. With no argument, fixes the open critical and high ones, one at a time; with --all, fixes all the open ones, without stopping.
+argument-hint: '"[S-<n> | package-name | --all]"'
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *) Bash(npm install *) Bash(npm update *) Bash(npm ls *) Bash(npx tsc *) Bash(npm run *) Bash(git diff *) Read Grep Glob Edit Write
 ---
 
-## Problema a corrigir
+## Problem to fix
 
-Argumentos: `$ARGUMENTS`
+Arguments: `$ARGUMENTS`
 
 !`node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" security-show $ARGUMENTS`
 
-Se aparecer erro, "corrigido" ou "Nenhum problema", avise o usuário e pare. Sem argumento, a lista acima são os problemas abertos: trabalhe só nos **críticos e altos**, um de cada vez, na ordem da lista (rode `faundr security-show S-<n>` para ver cada um). Com `--all`, trabalhe em **todos** os da lista, de qualquer gravidade, seguindo o "Modo --all" no fim.
+If an error, "fixed" or "No open security problems" shows up, tell the user and stop. With no argument, the list above is the open problems: work only on the **critical and high** ones, one at a time, in list order (run `faundr security-show S-<n>` to see each one). With `--all`, work on **all** of the list, of any severity, following "--all mode" at the end. The ones in the **Needs check** part aren't confirmed problems yet: don't fix them (not even with `--all`). If someone asks for a Needs check S-n, say what still needs to be known and offer `/faundr:security S-<n>` to recheck it first.
 
-## Regras
+## Rules
 
-- Corrija só o que está descrito. Não refatore o que não foi apontado.
-- Não invente número de versão nem nome de pacote: use exatamente os valores informados.
-- Se o problema estiver em arquivo de teste, exemplo ou documentação, diga isso em vez de alterar o arquivo.
-- Ao terminar, liste o que foi alterado e o que ficou de fora, com o motivo.
+- Fix only what is described. Don't refactor what wasn't pointed out.
+- Don't make up a version number or package name: use exactly the values given.
+- If the problem is in a test file, example or documentation, say so instead of changing the file.
+- When done, list what was changed and what was left out, with the reason.
 
-## Como corrigir, por tipo
+## How to fix, by type
 
-**Chave ou senha no código**
-1. Tire o valor do código: coloque no `.env` (ou `.env.local`), confira que o `.gitignore` cobre `.env*`, e leia com `process.env.NOME` (no servidor). Nunca use prefixo público (`NEXT_PUBLIC_`, `VITE_`…) para segredo.
-2. Diga ao usuário, com destaque, que ele **precisa trocar a chave no provedor** (o link está em "Como resolver"): tirar do código não basta, ela pode já ter vazado, inclusive pelo histórico do git. Você não consegue fazer isso por ele.
-3. `.env` no git: `git rm --cached <arquivo>` (o arquivo continua no disco) e ajuste o `.gitignore`. Não reescreva o histórico do git sem o usuário pedir.
+**Key or password in the code**
+1. Take the value out of the code: put it in `.env` (or `.env.local`), check that `.gitignore` covers `.env*`, and read it with `process.env.NAME` (on the server). Never use a public prefix (`NEXT_PUBLIC_`, `VITE_`…) for a secret.
+2. Tell the user, prominently, that they **need to rotate the key at the provider** (the link is in "How to fix"): taking it out of the code isn't enough, it may already have leaked, including through the git history. You can't do this for them.
+3. `.env` in git: `git rm --cached <file>` (the file stays on disk) and adjust `.gitignore`. Don't rewrite git history without the user asking.
 
-**Pacote com falha conhecida**
-1. Veja quem trouxe o pacote (`faundr` mostra "Vem de"; confirme com `npm ls <pacote>`).
-2. Estratégia, nesta ordem: (a) dependência direta: `npm install <pacote>@^<versão corrigida>`; (b) veio de outro pacote: atualize o pacote pai (`npm update <pai>` ou uma versão nova dele); (c) só se (a) e (b) não resolverem: `overrides` no package.json forçando a versão corrigida.
-3. Risco de quebra: salto de patch (1.2.3 → 1.2.9) aplique; minor (1.2 → 1.4) aplique e rode o build/testes; major (1.x → 2.x) explique o risco e pergunte ao usuário antes.
-4. Pacote malicioso: remova, apague `node_modules`, reinstale, e avise o usuário para trocar as chaves e senhas daquele computador.
+**Package with a known flaw**
+1. See who brought in the package (`faundr` shows "Vem de" (comes from); confirm with `npm ls <package>`).
+2. Strategy, in this order: (a) direct dependency: `npm install <package>@^<fixed version>`; (b) came from another package: update the parent package (`npm update <parent>` or a new version of it); (c) only if (a) and (b) don't solve it: `overrides` in package.json forcing the fixed version.
+3. Breakage risk: patch jump (1.2.3 → 1.2.9) apply it; minor (1.2 → 1.4) apply it and run the build/tests; major (1.x → 2.x) explain the risk and ask the user first.
+4. Malicious package: remove it, delete `node_modules`, reinstall, and tell the user to rotate the keys and passwords on that computer.
 
-**Banco de dados (Supabase)**
-1. Nunca edite uma migration antiga que já rodou: crie uma migration nova (ex.: `supabase/migrations/<data>_seguranca.sql`).
-2. Tabela sem RLS: `alter table public.<t> enable row level security;` + políticas que confiram o dono, ex.: `using ((select auth.uid()) = user_id)`. Confira no código se o app lê essa tabela e se as políticas novas não bloqueiam o uso normal.
-3. Política com `true`: `drop policy` + `create policy` com a condição do dono.
-4. Mostre a migration ao usuário antes de aplicar no banco.
+**Database (Supabase)**
+1. Never edit an old migration that has already run: create a new migration (e.g. `supabase/migrations/<date>_security.sql`).
+2. Table without RLS: `alter table public.<t> enable row level security;` + policies that check the owner, e.g. `using ((select auth.uid()) = user_id)`. Check in the code whether the app reads this table and whether the new policies don't block normal use.
+3. Policy with `true`: `drop policy` + `create policy` with the owner condition.
+4. Show the migration to the user before applying it to the database.
 
-**Código e configuração (checagem automática ou revisão com IA)**
-1. Siga o "Como resolver" do problema e o tema correspondente do catálogo (`${CLAUDE_PLUGIN_ROOT}/skills/security/catalog/`), com a correção mínima.
-2. Acesso a dados (IDOR, rota sem login): confira o usuário logado no servidor e compare com o dono do dado antes de ler, alterar ou apagar; nunca confie num id ou `user_id` vindo do cliente.
-3. Limite de pedidos (rate limit): use o que a plataforma do projeto oferece (Cloudflare: binding de Rate Limiting do Workers; Vercel/Node: `@upstash/ratelimit`; Express: `express-rate-limit`), comece pelas rotas sensíveis (login, cadastro, e-mail, IA, escrita) e responda 429. Se precisar de conta ou configuração nova no provedor, explique ao usuário e pergunte antes.
-4. Cabeçalhos de segurança: adicione no lugar onde o projeto já monta as respostas (middleware, `headers()` do Next, `_headers`), com a CSP primeiro em modo Report-Only.
+**Code and configuration (automatic check or AI review)**
+1. Follow the problem's "How to fix" and the matching catalog theme (`${CLAUDE_PLUGIN_ROOT}/skills/security/catalog/`), with the minimal fix.
+2. Data access (IDOR, route without login): check the logged-in user on the server and compare with the data's owner before reading, changing or deleting; never trust an id or `user_id` coming from the client.
+3. Request limit (rate limit): use what the project's platform offers (Cloudflare: Workers Rate Limiting binding; Vercel/Node: `@upstash/ratelimit`; Express: `express-rate-limit`), start with the sensitive routes (login, sign-up, email, AI, writes) and respond 429. If it needs a new account or configuration at the provider, explain to the user and ask first.
+4. Security headers: add them where the project already builds its responses (middleware, Next's `headers()`, `_headers`), with the CSP first in Report-Only mode.
 
-## Verificar e fechar
+## Verify and close
 
-1. O projeto compila (e os testes passam, se existirem).
-2. Rode com a ferramenta Bash: `faundr security-resolve S-<n>` para cada problema corrigido. Nos da checagem automática, ele refaz a checagem e só fecha se o problema sumiu; se disser que ainda aparece, revise a correção. Nos da revisão com IA, releia o código corrigido e feche com `faundr security-resolve S-<n> --verified "<o que mudou e como conferiu>"`.
-3. Se aparecer um problema que é alarme falso, **não** ignore por conta própria: explique ao usuário e sugira ignorar pelo painel (seção Segurança) ou com `faundr security-ignore S-<n> --reason nao-e-problema --note "<por quê>"`, se ele concordar.
+1. The project compiles (and the tests pass, if there are any).
+2. Run with the Bash tool: `faundr security-resolve S-<n>` for each fixed problem. For automatic check findings, it reruns the check and only closes if the problem is gone; if it says it still shows up, review the fix. For AI review findings, reread the fixed code and close with `faundr security-resolve S-<n> --verified "<what changed and how you checked>"`.
+3. If a problem turns out to be a false alarm, **don't** ignore it on your own: explain to the user and suggest ignoring it from the dashboard (Security section) or with `faundr security-ignore S-<n> --reason not-an-issue --note "<why>"`, if they agree.
 
-## Modo --all (todos, sem parar)
+## --all mode (all of them, without stopping)
 
-O usuário pediu para resolver tudo de uma vez: **não pare para perguntar** entre um problema e outro. Comece na hora, pelos críticos e altos, depois o resto.
+The user asked to resolve everything at once: **don't stop to ask** between one problem and the next. Start right away, with the critical and high ones, then the rest.
 
-- **Um por vez, na ordem da lista**, com as regras e o "Verificar e fechar" acima. Problemas do mesmo pacote saem numa atualização só. A cada problema fechado, uma linha só: `S-<n> corrigido (<feitos>/<total>): <o que mudou>`.
-- **O que precisaria do usuário não trava o resto**: salto de versão major, aplicar migration no banco (escreva a migration, não aplique), conta ou configuração nova no provedor, alarme falso a ignorar. Não faça; anote em "Esperam você", com o plano em uma linha, e siga para o próximo. Chave no código: tire do código normalmente e anote a troca no provedor em "Esperam você".
-- **Quebrou e não sai em 2 tentativas** (compilação, teste, ou `security-resolve` diz que ainda aparece): desfaça só a mudança daquele problema, anote em "Não deu" com o motivo e siga.
-- **Não termine a resposta enquanto houver problema aberto** que não esteja em "Esperam você" ou "Não deu". Se a conversa for resumida no meio do caminho, rode `faundr security-show` de novo: os corrigidos já saíram da lista, e ela é o que falta.
-- **No fim**, rode `faundr security-show` mais uma vez e corrija o que tiver aparecido de novo. Não faça commit.
+- **One at a time, in list order**, with the rules and "Verify and close" above. Problems from the same package go out in a single update. For each problem closed, a single line: `S-<n> fixed (<done>/<total>): <what changed>`.
+- **What would need the user doesn't block the rest**: major version jump, applying a migration to the database (write the migration, don't apply it), new account or configuration at the provider, a false alarm to ignore. Don't do it; note it under "Waiting on you", with the plan in one line, and move on to the next. Key in the code: take it out of the code normally and note the rotation at the provider under "Waiting on you".
+- **Broke and won't come out in 2 attempts** (compilation, test, or `security-resolve` says it still shows up): undo only that problem's change, note it under "Couldn't do" with the reason and move on.
+- **Don't end the response while there's an open problem** that isn't under "Waiting on you" or "Couldn't do". If the conversation gets summarized midway, run `faundr security-show` again: the fixed ones have left the list, and it's what remains.
+- **At the end**, run `faundr security-show` once more and fix whatever showed up again. Don't commit.
 
-Resposta final do modo --all: quantos corrigidos e as listas "Esperam você" (com destaque para chaves a trocar e migrations a aplicar) e "Não deu", com o S-n e uma linha cada.
+Final answer in --all mode: how many fixed and the "Waiting on you" (highlighting keys to rotate and migrations to apply) and "Couldn't do" lists, with the S-n and one line each.
 
-## Resposta
+## Answer
 
-Responda em poucas linhas: o que estava errado, o que mudou, como foi verificado e o que o usuário ainda precisa fazer (ex.: trocar a chave no provedor).
+Answer in a few lines, in the user's language: what was wrong, what changed, how it was verified and what the user still needs to do (e.g. rotate the key at the provider).

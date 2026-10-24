@@ -13,6 +13,9 @@ const FEATURE = [
   'pode ir para a fase 2 do plano',
   'siga para a próxima etapa da funcionalidade',
   'Quero ir para uma nova funcionalidade antes de refinar as que já temos, sobre qualidade do código',
+  "Let's create a new settings tab for the project configuration",
+  'I want to add a light mode to the dashboard, careful with pure white',
+  'go ahead to phase 2 of the plan',
 ]
 const NOT_FEATURE = [
   'pode',
@@ -25,6 +28,9 @@ const NOT_FEATURE = [
   'This session is being continued from a previous conversation that ran out of context.',
   '/faundr:feature criar o carrinho de compras',
   'quero saber o que a gente utilizou do repositório novo, o que foi adicionado?',
+  'how does the plugin login work today, can we add more?',
+  'commit everything and publish the plugin',
+  "the save button doesn't work when I click twice",
 ]
 
 test('pedido de funcionalidade nova: avisa', () => {
@@ -36,9 +42,9 @@ test('pergunta, rotina e conserto: não avisa', () => {
 })
 
 test('aviso: cita a funcionalidade atual só quando há uma, e pede critério de pronto e etapas', () => {
-  assert.match(featureNudge('Carrinho'), /continuação da funcionalidade atual \("Carrinho"\)/)
-  assert.doesNotMatch(featureNudge(null), /funcionalidade atual/)
+  assert.match(featureNudge('Carrinho'), /continues the current feature \("Carrinho"\)/)
+  assert.doesNotMatch(featureNudge(null), /current feature/)
   assert.match(featureNudge(null), /--done-when/)
-  assert.match(featureNudge(null), /--after atual/)
+  assert.match(featureNudge(null), /--after current/)
   assert.match(featureNudge(null), /faundr:planning/)
 })

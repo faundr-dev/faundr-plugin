@@ -5,6 +5,10 @@ import path from 'node:path'
 import { test } from 'node:test'
 import { runRules } from '../bin/design-rules.mjs'
 import { isUiFile, uiFiles } from '../bin/design.mjs'
+import { setLang } from '../bin/i18n.mjs'
+
+// Os títulos dos achados saem na língua da pessoa: o teste fixa o português.
+setLang('pt')
 
 function project(files) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-df-'))
@@ -64,6 +68,14 @@ test('Flutter: cor e fonte fixas, botão sem tooltip e sem ação, imagem sem de
   assert.deepEqual(rules('test/widget_test.dart'), [])
   // Um botão sem tooltip e uma imagem sem descrição (as outras duas têm).
   assert.equal(findings.find((f) => f.rule === 'acessibilidade/botao-sem-tooltip').title, 'Botão só com ícone, sem nome para leitor de tela')
+  setLang('en')
+  try {
+    const en = runRules(dir, { uiExt: /\.(tsx|jsx|vue|svelte|astro)$/, designMdPath: null, designMd: '', tokens: null }).findings
+    assert.equal(en.find((f) => f.rule === 'acessibilidade/botao-sem-tooltip').title, 'Icon-only button with no name for screen readers')
+    assert.match(en.find((f) => f.rule === 'identidade/titulo-do-modelo').title, /^The app title is still the template one/)
+  } finally {
+    setLang('pt')
+  }
   assert.ok(uiFiles(dir).includes('lib/main.dart'))
   assert.ok(isUiFile('lib/telas/home.dart') && !isUiFile('lib/main.g.dart') && !isUiFile('bin/cli.dart'))
 })

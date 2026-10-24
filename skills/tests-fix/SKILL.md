@@ -1,48 +1,48 @@
 ---
-description: Conserta testes falhando ou instáveis registrados no Faundr — explica a falha em português simples, descobre se o erro está no código ou no teste, conserta a causa (nunca apaga, pula ou afrouxa o teste só para passar) e confirma rodando de novo com faundr tests-run. Sem argumento, trabalha nos que estão falhando e instáveis, um de cada vez; com --all, conserta todos, sem parar.
-argument-hint: '"[nome do teste ou arquivo | --all]"'
+description: Fixes failing or flaky tests recorded in Faundr — explains the failure in plain language, finds out whether the error is in the code or in the test, fixes the cause (never deletes, skips or loosens the test just to make it pass) and confirms by running again with faundr tests-run. With no argument, works on the failing and flaky ones, one at a time; with --all, fixes all of them without stopping.
+argument-hint: '"[test name or file | --all]"'
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *) Bash(npm test*) Bash(npm run *) Bash(npx vitest *) Bash(npx jest *) Bash(npx playwright *) Bash(git diff *) Bash(git log *) Read Grep Glob Edit
 ---
 
-## Contexto
+## Context
 
 !`node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" tests-context --fix`
 
-O alvo: $ARGUMENTS (sem argumento ou com `--all`: os testes FALHANDO e INSTÁVEIS do contexto, um de cada vez, os falhando primeiro; com `--all`, siga também o "Modo --all" no fim).
+The target: $ARGUMENTS (no argument or with `--all`: the FALHANDO and INSTÁVEIS tests in the context, one at a time, failing ones first; with `--all`, also follow "--all mode" at the end).
 
-Leia as seções "Consertar teste falhando" e "Consertar teste instável" do **guia** (caminho no contexto).
+Read the **guide**'s sections on fixing a failing test and fixing a flaky test (path in the context).
 
-## Teste falhando
+## Failing test
 
-1. **Rode só ele** para ver a falha atual: `faundr tests-run --files <arquivo>`.
-2. **Explique ao dono em uma ou duas frases**, em português simples, o que o teste confere e o que deu errado (ex.: "o teste espera frete grátis acima de R$ 100, mas o app está cobrando R$ 15 em compras de exatamente R$ 100"). No Playwright, abra a captura de tela da falha se o caminho aparecer.
-3. **De que lado está o erro?** Veja o que mudou (`git log -p -- <arquivo do código>`, `git diff`):
-   - o código mudou de propósito e o teste ficou velho → atualize o teste e **diga por quê**;
-   - o código quebrou → conserte o código (na causa; procure quem mais chama a função);
-   - não dá para saber qual é o certo → **pergunte ao dono** qual é o comportamento esperado, com as duas opções.
-4. **Nunca**: apagar o teste, `.skip`, `.only`, afrouxar o `expect`, mudar o valor esperado sem explicar, aumentar o tempo limite como "solução".
-5. Rode de novo o arquivo e, no fim, todos (`faundr tests-run`): o conserto não pode quebrar outro teste. Um teste que voltou a passar fecha sozinho o erro dele na seção Erros.
+1. **Run only that one** to see the current failure: `faundr tests-run --files <file>`.
+2. **Explain to the owner in one or two sentences**, in plain language, what the test checks and what went wrong (e.g. "the test expects free shipping above $100, but the app is charging $15 on purchases of exactly $100"). In Playwright, open the failure screenshot if the path appears.
+3. **Which side is the error on?** Look at what changed (`git log -p -- <code file>`, `git diff`):
+   - the code changed on purpose and the test became stale → update the test and **say why**;
+   - the code broke → fix the code (at the cause; look for who else calls the function);
+   - you cannot tell which is right → **ask the owner** what the expected behavior is, with the two options.
+4. **Never**: delete the test, `.skip`, `.only`, loosen the `expect`, change the expected value without explaining, raise the timeout as a "solution".
+5. Run the file again and, at the end, all of them (`faundr tests-run`): the fix cannot break another test. A test that passes again closes its error in the Errors section on its own.
 
-## Teste instável (passa e falha sem o código mudar)
+## Flaky test (passes and fails without the code changing)
 
-1. Procure as causas típicas do guia, nesta ordem: espera com tempo fixo; data e hora reais; rede ou serviço real; dependência de outro teste (dado que sobrou, ordem); sorteio sem semente; corrida.
-2. Conserte a causa (relógio falso, esperar o resultado em vez do relógio, dado criado no próprio teste, simular o serviço de fora).
-3. Confirme rodando o arquivo umas 5 vezes seguidas (`faundr tests-run --files <arquivo>`): tem que passar todas.
-4. **Nunca** "resolva" aumentando `retries` ou o tempo limite.
+1. Look for the guide's typical causes, in this order: fixed-time wait; real date and time; real network or service; dependence on another test (leftover data, order); randomness without a seed; race.
+2. Fix the cause (fake clock, wait for the result instead of the clock, data created in the test itself, mock the external service).
+3. Confirm by running the file about 5 times in a row (`faundr tests-run --files <file>`): it has to pass every time.
+4. **Never** "solve" it by raising `retries` or the timeout.
 
-## Modo --all (todos, sem parar)
+## --all mode (all of them, without stopping)
 
-O usuário pediu para consertar tudo de uma vez: **não pare para perguntar** entre um teste e outro. Comece na hora.
+The user asked to fix everything at once: **do not stop to ask** between one test and the next. Start right away.
 
-- **Um por vez**, falhando primeiro e instáveis depois, com os passos acima. A cada teste consertado, uma linha só: `<teste> consertado (<feitos>/<total>): <lado do erro, o que mudou>`.
-- **O que precisaria do dono não trava o resto**: quando não dá para saber qual comportamento é o certo (passo 3), não escolha; anote em "Esperam você" com as duas opções em uma linha e siga para o próximo.
-- **Não sai em 2 tentativas**: desfaça só a mudança daquele teste, anote em "Não deu" com o motivo e siga.
-- **Não termine a resposta enquanto houver teste falhando ou instável** que não esteja em "Esperam você" ou "Não deu". Se a conversa for resumida no meio do caminho, rode `faundr tests-context --fix` de novo: ele mostra o que falta.
-- **No fim**, rode todos (`faundr tests-run`): o que tiver quebrado no caminho entra na fila. Não faça commit.
+- **One at a time**, failing first and flaky after, with the steps above. For each test fixed, a single line: `<test> fixed (<done>/<total>): <side of the error, what changed>`.
+- **What would need the owner does not block the rest**: when you cannot tell which behavior is right (step 3), do not choose; note it under "Waiting on you" with the two options in one line and move on to the next.
+- **Not fixed in 2 attempts**: undo only that test's change, note it under "Couldn't fix" with the reason, and move on.
+- **Do not end the response while there is a failing or flaky test** that is not under "Waiting on you" or "Couldn't fix". If the conversation is summarized midway, run `faundr tests-context --fix` again: it shows what remains.
+- **At the end**, run all of them (`faundr tests-run`): whatever broke along the way goes into the queue. Do not commit.
 
-A resposta final do modo --all traz também quantos foram consertados e as listas "Esperam você" e "Não deu".
+The final response of --all mode also includes how many were fixed and the "Waiting on you" and "Couldn't fix" lists.
 
-## Responda
+## Answer
 
-Poucas linhas, para quem não programa: o que estava errado, de que lado era (código ou teste), o que mudou e como confirmou (quantas rodadas passaram). Se precisou de decisão do dono, diga qual ficou pendente.
+A few lines, for people who don't code, in the user's language: what was wrong, which side it was on (code or test), what changed and how you confirmed it (how many runs passed). If an owner decision was needed, say which one is pending.

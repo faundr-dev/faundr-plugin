@@ -38,6 +38,6 @@ export function dependentsNote(graph, rel, max = 8) {
   if (!deps.length) return null
   const files = new Set(deps.map((d) => d.file)).size
   const list = deps.slice(0, max).map((d) => `${d.label} (${d.file}:${d.line})`)
-  const more = deps.length > max ? `, … e mais ${deps.length - max}` : ''
-  return `[Faundr] ${rel} é usado por ${deps.length} parte(s) em ${files} arquivo(s): ${list.join(', ')}${more}. Se mudar o que eles usam (nome, parâmetros, retorno), confira esses lugares; para a lista completa: faundr graph-callers ${rel}.`
+  const more = deps.length > max ? `, … and ${deps.length - max} more` : ''
+  return `[Faundr] ${rel} is used by ${deps.length} part(s) in ${files} file(s): ${list.join(', ')}${more}. If you change what they use (name, parameters, return value), check those places; for the full list: faundr graph-callers ${rel}.`
 }

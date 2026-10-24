@@ -1,103 +1,103 @@
 ---
-description: Planeja uma funcionalidade com o dono antes de construir — mede o tamanho do pedido, olha o projeto antes de perguntar, faz poucas perguntas certeiras (com opções e recomendação), fecha um “pronto quando” que dá para conferir, mostra um resumo curto para aprovar e grava tudo no painel do Faundr. Use quando o usuário pedir algo novo para construir (uma tela, uma função, uma integração), quiser pensar ou planejar uma ideia, ou quando o Faundr avisar que o pedido parece trabalho novo. No começo de um projeto novo, escreve a Visão, as etapas e, se o dono quiser, a arquitetura. Também desenha, se o dono quiser, um diagrama de como a funcionalidade vai funcionar (pedidos como “desenhe como isso vai funcionar” ou “desenhe a arquitetura do projeto”).
-argument-hint: [o que quer construir]
+description: Plans a feature with the owner before building — sizes the request, looks at the project before asking, asks a few sharp questions (with options and a recommendation), settles a checkable "done when", shows a short summary for approval and saves everything to the Faundr dashboard. Use when the user asks for something new to build (a screen, a function, an integration), wants to think through or plan an idea, or when Faundr warns that the request looks like new work. At the start of a new project, writes the Project overview, the stages and, if the owner wants, the architecture. Also draws, if the owner wants, a diagram of how the feature will work (requests like "draw how this will work" or "draw the project architecture").
+argument-hint: [what you want to build]
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *)
 ---
 
-Pedido do usuário: $ARGUMENTS
+User request: $ARGUMENTS
 
-O objetivo é construir a coisa certa com o mínimo de perguntas. Quem responde costuma não programar: pergunte sobre **o que a pessoa vê e faz**, nunca sobre tecnologia. **Fatos são seus, decisões são dele**: o que o projeto já responde, você descobre; só pergunte o que muda o resultado e só ele pode decidir.
+The goal is to build the right thing with as few questions as possible. The person answering usually doesn't code: ask about **what the person sees and does**, never about technology. **Facts are yours, decisions are theirs**: whatever the project already answers, you find out; only ask what changes the result and only they can decide.
 
-## 1. Meça o tamanho
+## 1. Size it
 
-Diga em uma linha qual é o tamanho e o que vai fazer. Em funcionalidade e várias etapas, termine a linha com a saída: "Se preferir, eu só começo."
+Say in one line what size it is and what you'll do. For a feature or several stages, end the line with the way out: "If you prefer, I'll just start."
 
-- **Tarefa rápida** (ajuste, texto, correção pontual): não pergunte nem resuma. Se fizer parte da funcionalidade atual, registre (`faundr task "<passo>"`); se não fizer, não registre. Faça e diga em uma linha o que mudou.
-- **Já existe** (o passo 2 mostra que o projeto já faz quase tudo): diga onde está e o que falta, e pergunte só sobre o que falta. Muitas vezes vira tarefa rápida ou só ligar algo.
-- **Funcionalidade** (uma coisa nova que a pessoa usa): siga os passos 2 a 7.
-- **Várias etapas** (MVP e depois, "primeiro X, depois Y", grande demais para uma sessão): siga 2 a 7 só para a **primeira** etapa; as seguintes ficam registradas em uma linha cada (passo 7).
-- **Projeto novo** (o dono descreve um produto inteiro, ou a pasta ainda não tem código nem funcionalidades): leia `${CLAUDE_PLUGIN_ROOT}/skills/planning/projeto.md` e siga o roteiro de começo de projeto (Visão, etapas, decisões e, se ele quiser, a arquitetura).
-- **Continuação** da funcionalidade atual ou etapa já planejada (`faundr focus`): não replaneje; só confirme o que mudou, se algo mudou.
+- **Quick task** (tweak, text, one-off fix): don't ask or summarize. If it's part of the current feature, record it (`faundr task "<step>"`); if not, don't. Do it and say in one line what changed.
+- **Already exists** (step 2 shows the project already does almost all of it): say where it is and what's missing, and ask only about what's missing. It often becomes a quick task or just wiring something up.
+- **Feature** (something new the person uses): follow steps 2 to 7.
+- **Several stages** (MVP and later, "first X, then Y", too big for one session): follow 2 to 7 only for the **first** stage; the following ones are recorded in one line each (step 7).
+- **New project** (the owner describes a whole product, or the folder has no code and no features yet): read `${CLAUDE_PLUGIN_ROOT}/skills/planning/new-project.md` and follow the project-start script (Project overview, stages, decisions and, if they want, the architecture).
+- **Continuation** of the current feature or an already planned stage (`faundr focus`): don't replan; only confirm what changed, if anything changed.
 
-O usuário pode mudar o tamanho ("é maior do que isso", "só faz"). Se ele disser para não perguntar, vá direto ao passo 6 com o que dá para decidir sozinho.
+The user can change the size ("it's bigger than that", "just do it"). If they say not to ask, go straight to step 6 with what you can decide on your own.
 
-## 2. Olhe antes de perguntar
+## 2. Look before asking
 
-Gaste pouco, mas não pergunte o que dá para descobrir:
+Spend little, but don't ask what you can find out:
 
-- `faundr board` — a funcionalidade atual, as etapas planejadas e as **preocupações abertas (P-n)**, que muitas vezes já contam a intenção do dono.
-- `faundr graph-query "<assunto do pedido>"` — onde está o código parecido (telas, dados, quem chama). Prefira isso a abrir arquivo.
-- As regras e decisões do time chegam sozinhas no seu contexto; respeite-as e não pergunte de novo o que já foi decidido.
-- No máximo 6 leituras ou buscas no total, só as que podem mudar uma pergunta.
+- `faundr board` — the current feature, the planned stages and the **open concerns (P-n)**, which often already tell you the owner's intent.
+- `faundr graph-query "<subject of the request>"` — where similar code lives (screens, data, callers). Prefer this to opening files.
+- The team's rules and decisions arrive in your context on their own; respect them and don't ask again what was already decided.
+- At most 6 reads or searches in total, only those that can change a question.
 
-Anote os **fatos com prova**, para usar no resumo e nas opções ("o login já usa o Supabase", "já existe a tela de pedidos em `src/routes/pedidos.tsx`").
+Note the **facts with proof**, to use in the summary and in the options ("login already uses Supabase", "the orders screen already exists in `src/routes/pedidos.tsx`").
 
-## 3. Ache as poucas decisões que mudam o resultado
+## 3. Find the few decisions that change the result
 
-Liste para você (não mostre a lista) de 3 a 6 pontos em que respostas diferentes levam a coisas diferentes **neste pedido**. Nada de tópicos genéricos ("para quem é?") quando o pedido já responde.
+List for yourself (don't show the list) 3 to 6 points where different answers lead to different things **in this request**. No generic topics ("who is it for?") when the request already answers them.
 
-- Se o assunto for comum (login, pagamento, aviso por e-mail, lista e busca, envio de arquivo, painel de números, permissões, dados pessoais, integração, agendamento, IA), leia `${CLAUDE_PLUGIN_ROOT}/skills/planning/sondas.md` e pegue só as 2 ou 3 sondas que valem aqui. Antes de usar uma sonda, veja se o projeto já responde: se já existe um jeito (ex.: avisos no Slack), a pergunta vira "manter o que já existe?", com isso como recomendado.
-- Inclua, quando fizer diferença, as duas perguntas de falha (na rodada 1, se não dependerem de outra resposta):
-  - **Se fosse só metade, o que fica?** (vira o "fora desta etapa").
-  - **O que faria você dizer que deu errado, mesmo funcionando?** (vira critério de pronto ou limite).
-- **Decida sozinho**, sem perguntar, o que é técnico ou não muda o que a pessoa vê (biblioteca, nome de tabela, estrutura do código, detalhe visual que o design.md já define). Guarde cada uma para a lista "Decidi sozinho" do resumo. O que muda o que um cliente ou alguém do time já vê hoje (preço, acesso, dados que somem) **não** é decisão sua: pergunte.
+- If the subject is common (login, payment, email notification, list and search, file upload, metrics dashboard, permissions, personal data, integration, scheduling, AI), read `${CLAUDE_PLUGIN_ROOT}/skills/planning/probes.md` and take only the 2 or 3 probes that matter here. Before using a probe, check whether the project already answers it: if there's already a way (e.g. notifications on Slack), the question becomes "keep what already exists?", with that as the recommended option.
+- Include, when it makes a difference, the two failure questions (in round 1, if they don't depend on another answer):
+  - **If it were only half, what stays?** (becomes the "out of this stage").
+  - **What would make you say it went wrong, even if it works?** (becomes a done criterion or a limit).
+- **Decide on your own**, without asking, whatever is technical or doesn't change what the person sees (library, table name, code structure, visual detail the design.md already defines). Keep each one for the "Decided on my own" list in the summary. Whatever changes what a customer or someone on the team already sees today (price, access, data that disappears) is **not** your decision: ask.
 
-## 4. Pergunte em rodadas curtas
+## 4. Ask in short rounds
 
-Use a ferramenta de perguntas ao usuário:
+Use the ask-the-user tool:
 
-- **De 2 a 4 perguntas por rodada, no máximo 3 rodadas.** Primeiro as que não dependem de outra resposta; as que dependem esperam a rodada seguinte.
-- Cada pergunta com **2 a 4 opções concretas tiradas do projeto**, a recomendada primeiro com "(Recomendado)" e o motivo em uma linha na descrição. Fale do resultado: "Mostrar os dados salvos na hora ou esperar os novos?", e não "estratégia de cache".
-- Quando der, ofereça uma opção "Você decide" para o que ele não faz questão.
-- **Resposta vaga não passa:** "rápido", "simples", "bonito" ou "Outro" com texto genérico ganham uma pergunta de volta na rodada seguinte, com opções que dão número ou exemplo ("rápido: abre em menos de 1 s? aguenta 1000 itens?"). Se ele quiser explicar com as palavras dele, pergunte em texto, sem opções.
-- **Pare** quando o "pronto quando" der para conferir e não sobrar decisão que mude o resultado. Não use as 3 rodadas só porque pode.
+- **2 to 4 questions per round, at most 3 rounds.** First the ones that don't depend on another answer; those that do wait for the next round.
+- Each question with **2 to 4 concrete options taken from the project**, the recommended one first with "(Recommended)" and the reason in one line in the description. Talk about the result: "Show the saved data right away or wait for the new data?", not "caching strategy".
+- When possible, offer a "You decide" option for what they don't care about.
+- **Vague answers don't pass:** "fast", "simple", "pretty" or "Other" with generic text get a follow-up question in the next round, with options that give a number or an example ("fast: opens in under 1 s? handles 1000 items?"). If they want to explain in their own words, ask in text, without options.
+- **Stop** when the "done when" is checkable and no decision that changes the result is left. Don't use all 3 rounds just because you can.
 
-## 5. Feche o "pronto quando" e revise como quem vai construir
+## 5. Settle the "done when" and review as the builder would
 
-- **Pronto quando**: de 2 a 4 critérios que passam ou falham, cada um dizendo o que a pessoa faz e o que ela vê ("a pessoa paga com Pix e recebe o e-mail de confirmação"; "a lista de 1000 pedidos abre em menos de 1 s"). Nada de "funciona bem" ou "fica bonito".
-- **Revisão escondida**: releia o plano como alguém que vai construir sem poder perguntar nada. Para cada dúvida que aparecer:
-  - já está respondida → entra no plano;
-  - é detalhe → decida e ponha em "Decidi sozinho";
-  - só o dono sabe → vira uma última pergunta (conta como rodada).
-  Em pedido grande (3 ou mais etapas ou muitas partes do sistema), faça essa revisão com um subagente que recebe só o resumo do passo 6, para ele não herdar o que você já sabe.
+- **Done when**: 2 to 4 pass/fail criteria, each saying what the person does and what they see ("the person pays with Pix and receives the confirmation email"; "the list of 1000 orders opens in under 1 s"). No "works well" or "looks nice".
+- **Hidden review**: reread the plan as someone who will build it without being able to ask anything. For each doubt that comes up:
+  - already answered → goes into the plan;
+  - it's a detail → decide and put it under "Decided on my own";
+  - only the owner knows → becomes one last question (counts as a round).
+  On a big request (3 or more stages or many parts of the system), do this review with a subagent that receives only the step 6 summary, so it doesn't inherit what you already know.
 
-## 6. Mostre o resumo e espere o OK
+## 6. Show the summary and wait for the OK
 
-No máximo 15 linhas, neste formato:
+At most 15 lines, in this format (write it in the user's language):
 
 ```
-**<Nome da funcionalidade>**
-Para: <quem usa> · Resolve: <o problema, em uma frase>
-Já existe: <o que o projeto já faz e vai ser aproveitado, se houver>
-Entra: <o que vai ser feito, 2 a 4 itens>
-Fora desta etapa: <o que fica para depois>
-Pronto quando: <critério 1>; <critério 2>; …
-Decidi sozinho: <escolha 1>; <escolha 2>  (diga se quiser mudar algo)
-Depois: <próximas etapas, se houver>
+**<Feature name>**
+For: <who uses it> · Solves: <the problem, in one sentence>
+Already exists: <what the project already does and will be reused, if any>
+In: <what will be done, 2 to 4 items>
+Out of this stage: <what is left for later>
+Done when: <criterion 1>; <criterion 2>; …
+Decided on my own: <choice 1>; <choice 2>  (say if you want to change anything)
+Later: <next stages, if any>
 ```
 
-Pergunte: **"Algo errado ou faltando? Posso registrar e começar?"** Não comece a construir antes do OK.
+Ask: **"Anything wrong or missing? Can I record it and start?"** Don't start building before the OK.
 
-Quando a funcionalidade tem um fluxo com 3 ou mais partes (tela, servidor, banco, serviço de fora) ou um caminho de erro que importa, acrescente uma linha: "Se quiser, também desenho como vai funcionar: abre num canvas no navegador para você aprovar ou pedir mudanças (gasta mais tokens que o normal)." Não ofereça em tarefa pequena. Se ele corrigir algo, ajuste o resumo e confirme só o que mudou.
+When the feature has a flow with 3 or more parts (screen, server, database, outside service) or an error path that matters, add one line: "If you want, I can also draw how it will work: it opens on a canvas in the browser for you to approve or ask for changes (uses more tokens than usual)." Don't offer it on a small task. If they correct something, adjust the summary and confirm only what changed.
 
-## 7. Grave no Faundr (sem criar arquivos)
+## 7. Save to Faundr (without creating files)
 
-Nada de arquivos .md de plano: tudo vai para o painel, que o agente relê nas próximas sessões.
+No plan .md files: everything goes to the dashboard, which the agent rereads in the next sessions. Write it in the user's language.
 
-1. A funcionalidade e o critério:
-   `faundr feature "<título curto, até ~8 palavras>" --desc "<para quem e o problema, em uma frase>" --done-when "<critério 1>; <critério 2>"`
-2. Cada escolha do dono que muda o que vai ser feito, como decisão:
-   `faundr decision "<a escolha>" --why "<o que ele respondeu e por quê>" --global`
-   O que ficou de fora vira `"Fora desta etapa: …"`. Das escolhas que você fez sozinho, registre só as que alguém estranharia depois (`--why "Decidi sozinho: <motivo>"`). Use `--file <caminho>` no lugar de `--global` só quando a decisão vale para um arquivo ou pasta específico.
-3. Os passos, em ordem: `faundr task "<passo>"` (de 3 a 8, cada um verificável).
-4. As etapas seguintes, cada uma depois da anterior:
-   `faundr feature "<etapa 2>" --after atual --desc "<o que entra>"`, depois `faundr feature "<etapa 3>" --after "<etapa 2>" --desc "…"`.
-5. Mostre o checklist com `faundr board` e diga que ele já está no painel (Funcionalidades), com o critério de pronto.
-6. Se o dono pediu o diagrama, leia `${CLAUDE_PLUGIN_ROOT}/skills/planning/diagrama.md` e siga (escreve o JSON de uma vez, `faundr diagram-save`, no máximo 2 correções). Faça isso antes de construir: o desenho é do plano. O comando abre o canvas e espera: **aprovado no canvas = OK para construir**; mudanças pedidas = ajuste e salve de novo.
-7. Então comece pelo primeiro passo.
+1. The feature and the criterion:
+   `faundr feature "<short title, up to ~8 words>" --desc "<who it's for and the problem, in one sentence>" --done-when "<criterion 1>; <criterion 2>"`
+2. Each owner choice that changes what will be done, as a decision:
+   `faundr decision "<the choice>" --why "<what they answered and why>" --global`
+   What was left out becomes `"Out of this stage: …"`. Of the choices you made on your own, record only those someone would find odd later (`--why "Decided on my own: <reason>"`). Use `--file <path>` instead of `--global` only when the decision applies to a specific file or folder.
+3. The steps, in order: `faundr task "<step>"` (3 to 8, each checkable).
+4. The following stages, each after the previous one:
+   `faundr feature "<stage 2>" --after current --desc "<what goes in>"`, then `faundr feature "<stage 3>" --after "<stage 2>" --desc "…"`.
+5. Show the checklist with `faundr board` and say it's already on the dashboard (Features), with the done criterion.
+6. If the owner asked for the diagram, read `${CLAUDE_PLUGIN_ROOT}/skills/planning/diagram.md` and follow it (write the JSON in one go, `faundr diagram-save`, at most 2 corrections). Do this before building: the drawing is part of the plan. The command opens the canvas and waits: **approved on the canvas = OK to build**; changes requested = adjust and save again.
+7. Then start with the first step.
 
-## Só o diagrama
+## Diagram only
 
-Se o pedido for só desenhar como uma funcionalidade já registrada vai funcionar, avise que gasta mais tokens, leia o código e as decisões dela (no máximo 6 leituras), siga `diagrama.md` com `--feature "<nome>"` e não refaça o planejamento.
+If the request is only to draw how an already registered feature will work, warn that it uses more tokens, read its code and decisions (at most 6 reads), follow `diagram.md` with `--feature "<name>"` and don't redo the planning.
 
-Se for desenhar a arquitetura de um projeto que já existe, avise do custo, use o mapa do código (`faundr graph-query`) e a Visão em vez de abrir muitos arquivos, e siga `diagrama.md` com as camadas e o `--architecture` descritos em `projeto.md` (passo 4.5). As partes que já existem entram com o nome e os `paths` reais delas.
+If it's to draw the architecture of a project that already exists, warn about the cost, use the code map (`faundr graph-query`) and the Project overview instead of opening many files, and follow `diagram.md` with the layers and the `--architecture` described in `new-project.md` (step 4.5). Parts that already exist go in with their real name and `paths`.

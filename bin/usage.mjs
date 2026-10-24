@@ -9,7 +9,8 @@ const EXPLORE_TOOLS = new Set(['Read', 'Grep', 'Glob'])
 const EXPLORE_BASH = /^\s*(?:cd\s+[^&;|]+(?:&&|;)\s*)?(?:grep|rg|cat|head|tail|sed\s+-n|find|ls|wc)\b/
 const GRAPH_CMD = /\bfaundr(?:\.mjs)?["']?\s+graph-(?:query|path|explain|callers|skeleton|grep)\b/
 // Rodapé que `faundr graph-*` imprime (graphFooter).
-const GRAPH_FOOTER = /\[Faundr\] Grafo: resposta ~(\d+) tokens; arquivos citados: \d+, ~(\d+) tokens/
+// Rodapé em inglês e o antigo, em português (conversas de antes da troca).
+const GRAPH_FOOTER = /\[Faundr\] (?:Graph: answer|Grafo: resposta) ~(\d+) tokens; (?:files cited|arquivos citados): \d+, ~(\d+) tokens/
 const FAUNDR_MARK = '[Faundr]'
 
 function readEntries(file) {
@@ -186,8 +187,8 @@ export function transcriptUsage(transcriptPath) {
   return usage
 }
 
-// Arquivos citados: "src=<arquivo>" (graph-query), "Fonte: <arquivo>" e "<arquivo>:L<linha>" (graph-callers, graph-path).
-const CITED_FILE = /(?:\bsrc=|Fonte:\s+)([^\s\]]+)|([\w./@-]+\.\w+):L\d+/g
+// Arquivos citados: "src=<arquivo>" (graph-query), "Source: <arquivo>" (ou "Fonte:") e "<arquivo>:L<linha>" (graph-callers, graph-path).
+const CITED_FILE = /(?:\bsrc=|(?:Fonte|Source):\s+)([^\s\]]+)|([\w./@-]+\.\w+):L\d+/g
 // O Read do Claude Code lê até 2000 linhas por vez: um arquivo maior não custaria o arquivo inteiro.
 const READ_LINES = 2000
 const tokensOf = (chars) => Math.round(chars / 4)
@@ -208,7 +209,7 @@ export function graphFooter(output, root) {
     }
   }
   if (!counted) return ''
-  return `[Faundr] Grafo: resposta ~${tokensOf(output.length)} tokens; arquivos citados: ${counted}, ~${tokensOf(chars)} tokens se lidos inteiros.`
+  return `[Faundr] Graph: answer ~${tokensOf(output.length)} tokens; files cited: ${counted}, ~${tokensOf(chars)} tokens if read in full.`
 }
 
 // O último fim de resposta e o fim da sessão costumam se perder (o Claude Code fecha antes do envio terminar):
@@ -231,4 +232,76 @@ export function transcriptsToSync(pending, currentSid) {
   return Object.entries(pending ?? {})
     .filter(([sid]) => sid !== currentSid)
     .map(([sid, v]) => ({ sid, path: v.path }))
+}
+
+// ---- Custo de uma skill: só o trecho da conversa depois de uma marca ------------------------------------------
+// Quando uma skill começa, guarda o tamanho da conversa e de cada subagente; no fim da resposta, soma só o que veio
+// depois (sem reler a conversa inteira, que passa de dezenas de MB).
+
+const subagentDir = (transcriptPath) => path.join(path.dirname(transcriptPath), path.basename(transcriptPath, '.jsonl'), 'subagents')
+const sizeOf = (file) => {
+  try {
+    return fs.statSync(file).size
+  } catch {
+    // Arquivo ainda não existe: começa do zero.
+    return 0
+  }
+}
+
+/** Marca: o tamanho da conversa e dos subagentes que já existem. */
+export function transcriptMark(transcriptPath) {
+  if (!transcriptPath) return null
+  const subs = {}
+  try {
+    for (const f of fs.readdirSync(subagentDir(transcriptPath))) if (f.endsWith('.jsonl')) subs[f] = sizeOf(path.join(subagentDir(transcriptPath), f))
+  } catch {
+    // Sem subagentes ainda.
+  }
+  return { main: sizeOf(transcriptPath), subs }
+}
+
+function entriesFrom(file, offset) {
+  let text = ''
+  try {
+    const fd = fs.openSync(file, 'r')
+    const size = fs.fstatSync(fd).size
+    const buf = Buffer.alloc(Math.max(0, size - offset))
+    fs.readSync(fd, buf, 0, buf.length, offset)
+    fs.closeSync(fd)
+    text = buf.toString('utf8')
+  } catch {
+    return []
+  }
+  const out = []
+  for (const line of text.split('\n')) {
+    if (!line) continue
+    try {
+      out.push(JSON.parse(line))
+    } catch {
+      // A primeira linha pode vir cortada pela marca: pula só ela.
+    }
+  }
+  return out
+}
+
+/** Tokens gastos depois da marca (conversa + subagentes, novos ou que cresceram), por tipo e por modelo. */
+export function usageSince(transcriptPath, mark) {
+  if (!transcriptPath || !mark) return null
+  const { usage, seen } = summarizeEntries(entriesFrom(transcriptPath, mark.main ?? 0))
+  try {
+    for (const f of fs.readdirSync(subagentDir(transcriptPath)).filter((x) => x.endsWith('.jsonl')))
+      summarizeEntries(entriesFrom(path.join(subagentDir(transcriptPath), f), mark.subs?.[f] ?? 0), { main: false, usage, seen })
+  } catch {
+    // Sem subagentes.
+  }
+  const t = { input: 0, output: 0, cache_creation: 0, cache_read: 0, calls: 0, models: {} }
+  for (const { model, usage: u } of seen.values()) {
+    t.input += u.input_tokens ?? 0
+    t.output += u.output_tokens ?? 0
+    t.cache_creation += u.cache_creation_input_tokens ?? 0
+    t.cache_read += u.cache_read_input_tokens ?? 0
+    t.calls += 1
+    t.models[model] = (t.models[model] ?? 0) + 1
+  }
+  return t
 }

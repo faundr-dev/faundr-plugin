@@ -11,6 +11,7 @@ import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { locale, t } from './i18n.mjs'
 
 export const CHECKPOINT_PREFIX = 'refs/faundr/checkpoints/'
 const KEEP = 50
@@ -84,7 +85,7 @@ function readBlobs(root, commit, paths) {
     const nl = out.indexOf(10, at)
     const header = out.subarray(at, nl).toString()
     const size = Number(header.split(' ')[2])
-    if (!header.includes(' blob ') || Number.isNaN(size)) throw new Error(`não achei ${p} no ponto de volta`)
+    if (!header.includes(' blob ') || Number.isNaN(size)) throw new Error(t(`${p} not found in the restore point`, `não achei ${p} no ponto de volta`))
     at = nl + 1 + size + 1
     return out.subarray(nl + 1, nl + 1 + size)
   })
@@ -115,7 +116,7 @@ export function listCheckpoints(root) {
 }
 
 // Tira uma foto. Se nada mudou desde a última, não cria outra (devolve a última com created: false).
-export function createCheckpoint(root, { reason = 'ponto de volta', session = null, now = Date.now() } = {}) {
+export function createCheckpoint(root, { reason = t('restore point', 'ponto de volta'), session = null, now = Date.now() } = {}) {
   const tree = currentTree(root)
   const all = listCheckpoints(root)
   if (all[0]?.tree === tree) return { ...all[0], created: false }
@@ -162,7 +163,7 @@ export function findCheckpoint(root, which) {
 
 // Volta os arquivos para o ponto de volta. Antes, guarda o estado atual (a volta pode ser desfeita).
 export function restoreCheckpoint(root, checkpoint, { session = null } = {}) {
-  const saved = createCheckpoint(root, { reason: `antes de voltar para o ponto de ${new Date(checkpoint.at).toLocaleString('pt-BR')}`, session })
+  const saved = createCheckpoint(root, { reason: t(`before restoring the point from ${new Date(checkpoint.at).toLocaleString(locale())}`, `antes de voltar para o ponto de ${new Date(checkpoint.at).toLocaleString(locale())}`), session })
   const changes = treeDiff(root, saved.tree, checkpoint.tree)
   const bring = changes.filter((c) => c.status !== 'apagado').map((c) => c.path)
   const remove = changes.filter((c) => c.status === 'apagado').map((c) => c.path)
@@ -195,7 +196,7 @@ export function restoreCheckpoint(root, checkpoint, { session = null } = {}) {
 
 // Uma foto antes da primeira mudança da sessão e, com edições seguidas, de novo a cada 30 min.
 // Devolve o ponto de volta criado (ou null quando não era hora, não há git ou nada mudou).
-export function ensureSessionCheckpoint(cwd, sessionId, { configDir, reason = 'antes da primeira mudança da sessão', now = Date.now(), every = CHECKPOINT_EVERY_MS } = {}) {
+export function ensureSessionCheckpoint(cwd, sessionId, { configDir, reason = t('before the first change of the session', 'antes da primeira mudança da sessão'), now = Date.now(), every = CHECKPOINT_EVERY_MS } = {}) {
   if (!sessionId || !configDir) return null
   const root = gitRoot(cwd)
   if (!root) return null
@@ -210,7 +211,7 @@ export function ensureSessionCheckpoint(cwd, sessionId, { configDir, reason = 'a
   fs.mkdirSync(configDir, { recursive: true })
   fs.writeFileSync(marker, String(now))
   cleanMarkers(configDir, now)
-  const c = createCheckpoint(root, { reason: last ? 'antes de continuar as mudanças (30 min depois do último ponto)' : reason, session: sessionId, now })
+  const c = createCheckpoint(root, { reason: last ? t('before continuing the changes (30 min after the last point)', 'antes de continuar as mudanças (30 min depois do último ponto)') : reason, session: sessionId, now })
   return c.created ? c : null
 }
 
@@ -229,37 +230,49 @@ function cleanMarkers(configDir, now) {
 // O que voltar para o ponto faz com os arquivos, em português simples, para o usuário decidir.
 // `changes` = changesSince(ponto): o que mudou depois dele (alterado, criado, apagado).
 export function restoreSummary(checkpoint, changes, { max = 8 } = {}) {
-  const when = new Date(checkpoint.at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-  const head = `Voltar para o ponto de ${when} (${checkpoint.reason}).`
-  if (!changes.length) return `${head} Os arquivos já estão iguais a este ponto: nada muda.`
-  const list = (items) => `${items.slice(0, max).map((c) => c.path).join(', ')}${items.length > max ? ` e mais ${items.length - max}` : ''}`
+  const when = new Date(checkpoint.at).toLocaleString(locale(), { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+  const head = t(`Restore the point from ${when} (${checkpoint.reason}).`, `Voltar para o ponto de ${when} (${checkpoint.reason}).`)
+  if (!changes.length) return `${head} ${t('The files already match this point: nothing changes.', 'Os arquivos já estão iguais a este ponto: nada muda.')}`
+  const list = (items) => `${items.slice(0, max).map((c) => c.path).join(', ')}${items.length > max ? t(` and ${items.length - max} more`, ` e mais ${items.length - max}`) : ''}`
   const of = (s) => changes.filter((c) => c.status === s)
-  const lines = [head, 'O que acontece com os arquivos:']
+  const lines = [head, t('What happens to the files:', 'O que acontece com os arquivos:')]
   if (of('alterado').length)
-    lines.push(`- ${of('alterado').length} voltam como eram; as mudanças feitas neles depois do ponto se perdem: ${list(of('alterado'))}`)
-  if (of('criado').length) lines.push(`- ${of('criado').length} criados depois do ponto são apagados: ${list(of('criado'))}`)
-  if (of('apagado').length) lines.push(`- ${of('apagado').length} apagados depois do ponto voltam: ${list(of('apagado'))}`)
+    lines.push(
+      t(
+        `- ${of('alterado').length} go back to how they were; the changes made to them after the point are lost: ${list(of('alterado'))}`,
+        `- ${of('alterado').length} voltam como eram; as mudanças feitas neles depois do ponto se perdem: ${list(of('alterado'))}`,
+      ),
+    )
+  if (of('criado').length) lines.push(t(`- ${of('criado').length} created after the point are deleted: ${list(of('criado'))}`, `- ${of('criado').length} criados depois do ponto são apagados: ${list(of('criado'))}`))
+  if (of('apagado').length) lines.push(t(`- ${of('apagado').length} deleted after the point come back: ${list(of('apagado'))}`, `- ${of('apagado').length} apagados depois do ponto voltam: ${list(of('apagado'))}`))
   // O que fica fora da foto e pode não bater com os arquivos de volta.
   if (changes.some((c) => /(^|\/)(package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|requirements\.txt|pyproject\.toml)$/.test(c.path)))
-    lines.push('Atenção: a lista de pacotes muda. Depois da volta, rode a instalação (ex.: npm install) para os pacotes baterem com o código.')
+    lines.push(
+      t(
+        'Warning: the package list changes. After restoring, run the install (e.g. npm install) so the packages match the code.',
+        'Atenção: a lista de pacotes muda. Depois da volta, rode a instalação (ex.: npm install) para os pacotes baterem com o código.',
+      ),
+    )
   if (changes.some((c) => /(^|\/)(migrations?|prisma)\//i.test(c.path)))
-    lines.push('Atenção: arquivos de migração do banco mudam, mas o banco não volta. Se alguma migração já foi aplicada, o código antigo pode não bater com o banco.')
+    lines.push(
+      t(
+        'Warning: database migration files change, but the database does not go back. If a migration was already applied, the old code may not match the database.',
+        'Atenção: arquivos de migração do banco mudam, mas o banco não volta. Se alguma migração já foi aplicada, o código antigo pode não bater com o banco.',
+      ),
+    )
   lines.push(
-    'O que não muda: o .env, o node_modules, o banco de dados e os commits do git.',
-    'O estado de agora é salvo antes, como um ponto de volta novo: dá para desfazer a volta.',
+    t('What does not change: the .env, node_modules, the database and the git commits.', 'O que não muda: o .env, o node_modules, o banco de dados e os commits do git.'),
+    t('The current state is saved first, as a new restore point: the restore can be undone.', 'O estado de agora é salvo antes, como um ponto de volta novo: dá para desfazer a volta.'),
   )
   return lines.join('\n')
 }
 
 // Resumo em português simples de uma lista de mudanças: "3 alterados, 1 criado (a.ts, b.ts, …)".
 export function describeChanges(changes, max = 4) {
-  if (!changes.length) return 'nada mudou desde então'
+  if (!changes.length) return t('nothing changed since then', 'nada mudou desde então')
   const count = (s) => changes.filter((c) => c.status === s).length
-  const parts = [
-    count('alterado') && `${count('alterado')} alterado${count('alterado') > 1 ? 's' : ''}`,
-    count('criado') && `${count('criado')} criado${count('criado') > 1 ? 's' : ''}`,
-    count('apagado') && `${count('apagado')} apagado${count('apagado') > 1 ? 's' : ''}`,
-  ].filter(Boolean)
+  const label = (s, en, pt) => count(s) && `${count(s)} ${t(en, `${pt}${count(s) > 1 ? 's' : ''}`)}`
+  const parts = [label('alterado', 'changed', 'alterado'), label('criado', 'created', 'criado'), label('apagado', 'deleted', 'apagado')].filter(Boolean)
   const names = changes.slice(0, max).map((c) => c.path.split('/').pop())
   return `${parts.join(', ')} (${names.join(', ')}${changes.length > max ? ', …' : ''})`
 }

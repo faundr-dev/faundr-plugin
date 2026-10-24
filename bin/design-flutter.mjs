@@ -4,6 +4,7 @@
 // faz nada e o título do modelo ("Flutter Demo"). Também lê as cores do tema para a Vitrine.
 import fs from 'node:fs'
 import path from 'node:path'
+import { t } from './i18n.mjs'
 
 export const FLUTTER_RULES = {
   'design/cor-fixa-flutter': { kind: 'off_spec', severity: 'medium' },
@@ -19,40 +20,64 @@ export const FLUTTER_RULES = {
 
 export const FLUTTER_TEXT = {
   'design/cor-fixa-flutter': (c, n) => [
-    `${n} cor${n > 1 ? 'es' : ''} escrita${n > 1 ? 's' : ''} direto na tela (${c.token})`,
-    'A cor está fixa no widget em vez de vir do tema. Quando o design mudar (ou no tema escuro), essa tela fica diferente das outras. Use Theme.of(context).colorScheme (primary, surface, onSurface…) e defina as cores uma vez no ThemeData.',
+    t(`${n} color${n > 1 ? 's' : ''} written straight into the screen (${c.token})`, `${n} cor${n > 1 ? 'es' : ''} escrita${n > 1 ? 's' : ''} direto na tela (${c.token})`),
+    t(
+      'The color is fixed in the widget instead of coming from the theme. When the design changes (or in the dark theme), this screen ends up different from the others. Use Theme.of(context).colorScheme (primary, surface, onSurface…) and define the colors once in ThemeData.',
+      'A cor está fixa no widget em vez de vir do tema. Quando o design mudar (ou no tema escuro), essa tela fica diferente das outras. Use Theme.of(context).colorScheme (primary, surface, onSurface…) e defina as cores uma vez no ThemeData.',
+    ),
   ],
   'design/fonte-fixa-flutter': (c, n) => [
-    `${n} tamanho${n > 1 ? 's' : ''} de fonte fixo${n > 1 ? 's' : ''} na tela (fontSize: ${c.size})`,
-    'O tamanho do texto está escrito no widget em vez de vir do tema. Use Theme.of(context).textTheme (titleLarge, bodyMedium…) para o texto seguir o padrão e o ajuste de tamanho do sistema.',
+    t(`${n} fixed font size${n > 1 ? 's' : ''} on the screen (fontSize: ${c.size})`, `${n} tamanho${n > 1 ? 's' : ''} de fonte fixo${n > 1 ? 's' : ''} na tela (fontSize: ${c.size})`),
+    t(
+      'The text size is written in the widget instead of coming from the theme. Use Theme.of(context).textTheme (titleLarge, bodyMedium…) so the text follows the standard and the system text size setting.',
+      'O tamanho do texto está escrito no widget em vez de vir do tema. Use Theme.of(context).textTheme (titleLarge, bodyMedium…) para o texto seguir o padrão e o ajuste de tamanho do sistema.',
+    ),
   ],
   'acessibilidade/botao-sem-tooltip': (c, n) => [
-    `Botão só com ícone, sem nome para leitor de tela${n > 1 ? ` (${n} botões)` : ''}`,
-    'O IconButton não tem tooltip: o TalkBack e o VoiceOver anunciam só "botão". Adicione tooltip: "…" dizendo o que o botão faz (ele vira o nome lido em voz alta).',
+    t(`Icon-only button with no name for screen readers${n > 1 ? ` (${n} buttons)` : ''}`, `Botão só com ícone, sem nome para leitor de tela${n > 1 ? ` (${n} botões)` : ''}`),
+    t(
+      'The IconButton has no tooltip: TalkBack and VoiceOver just say "button". Add tooltip: "…" saying what the button does (it becomes the name read aloud).',
+      'O IconButton não tem tooltip: o TalkBack e o VoiceOver anunciam só "botão". Adicione tooltip: "…" dizendo o que o botão faz (ele vira o nome lido em voz alta).',
+    ),
   ],
   'acessibilidade/imagem-sem-descricao': (c, n) => [
-    `Imagem sem descrição para leitor de tela${n > 1 ? ` (${n} imagens)` : ''}`,
-    'Image sem semanticLabel: quem usa leitor de tela não sabe o que a imagem mostra. Adicione semanticLabel: "…" (ou excludeFromSemantics: true se for só decoração).',
+    t(`Image with no description for screen readers${n > 1 ? ` (${n} images)` : ''}`, `Imagem sem descrição para leitor de tela${n > 1 ? ` (${n} imagens)` : ''}`),
+    t(
+      'Image without semanticLabel: screen reader users do not know what the image shows. Add semanticLabel: "…" (or excludeFromSemantics: true if it is just decoration).',
+      'Image sem semanticLabel: quem usa leitor de tela não sabe o que a imagem mostra. Adicione semanticLabel: "…" (ou excludeFromSemantics: true se for só decoração).',
+    ),
   ],
   'responsivo/largura-fixa-flutter': (c, n) => [
-    `Largura fixa maior que a tela do celular (width: ${c.width})${n > 1 ? ` em ${n} lugares` : ''}`,
-    'Uma largura fixa acima de ~360 estoura a tela em celulares pequenos (aparece a faixa amarela e preta de overflow). Use Expanded/Flexible, ConstrainedBox(maxWidth: …) ou a largura vinda do LayoutBuilder.',
+    t(`Fixed width bigger than a phone screen (width: ${c.width})${n > 1 ? ` in ${n} places` : ''}`, `Largura fixa maior que a tela do celular (width: ${c.width})${n > 1 ? ` em ${n} lugares` : ''}`),
+    t(
+      'A fixed width above ~360 overflows the screen on small phones (the yellow and black overflow stripe shows up). Use Expanded/Flexible, ConstrainedBox(maxWidth: …) or the width from LayoutBuilder.',
+      'Uma largura fixa acima de ~360 estoura a tela em celulares pequenos (aparece a faixa amarela e preta de overflow). Use Expanded/Flexible, ConstrainedBox(maxWidth: …) ou a largura vinda do LayoutBuilder.',
+    ),
   ],
   'movimento/duracao-longa-flutter': (c, n) => [
-    `Animação longa (${c.ms} ms)${n > 1 ? ` em ${n} lugares` : ''}`,
-    'Animação de interface acima de 300 ms (500 para telas inteiras) deixa o app com cara de lento. Use 150–300 ms para botões, menus e trocas de estado.',
+    t(`Long animation (${c.ms} ms)${n > 1 ? ` in ${n} places` : ''}`, `Animação longa (${c.ms} ms)${n > 1 ? ` em ${n} lugares` : ''}`),
+    t(
+      'Interface animations above 300 ms (500 for full screens) make the app feel slow. Use 150–300 ms for buttons, menus and state changes.',
+      'Animação de interface acima de 300 ms (500 para telas inteiras) deixa o app com cara de lento. Use 150–300 ms para botões, menus e trocas de estado.',
+    ),
   ],
   'movimento/ease-in-flutter': (c, n) => [
-    `Curva Curves.easeIn em interface${n > 1 ? ` (${n} lugares)` : ''}`,
-    'easeIn começa devagar: o toque parece atrasado. Em interface, use Curves.easeOut ou Curves.easeOutCubic.',
+    t(`Curves.easeIn curve in the interface${n > 1 ? ` (${n} places)` : ''}`, `Curva Curves.easeIn em interface${n > 1 ? ` (${n} lugares)` : ''}`),
+    t('easeIn starts slowly: the tap feels delayed. In interfaces, use Curves.easeOut or Curves.easeOutCubic.', 'easeIn começa devagar: o toque parece atrasado. Em interface, use Curves.easeOut ou Curves.easeOutCubic.'),
   ],
   'pratica/botao-sem-acao': (c, n) => [
-    `Botão que não faz nada (${c.token})${n > 1 ? `, ${n} lugares` : ''}`,
-    'O botão aparece ativo mas o onPressed/onTap está vazio: a pessoa toca e nada acontece. Ligue a ação de verdade ou desabilite o botão (onPressed: null) até ela existir.',
+    t(`Button that does nothing (${c.token})${n > 1 ? `, ${n} places` : ''}`, `Botão que não faz nada (${c.token})${n > 1 ? `, ${n} lugares` : ''}`),
+    t(
+      'The button looks active but onPressed/onTap is empty: the person taps and nothing happens. Connect the real action or disable the button (onPressed: null) until it exists.',
+      'O botão aparece ativo mas o onPressed/onTap está vazio: a pessoa toca e nada acontece. Ligue a ação de verdade ou desabilite o botão (onPressed: null) até ela existir.',
+    ),
   ],
   'identidade/titulo-do-modelo': (c) => [
-    `Título do app ainda é o do modelo ("${c.title}")`,
-    'É o nome que aparece na lista de apps abertos do Android e na aba do navegador (Flutter Web). Troque pelo nome do app no MaterialApp(title: …).',
+    t(`The app title is still the template one ("${c.title}")`, `Título do app ainda é o do modelo ("${c.title}")`),
+    t(
+      'It is the name shown in the Android recent apps list and on the browser tab (Flutter Web). Replace it with the app name in MaterialApp(title: …).',
+      'É o nome que aparece na lista de apps abertos do Android e na aba do navegador (Flutter Web). Troque pelo nome do app no MaterialApp(title: …).',
+    ),
   ],
 }
 

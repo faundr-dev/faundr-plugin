@@ -61,5 +61,5 @@ test('ponte recusa quem não é a extensão ou não tem a senha', async () => {
     })
     assert.equal(refused, true, url)
   }
-  await assert.rejects(opening, /não respondeu/)
+  await assert.rejects(opening, /did not respond/)
 })

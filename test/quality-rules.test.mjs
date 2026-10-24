@@ -6,7 +6,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
 import { analyzeQuality } from '../dist/graph.mjs'
+import { setLang } from '../bin/i18n.mjs'
 import { runQuality } from '../bin/quality-rules.mjs'
+
+// Os textos dos achados vão para o painel na língua da pessoa: os testes fixam a língua.
+setLang('pt')
 
 const rules = async (code, file = 'a.ts', opts) => (await analyzeQuality(file, code, opts)).hits.map((h) => h.rule)
 const branches = (n) => Array.from({ length: n }, (_, i) => `  if (x === ${i}) return ${i}`).join('\n')
@@ -120,4 +124,29 @@ test('regras da casa e livro de atalhos', async () => {
   assert.equal(semPrazo.length, 1)
   assert.match(semPrazo[0].detail, /sem cache/)
   fs.rmSync(dir, { recursive: true, force: true })
+})
+
+test('textos dos achados em inglês, com as regras da casa em chaves inglesas', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-q-'))
+  const write = (rel, text) => {
+    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true })
+    fs.writeFileSync(path.join(dir, rel), text)
+  }
+  write('package.json', JSON.stringify({ dependencies: { uuid: '9', 'left-pad': '1' } }))
+  write('.faundr-regras/no-fetch.md', '---\nname: No fetch in screens\npattern: "\\bfetch\\("\nfiles: src/components/**\nseverity: high\n---\nUse src/lib/api.ts.\n')
+  write('src/components/A.tsx', "import { v4 } from 'uuid'\nexport const A = () => { fetch(v4()); return null }\n")
+  setLang('en')
+  try {
+    const { findings } = await runQuality(dir, { history: false, tools: false })
+    assert.equal(findings.find((f) => f.rule_id === 'demais/dependencia-sem-uso')?.title, 'Package no file uses: left-pad')
+    const native = findings.find((f) => f.rule_id === 'demais/dependencia-dispensavel')
+    assert.equal(native.detail, 'uuid does what crypto.randomUUID() already does (Node 19+ and all current browsers).')
+    const house = findings.find((f) => f.rule_id === 'casa/no-fetch')
+    assert.equal(house.title, 'House rule: No fetch in screens')
+    assert.equal(house.severity, 'high')
+    assert.match(house.detail, /Lines: 2\./)
+  } finally {
+    setLang('pt')
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
 })

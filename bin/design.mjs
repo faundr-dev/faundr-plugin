@@ -8,6 +8,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { t } from './i18n.mjs'
 import { isClaudePlugin, projectParts } from './parts.mjs'
 import { extractTokens } from './design-tokens.mjs'
 import { detectThemes, runRules } from './design-rules.mjs'
@@ -143,8 +144,11 @@ function clippedPopups(rel, text) {
     findings.push({
       kind: 'visual',
       severity: 'high',
-      title: `Menu "${culprit}" pode abrir cortado dentro de uma caixa com ${clip}`,
-      detail: `A caixa na linha ${open + 1} usa "${clip}", e dentro dela há um menu flutuante (${culprit}). Quando o menu abre, a parte que passa da borda da caixa fica escondida. Tire o ${clip} da caixa (use rounded nas células) ou renderize o menu num portal (fora da caixa).`,
+      title: t(`Menu "${culprit}" may open cut off inside a box with ${clip}`, `Menu "${culprit}" pode abrir cortado dentro de uma caixa com ${clip}`),
+      detail: t(
+        `The box on line ${open + 1} uses "${clip}", and inside it there is a floating menu (${culprit}). When the menu opens, the part that goes past the edge of the box is hidden. Remove ${clip} from the box (use rounded on the cells) or render the menu in a portal (outside the box).`,
+        `A caixa na linha ${open + 1} usa "${clip}", e dentro dela há um menu flutuante (${culprit}). Quando o menu abre, a parte que passa da borda da caixa fica escondida. Tire o ${clip} da caixa (use rounded nas células) ou renderize o menu num portal (fora da caixa).`,
+      ),
       file: rel,
       line: open + 1,
       rule: 'visual/menu-cortado',
@@ -172,12 +176,12 @@ function looseColors(rel, text, colors, hasDesign) {
       kind: 'off_spec',
       severity: 'medium',
       title: hasDesign
-        ? `${unique.length === 1 ? '1 cor fora' : `${unique.length} cores fora`} da paleta do design.md`
-        : `${unique.length === 1 ? '1 cor escrita' : `${unique.length} cores escritas`} direto no código`,
+        ? t(`${unique.length === 1 ? '1 color' : `${unique.length} colors`} outside the design.md palette`, `${unique.length === 1 ? '1 cor fora' : `${unique.length} cores fora`} da paleta do design.md`)
+        : t(`${unique.length === 1 ? '1 color' : `${unique.length} colors`} written straight into the code`, `${unique.length === 1 ? '1 cor escrita' : `${unique.length} cores escritas`} direto no código`),
       detail: `${unique.slice(0, 8).join(', ')}${unique.length > 8 ? '…' : ''}. ${
         hasDesign
-          ? 'Use as cores (tokens) definidas no design.md.'
-          : 'Crie tokens de cor (ex.: no tema do Tailwind) e use-os, para mudar a paleta num lugar só.'
+          ? t('Use the colors (tokens) defined in design.md.', 'Use as cores (tokens) definidas no design.md.')
+          : t('Create color tokens (e.g. in the Tailwind theme) and use them, so the palette changes in one place.', 'Crie tokens de cor (ex.: no tema do Tailwind) e use-os, para mudar a paleta num lugar só.')
       }`,
       file: rel,
       line: hits[0].line,
@@ -210,8 +214,14 @@ function fixedThemeColors(rel, text, colors) {
     {
       kind: 'off_spec',
       severity: 'medium',
-      title: `${unique.length === 1 ? 'Cor fixa que não muda' : `${unique.length} cores fixas que não mudam`} com o tema`,
-      detail: `${unique.slice(0, 8).join(', ')} escrita(s) direto no código: a cor é da paleta, mas fica igual no tema claro e no escuro, e num deles o texto ou o fundo some. Use o token da cor (que troca com o tema) ou acrescente a variante do outro tema (dark:… / light:…). Linhas: ${lines.slice(0, 12).join(', ')}${lines.length > 12 ? '…' : ''}.`,
+      title: t(
+        `${unique.length === 1 ? 'Fixed color that does not change' : `${unique.length} fixed colors that do not change`} with the theme`,
+        `${unique.length === 1 ? 'Cor fixa que não muda' : `${unique.length} cores fixas que não mudam`} com o tema`,
+      ),
+      detail: t(
+        `${unique.slice(0, 8).join(', ')} written straight into the code: the color is from the palette, but it stays the same in the light and dark themes, and in one of them the text or background disappears. Use the color token (which changes with the theme) or add the variant for the other theme (dark:… / light:…). Lines: ${lines.slice(0, 12).join(', ')}${lines.length > 12 ? '…' : ''}.`,
+        `${unique.slice(0, 8).join(', ')} escrita(s) direto no código: a cor é da paleta, mas fica igual no tema claro e no escuro, e num deles o texto ou o fundo some. Use o token da cor (que troca com o tema) ou acrescente a variante do outro tema (dark:… / light:…). Linhas: ${lines.slice(0, 12).join(', ')}${lines.length > 12 ? '…' : ''}.`,
+      ),
       file: rel,
       line: hits[0].line,
       rule: 'design/cor-fixa-sem-tema',
@@ -243,8 +253,11 @@ function repeatedStyles(texts) {
     findings.push({
       kind: 'duplicate',
       severity: where.length >= 5 ? 'medium' : 'low',
-      title: `Mesmo estilo de <${tag}> repetido ${where.length} vezes`,
-      detail: `Aparece em ${files.slice(0, 4).join(', ')}${files.length > 4 ? '…' : ''}. Crie um componente reutilizável (ou uma classe do tema) e use-o nesses lugares, para mudar o visual num lugar só.`,
+      title: t(`Same <${tag}> style repeated ${where.length} times`, `Mesmo estilo de <${tag}> repetido ${where.length} vezes`),
+      detail: t(
+        `Shows up in ${files.slice(0, 4).join(', ')}${files.length > 4 ? '…' : ''}. Create a reusable component (or a theme class) and use it in these places, so the look changes in one place.`,
+        `Aparece em ${files.slice(0, 4).join(', ')}${files.length > 4 ? '…' : ''}. Crie um componente reutilizável (ou uma classe do tema) e use-o nesses lugares, para mudar o visual num lugar só.`,
+      ),
       file: where[0].rel,
       line: where[0].line,
       rule: 'repeticao/estilo-repetido',
@@ -275,8 +288,11 @@ function rawButtons(texts) {
     {
       kind: 'practice',
       severity: 'medium',
-      title: `${raw} botões montados na mão, sem componente de botão`,
-      detail: `Há ${raw} <button> com classes escritas na hora em ${files.size} arquivos. Crie um componente <Button> com as variantes do design (principal, secundário, ícone) e use-o em todo lugar.`,
+      title: t(`${raw} hand-built buttons, with no button component`, `${raw} botões montados na mão, sem componente de botão`),
+      detail: t(
+        `There are ${raw} <button> elements with classes written on the spot in ${files.size} files. Create a <Button> component with the design variants (primary, secondary, icon) and use it everywhere.`,
+        `Há ${raw} <button> com classes escritas na hora em ${files.size} arquivos. Crie um componente <Button> com as variantes do design (principal, secundário, ícone) e use-o em todo lugar.`,
+      ),
       file: first.rel,
       line: first.line,
       rule: 'pratica/botoes-sem-componente',
@@ -347,7 +363,7 @@ export function measurePlan(scopeTheme, detected, widths) {
         { tema: base, widths: sorted },
         { tema: OTHER[base], widths: ends },
       ],
-      hint: scopeTheme === 'ambos' ? null : 'O código tem tema claro e escuro, mas o escopo do design não diz: grave com faundr design-scope --theme ambos (ou só um tema, se o outro não vale).',
+      hint: scopeTheme === 'ambos' ? null : 'The code has a light and a dark theme, but the design scope does not say so: save it with faundr design-scope --theme ambos (or just one theme, if the other does not apply).',
     }
   // Um tema só e sem escopo: mede como a tela abre, sem forçar nem marcar tema.
   return { themes: [{ tema: null, widths: sorted }] }

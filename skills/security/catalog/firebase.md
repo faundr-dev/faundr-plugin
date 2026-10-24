@@ -1,26 +1,26 @@
 # Firebase
-Quando ler: `firebase`, `firebase-admin`, `firebase-functions`, `@react-native-firebase/*`, `reactfire` no `package.json`; arquivos `firebase.json`, `.firebaserc`, `firestore.rules`, `database.rules.json`, `storage.rules`, `functions/`; variáveis `NEXT_PUBLIC_FIREBASE_*`/`VITE_FIREBASE_*`.
+When to read: `firebase`, `firebase-admin`, `firebase-functions`, `@react-native-firebase/*`, `reactfire` in `package.json`; `firebase.json`, `.firebaserc`, `firestore.rules`, `database.rules.json`, `storage.rules` files, `functions/`; `NEXT_PUBLIC_FIREBASE_*`/`VITE_FIREBASE_*` variables.
 
-Modelo mental: igual ao Supabase, o navegador fala direto com Firestore, Realtime Database (RTDB) e Storage. A config do app (`apiKey`, `projectId`, `storageBucket`) é pública por desenho e não é segredo. A barreira são as Security Rules, que são três motores separados (Firestore, RTDB, Storage). Cloud Functions com Admin SDK ignoram todas as rules.
+Mental model: like Supabase, the browser talks directly to Firestore, Realtime Database (RTDB) and Storage. The app config (`apiKey`, `projectId`, `storageBucket`) is public by design and is not a secret. The barrier is the Security Rules, which are three separate engines (Firestore, RTDB, Storage). Cloud Functions with the Admin SDK ignore all rules.
 
-Fontes de verdade: os arquivos de rules referenciados em `firebase.json` (`"firestore": { "rules": "firestore.rules" }`, `"database": { "rules": ... }`, `"storage": { "rules": ... }`). Se o app usa um desses produtos e o `firebase.json` não aponta arquivo de rules para ele, ou o arquivo não está no repositório, as rules vivem só no console: registre como lacuna de prova e recomende versionar as rules (isso por si só é um achado baixo/médio; não conclua "seguro").
+Sources of truth: the rules files referenced in `firebase.json` (`"firestore": { "rules": "firestore.rules" }`, `"database": { "rules": ... }`, `"storage": { "rules": ... }`). If the app uses one of these products and `firebase.json` doesn't point to a rules file for it, or the file isn't in the repository, the rules live only in the console: record it as a gap in the evidence and recommend versioning the rules (this alone is a low/medium finding; don't conclude "safe").
 
-## firebase-rules-abertas — `allow read, write: if true` ou modo de teste com data
-- Gravidade típica: crítica (qualquer pessoa na internet lê, altera e apaga o banco). Depois da data do modo de teste, as rules negam tudo (o app quebra, e o time tende a "abrir de novo").
-- Onde procurar: `firestore.rules`, `storage.rules`: `if true`, `allow read, write;` (sem condição), `if request.time < timestamp.date(`; `database.rules.json`: `".read": true`, `".write": true` na raiz ou em nós altos.
-- Como confirmar lendo o código: leia cada `match` e suas condições. Em Firestore/Storage, se qualquer `match` que casa com um caminho permite, está permitido (OR entre matches); então um `match /{document=**} { allow read, write: if true; }` anula todas as regras finas.
-- Descarta se: a regra aberta está num caminho de dados públicos só leitura (ex.: `allow read: if true` em `/public_posts/{id}` com `allow write: if false` ou escrita com dono).
-- Não descarta: regras finas corretas convivendo com um curinga `{document=**}` aberto; "a data ainda não venceu".
-- Como corrigir: remover curingas amplos e escrever regras por coleção com dono (ver abaixo).
+## firebase-rules-abertas — `allow read, write: if true` or test mode with a date
+- Typical severity: critical (anyone on the internet reads, changes and deletes the database). After the test-mode date, the rules deny everything (the app breaks, and the team tends to "open it again").
+- Where to look: `firestore.rules`, `storage.rules`: `if true`, `allow read, write;` (no condition), `if request.time < timestamp.date(`; `database.rules.json`: `".read": true`, `".write": true` at the root or on high nodes.
+- How to confirm by reading the code: read each `match` and its conditions. In Firestore/Storage, if any `match` that matches a path allows, it is allowed (OR between matches); so a `match /{document=**} { allow read, write: if true; }` cancels all the fine-grained rules.
+- Ruled out if: the open rule is on a path of public read-only data (e.g., `allow read: if true` on `/public_posts/{id}` with `allow write: if false` or owner-only writes).
+- Not ruled out by: correct fine-grained rules living alongside an open `{document=**}` wildcard; "the date hasn't expired yet".
+- How to fix: remove broad wildcards and write per-collection rules with an owner (see below).
 - CWE: CWE-284
 
-## firebase-auth-como-unica-regra — `request.auth != null` como única condição
-- Gravidade típica: crítica quando o cadastro é aberto (qualquer um cria conta e lê/escreve dados de todos). Alta se o cadastro é restrito mas os usuários não deveriam ver dados uns dos outros.
-- Onde procurar: `allow read, write: if request.auth != null;`, `if request.auth.uid != null`, RTDB `"auth != null"`, Storage `allow read, write: if request.auth != null;`. Também `request.auth.token.email_verified == true` sozinho, ou checagens de presença de claim (`request.auth.token.role != null`) sem comparar valor.
-- Como confirmar lendo o código: pergunte se, para aquela coleção, um usuário qualquer deveria acessar todos os documentos. Se a coleção tem dono (`users`, `orders`, `messages`), precisa comparar com `request.auth.uid`.
-- Descarta se: dado é compartilhado por desenho entre todos os usuários logados (ex.: catálogo interno) e não há campos sensíveis; ou a condição compara dono/associação.
-- Não descarta: "só funcionários têm conta" quando o provedor de login está aberto (e-mail/senha, Google, anônimo) no projeto.
-- Como corrigir:
+## firebase-auth-como-unica-regra — `request.auth != null` as the only condition
+- Typical severity: critical when sign-up is open (anyone creates an account and reads/writes everyone's data). High if sign-up is restricted but users shouldn't see each other's data.
+- Where to look: `allow read, write: if request.auth != null;`, `if request.auth.uid != null`, RTDB `"auth != null"`, Storage `allow read, write: if request.auth != null;`. Also `request.auth.token.email_verified == true` alone, or claim-presence checks (`request.auth.token.role != null`) without comparing the value.
+- How to confirm by reading the code: ask whether, for that collection, any user should access all documents. If the collection has an owner (`users`, `orders`, `messages`), it needs to compare with `request.auth.uid`.
+- Ruled out if: the data is shared by design among all logged-in users (e.g., an internal catalog) and has no sensitive fields; or the condition compares owner/membership.
+- Not ruled out by: "only employees have accounts" when the login provider is open (email/password, Google, anonymous) in the project.
+- How to fix:
   ```
   match /orders/{orderId} {
     allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
@@ -31,53 +31,53 @@ Fontes de verdade: os arquivos de rules referenciados em `firebase.json` (`"fire
   ```
 - CWE: CWE-285
 
-## firebase-dono-do-payload — Regra que confia no dono enviado, ou escrita sem restringir campos
-- Gravidade típica: crítica quando permite gravar `role`/`isAdmin`/`plan`/`credits` ou trocar o dono; alta nos demais casos.
-- Onde procurar: `allow create`/`update` que não compara `request.resource.data.ownerId` com `request.auth.uid`; `update` sem restrição de campos; coleções `users/{uid}` com `allow write: if request.auth.uid == uid` onde o documento tem `role`.
-- Como confirmar lendo o código: em `create`, o dono gravado deve ser o `uid`. Em `update`, o dono não pode mudar e campos privilegiados não podem ser tocados. Procure `hasOnly`/`affectedKeys`.
-- Descarta se: há `request.resource.data.keys().hasOnly([...])` no create e `request.resource.data.diff(resource.data).affectedKeys().hasOnly([...])` no update sem campos privilegiados, e comparação de dono; ou campos privilegiados vivem em outro documento sem escrita pelo cliente (ou em custom claims).
-- Não descarta: o app não oferece campo `role` no formulário; validação feita só no front ou numa Cloud Function que o cliente pode pular escrevendo direto no Firestore.
-- Como corrigir:
+## firebase-dono-do-payload — Rule that trusts the owner sent, or writes without restricting fields
+- Typical severity: critical when it allows writing `role`/`isAdmin`/`plan`/`credits` or changing the owner; high otherwise.
+- Where to look: `allow create`/`update` that doesn't compare `request.resource.data.ownerId` with `request.auth.uid`; `update` without field restriction; `users/{uid}` collections with `allow write: if request.auth.uid == uid` where the document has `role`.
+- How to confirm by reading the code: in `create`, the owner written must be the `uid`. In `update`, the owner can't change and privileged fields can't be touched. Look for `hasOnly`/`affectedKeys`.
+- Ruled out if: there is `request.resource.data.keys().hasOnly([...])` in create and `request.resource.data.diff(resource.data).affectedKeys().hasOnly([...])` in update without privileged fields, plus the owner comparison; or privileged fields live in another document the client can't write (or in custom claims).
+- Not ruled out by: the app doesn't offer a `role` field in the form; validation done only on the front end or in a Cloud Function the client can skip by writing directly to Firestore.
+- How to fix:
   ```
   allow update: if request.auth.uid == uid
     && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'photoURL']);
   ```
 - CWE: CWE-915
 
-## firebase-list-e-regras-nao-sao-filtros — Leitura de coleção inteira / collectionGroup
-- Gravidade típica: alta.
-- Onde procurar: `allow read` (que inclui `get` e `list`) com condição que não depende do documento; `allow list: if request.auth != null`; `match /{path=**}/comments/{id}` (regras de `collectionGroup`); subcoleções sem regra própria.
-- Como confirmar lendo o código: `allow get` protegido por dono, mas `allow list` aberto, deixa listar todos. Regras de Firestore não se herdam para subcoleções: uma subcoleção sem `match` fica negada (seguro), mas um `match /{document=**}` a cobre. Consultas `collectionGroup` usam o `match` com `{path=**}`.
-- Descarta se: `list` exige a mesma condição de dono (`resource.data.ownerId == request.auth.uid`), o que obriga o cliente a filtrar por dono na query.
-- Não descarta: "a tela só consulta com `where('ownerId', '==', uid)`" (o atacante consulta sem filtro; a rule é que decide).
-- Como corrigir: usar `resource.data` na condição de `read`/`list`; revisar regras `{path=**}`.
+## firebase-list-e-regras-nao-sao-filtros — Reading a whole collection / collectionGroup
+- Typical severity: high.
+- Where to look: `allow read` (which includes `get` and `list`) with a condition that doesn't depend on the document; `allow list: if request.auth != null`; `match /{path=**}/comments/{id}` (`collectionGroup` rules); subcollections without their own rule.
+- How to confirm by reading the code: `allow get` protected by owner but `allow list` open lets anyone list everything. Firestore rules are not inherited by subcollections: a subcollection without a `match` is denied (safe), but a `match /{document=**}` covers it. `collectionGroup` queries use the `match` with `{path=**}`.
+- Ruled out if: `list` requires the same owner condition (`resource.data.ownerId == request.auth.uid`), which forces the client to filter by owner in the query.
+- Not ruled out by: "the screen only queries with `where('ownerId', '==', uid)`" (the attacker queries without the filter; the rule decides).
+- How to fix: use `resource.data` in the `read`/`list` condition; review `{path=**}` rules.
 - CWE: CWE-639
 
-## firebase-rtdb-cascata — Regra do pai libera o filho (Realtime Database)
-- Gravidade típica: alta a crítica.
-- Onde procurar: `database.rules.json` com `.read`/`.write` em nós altos (`"users": { ".read": "auth != null", "$uid": { ".read": "$uid === auth.uid" } }`).
-- Como confirmar lendo o código: no RTDB as regras cascateiam: uma permissão concedida num nó pai vale para todos os filhos e não pode ser revogada por regra mais funda. No exemplo acima, qualquer logado lê todos os usuários, apesar da regra do `$uid`.
-- Descarta se: permissões concedidas só nos nós folha com `$uid === auth.uid` (ou associação), sem concessões nos pais; `.validate` nos campos sensíveis.
-- Não descarta: a regra do filho "parece restrita".
-- Como corrigir: remover `.read`/`.write` dos pais e conceder só nos nós de cada usuário.
+## firebase-rtdb-cascata — Parent rule grants the child (Realtime Database)
+- Typical severity: high to critical.
+- Where to look: `database.rules.json` with `.read`/`.write` on high nodes (`"users": { ".read": "auth != null", "$uid": { ".read": "$uid === auth.uid" } }`).
+- How to confirm by reading the code: in RTDB rules cascade: a permission granted on a parent node applies to all children and can't be revoked by a deeper rule. In the example above, any logged-in user reads all users, despite the `$uid` rule.
+- Ruled out if: permissions granted only on leaf nodes with `$uid === auth.uid` (or membership), with no grants on parents; `.validate` on sensitive fields.
+- Not ruled out by: the child rule "looks restricted".
+- How to fix: remove `.read`/`.write` from parents and grant only on each user's nodes.
 - CWE: CWE-284
 
-## firebase-storage-rules — Storage aberto, sem dono, sem tipo/tamanho
-- Gravidade típica: alta para arquivos privados; crítica se escrita é aberta (hospedagem de conteúdo malicioso na conta do app, custo).
-- Onde procurar: `storage.rules`: `match /{allPaths=**}`, `allow read, write: if request.auth != null`, `if true`; uploads com caminho sem `uid`. Também `makePublic()` ou `public: true` no Admin SDK.
-- Como confirmar lendo o código: o caminho deve conter o `uid` e a regra comparar com `request.auth.uid`; escrita deve limitar `request.resource.size` e `request.resource.contentType`.
-- Descarta se: `match /users/{uid}/{file=**} { allow read, write: if request.auth.uid == uid && request.resource.size < 5 * 1024 * 1024 && request.resource.contentType.matches('image/.*'); }` (para write) e nenhum curinga aberto.
-- Não descarta: regras Storage corretas mas objetos tornados públicos via ACL pelo Admin SDK (a ACL é outra porta, via `storage.googleapis.com`).
-- Como corrigir: caminhos por `uid`, limites de tamanho/tipo, remover `makePublic`.
+## firebase-storage-rules — Storage open, without owner, without type/size
+- Typical severity: high for private files; critical if writes are open (hosting malicious content on the app's account, cost).
+- Where to look: `storage.rules`: `match /{allPaths=**}`, `allow read, write: if request.auth != null`, `if true`; uploads with a path without `uid`. Also `makePublic()` or `public: true` in the Admin SDK.
+- How to confirm by reading the code: the path must contain the `uid` and the rule must compare it with `request.auth.uid`; writes must limit `request.resource.size` and `request.resource.contentType`.
+- Ruled out if: `match /users/{uid}/{file=**} { allow read, write: if request.auth.uid == uid && request.resource.size < 5 * 1024 * 1024 && request.resource.contentType.matches('image/.*'); }` (for write) and no open wildcard.
+- Not ruled out by: correct Storage rules but objects made public via ACL by the Admin SDK (the ACL is another door, via `storage.googleapis.com`).
+- How to fix: per-`uid` paths, size/type limits, remove `makePublic`.
 - CWE: CWE-284
 
-## firebase-functions-sem-token — Cloud Function `onRequest` sem verificar ID token
-- Gravidade típica: alta a crítica (funções usam Admin SDK e ignoram rules).
-- Onde procurar: `functions/src/**`: `onRequest(`, `functions.https.onRequest(`, Express dentro de functions; `req.body.uid`, `req.query.userId`; `admin.auth().verifyIdToken` (ausência é o sinal).
-- Como confirmar lendo o código: `onCall` recebe a identidade pronta (`request.auth` na v2, `context.auth` na v1), mas a função precisa checar se ela é nula. `onRequest` não verifica nada sozinho: deve ler `Authorization: Bearer <idToken>` e chamar `await getAuth().verifyIdToken(token)`. Depois, usar o `uid` verificado, nunca o do corpo.
-- Descarta se: `onCall` com `if (!request.auth) throw new HttpsError('unauthenticated', ...)` e uso de `request.auth.uid`; `onRequest` com `verifyIdToken` antes do trabalho; ou função pública por desenho (webhook com assinatura).
-- Não descarta: `onCall` sem checar `request.auth` (anônimos passam com `auth` nulo); `uid` do corpo "porque o app sempre manda o certo".
-- Como corrigir:
+## firebase-functions-sem-token — `onRequest` Cloud Function without verifying the ID token
+- Typical severity: high to critical (functions use the Admin SDK and ignore rules).
+- Where to look: `functions/src/**`: `onRequest(`, `functions.https.onRequest(`, Express inside functions; `req.body.uid`, `req.query.userId`; `admin.auth().verifyIdToken` (its absence is the signal).
+- How to confirm by reading the code: `onCall` receives the identity ready (`request.auth` in v2, `context.auth` in v1), but the function needs to check whether it is null. `onRequest` verifies nothing on its own: it must read `Authorization: Bearer <idToken>` and call `await getAuth().verifyIdToken(token)`. Then use the verified `uid`, never the one from the body.
+- Ruled out if: `onCall` with `if (!request.auth) throw new HttpsError('unauthenticated', ...)` and use of `request.auth.uid`; `onRequest` with `verifyIdToken` before the work; or a function public by design (webhook with signature).
+- Not ruled out by: `onCall` without checking `request.auth` (anonymous callers get through with a null `auth`); `uid` from the body "because the app always sends the right one".
+- How to fix:
   ```ts
   export const deleteDoc = onCall(async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'login');
@@ -89,29 +89,29 @@ Fontes de verdade: os arquivos de rules referenciados em `firebase.json` (`"fire
   ```
 - CWE: CWE-306
 
-## firebase-admin-sdk-sem-checagem — Admin SDK acessa dado sem checar dono
-- Gravidade típica: alta.
-- Onde procurar: qualquer código servidor (Functions, route handlers do Next, Workers) com `firebase-admin` (`getFirestore()`, `admin.firestore()`) respondendo a pedidos de usuário.
-- Como confirmar lendo o código: como o Admin SDK ignora rules, toda checagem de dono/tenant precisa estar no código antes de ler/escrever.
-- Descarta se: filtro/checagem de dono com o `uid` verificado em cada operação.
-- Não descarta: "as rules protegem" (não valem para o Admin SDK).
-- Como corrigir: checagem explícita de dono, como no exemplo acima.
+## firebase-admin-sdk-sem-checagem — Admin SDK accesses data without checking the owner
+- Typical severity: high.
+- Where to look: any server code (Functions, Next route handlers, Workers) with `firebase-admin` (`getFirestore()`, `admin.firestore()`) answering user requests.
+- How to confirm by reading the code: since the Admin SDK ignores rules, every owner/tenant check must be in the code before reading/writing.
+- Ruled out if: owner filter/check with the verified `uid` on every operation.
+- Not ruled out by: "the rules protect it" (they don't apply to the Admin SDK).
+- How to fix: explicit owner check, as in the example above.
 - CWE: CWE-639
 
-## firebase-trigger-concede-privilegio — Trigger que concede papel com base em dado do cliente
-- Gravidade típica: crítica.
-- Onde procurar: `onDocumentCreated`, `onDocumentWritten`, `functions.firestore.document(...).onCreate`, `beforeUserCreated`; chamadas `setCustomUserClaims(` com valor lido de documento que o usuário escreve.
-- Como confirmar lendo o código: veja de onde vem o papel concedido. Se vem de um documento gravável pelo cliente (`users/{uid}.role`), o usuário se promove.
-- Descarta se: o papel vem de fonte que o cliente não escreve (tabela de convites criada pelo servidor, lista de admins no código/config).
-- Não descarta: "a tela de cadastro não tem campo de papel".
-- Como corrigir: conceder papel só a partir de dados do servidor; negar escrita do campo nas rules.
+## firebase-trigger-concede-privilegio — Trigger that grants a role based on client data
+- Typical severity: critical.
+- Where to look: `onDocumentCreated`, `onDocumentWritten`, `functions.firestore.document(...).onCreate`, `beforeUserCreated`; `setCustomUserClaims(` calls with a value read from a document the user writes.
+- How to confirm by reading the code: see where the granted role comes from. If it comes from a client-writable document (`users/{uid}.role`), the user promotes themselves.
+- Ruled out if: the role comes from a source the client doesn't write (invite table created by the server, list of admins in code/config).
+- Not ruled out by: "the sign-up screen has no role field".
+- How to fix: grant roles only from server data; deny writes to the field in the rules.
 - CWE: CWE-269
 
-## firebase-app-check-como-authz — App Check tratado como autorização
-- Gravidade típica: média (a confusão costuma esconder uma regra aberta, que é o achado real).
-- Onde procurar: comentários/código que dizem "protegido pelo App Check"; `enforceAppCheck: true` em função sem checagem de `auth`; rules abertas "porque o App Check está ligado".
-- Como confirmar lendo o código: App Check atesta que o pedido veio do app legítimo; não diz quem é o usuário nem o que ele pode acessar, e pode ser contornado por quem roda o app. Veja se, sem App Check, a regra/função seria aberta.
-- Descarta se: rules e funções têm autorização por usuário e o App Check é camada extra.
-- Não descarta: App Check "enforced" no console como única defesa.
-- Como corrigir: manter App Check, mas escrever rules/checagens por usuário.
+## firebase-app-check-como-authz — App Check treated as authorization
+- Typical severity: medium (the confusion usually hides an open rule, which is the real finding).
+- Where to look: comments/code saying "protected by App Check"; `enforceAppCheck: true` on a function without an `auth` check; open rules "because App Check is on".
+- How to confirm by reading the code: App Check attests that the request came from the legitimate app; it doesn't say who the user is or what they can access, and it can be bypassed by whoever runs the app. See whether, without App Check, the rule/function would be open.
+- Ruled out if: rules and functions have per-user authorization and App Check is an extra layer.
+- Not ruled out by: App Check "enforced" in the console as the only defense.
+- How to fix: keep App Check, but write per-user rules/checks.
 - CWE: CWE-285

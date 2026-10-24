@@ -5,6 +5,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { t } from './i18n.mjs'
 
 // .env usados no computador (o .env.production é o do app no ar).
 const LOCAL_ENV = ['.env', '.env.local', '.env.development', '.env.development.local', '.dev.vars']
@@ -83,8 +84,8 @@ export function remoteNote(dbs) {
   if (!dbs.length) return null
   const d = dbs.find((x) => x.sameAsProduction) ?? dbs[0]
   return d.sameAsProduction
-    ? `O ${d.file} deste computador aponta para ${d.host}, o mesmo banco do app no ar: isso mexe nos dados reais dos usuários.`
-    : `O ${d.file} deste computador aponta para um banco na nuvem (${d.host}); se for o banco do app no ar, isso mexe nos dados reais dos usuários.`
+    ? `The ${d.file} on this computer points to ${d.host}, the same database as the live app: this touches the users' real data.`
+    : `The ${d.file} on this computer points to a cloud database (${d.host}); if it is the live app's database, this touches the users' real data.`
 }
 
 /** Achado de segurança (painel): o ambiente local usa um banco na nuvem. */
@@ -94,10 +95,21 @@ export function remoteDatabaseFindings(root) {
     rule_id: 'local-env-remote-db',
     severity: d.sameAsProduction ? 'high' : 'medium',
     confidence: d.sameAsProduction ? 'high' : 'medium',
-    title: d.sameAsProduction ? `O ambiente local usa o banco de produção (${d.host})` : `O ambiente local usa um banco na nuvem (${d.host})`,
-    detail: `A variável ${d.name}, no ${d.file}, aponta para ${d.host}${d.sameAsProduction ? ', o mesmo banco do app no ar' : ''}. Tudo o que o agente roda no seu computador (migrações, seed, testes, scripts) vai para esse banco.`,
-    impact: 'Um erro do agente (apagar uma tabela, rodar uma migração errada, um teste que limpa dados) atinge os dados reais dos usuários, e o ponto de volta do Faundr não guarda o banco.',
-    fix: 'Use um banco só para desenvolvimento: no Supabase, "supabase start" sobe um banco local (ou crie um segundo projeto para testes) e ponha o endereço dele no .env; deixe o endereço de produção só na hospedagem. Até lá, confira se há backup automático do banco de produção.',
+    title: d.sameAsProduction
+      ? t(`The local environment uses the production database (${d.host})`, `O ambiente local usa o banco de produção (${d.host})`)
+      : t(`The local environment uses a cloud database (${d.host})`, `O ambiente local usa um banco na nuvem (${d.host})`),
+    detail: t(
+      `The variable ${d.name}, in ${d.file}, points to ${d.host}${d.sameAsProduction ? ', the same database as the live app' : ''}. Everything the agent runs on your computer (migrations, seed, tests, scripts) goes to that database.`,
+      `A variável ${d.name}, no ${d.file}, aponta para ${d.host}${d.sameAsProduction ? ', o mesmo banco do app no ar' : ''}. Tudo o que o agente roda no seu computador (migrações, seed, testes, scripts) vai para esse banco.`,
+    ),
+    impact: t(
+      "A mistake by the agent (dropping a table, running the wrong migration, a test that wipes data) hits the users' real data, and Faundr's restore point does not cover the database.",
+      'Um erro do agente (apagar uma tabela, rodar uma migração errada, um teste que limpa dados) atinge os dados reais dos usuários, e o ponto de volta do Faundr não guarda o banco.',
+    ),
+    fix: t(
+      'Use a database just for development: in Supabase, "supabase start" runs a local database (or create a second project for testing) and put its address in .env; keep the production address only in your hosting. Until then, check that the production database has automatic backups.',
+      'Use um banco só para desenvolvimento: no Supabase, "supabase start" sobe um banco local (ou crie um segundo projeto para testes) e ponha o endereço dele no .env; deixe o endereço de produção só na hospedagem. Até lá, confira se há backup automático do banco de produção.',
+    ),
     file: d.file,
     line: null,
     snippet: null,

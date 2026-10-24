@@ -25,9 +25,9 @@ test('padrão proibido: só nos arquivos da regra e só quando o texto tem o pad
   )
   assert.deepEqual(forbiddenIn(rules, 'src/components/A.tsx', 'const x = 1'), [])
   const note = forbiddenNote('src/components/A.tsx', forbiddenIn(rules, 'src/components/A.tsx', code))
-  assert.match(note, /contraria 2 regras do time/)
+  assert.match(note, /breaks 2 team rules/)
   assert.match(note, /Usar fetch, não axios/)
-  assert.match(note, /Trecho: import axios/)
+  assert.match(note, /Excerpt: import axios/)
   assert.equal(forbiddenNote('a.ts', []), null)
 })
 

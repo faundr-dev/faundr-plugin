@@ -1,19 +1,19 @@
 ---
-description: 'Registra uma regra do time no Faundr. Com arquivos ou padrões (ex.: src/server/**), a regra chega ao agente na hora de editar esses arquivos, em vez de no início de toda sessão.'
-argument-hint: '<regra> [porque ...] [em <arquivos ou pastas>]'
+description: 'Records a team rule in Faundr. With files or patterns (e.g. src/server/**), the rule reaches the agent when it edits those files, instead of at the start of every session.'
+argument-hint: '<rule> [because ...] [in <files or folders>]'
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *)
 ---
 
-Pedido do usuário: $ARGUMENTS
+User request: $ARGUMENTS
 
-Separe a regra (curta e afirmativa, ex.: "Toda rota do servidor confere o acesso ao projeto"), o porquê e, se o usuário citou arquivos, pastas ou tipos de arquivo, os caminhos. Use caminhos a partir da raiz do projeto: um arquivo (`src/server/hook-events.ts`), uma pasta (`src/server`) ou um padrão (`src/routes/**/*.ts`, `*.sql`). Rode com a ferramenta Bash, com aspas, um `--file` por caminho:
-`node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" rule "<regra>" --why "<porquê>" --file "<caminho>"`
+Separate the rule (short and affirmative, e.g. "Every server route checks access to the project"), the why and, if the user mentioned files, folders or file types, the paths. Write the rule and the why in the user's language. Use paths from the project root: a file (`src/server/hook-events.ts`), a folder (`src/server`) or a pattern (`src/routes/**/*.ts`, `*.sql`). Run with the Bash tool, with quotes, one `--file` per path:
+`node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" rule "<rule>" --why "<why>" --file "<path>"`
 
-Sem caminhos, a regra vale para tudo e entra no início de toda sessão. Se a regra claramente fala de uma parte do código mas o usuário não disse onde, sugira os caminhos (use `faundr graph-query` se houver grafo) e pergunte em uma frase antes de registrar.
+Without paths, the rule applies to everything and goes in at the start of every session. If the rule clearly talks about a part of the code but the user did not say where, suggest the paths (use `faundr graph-query` if there is a graph) and ask in one sentence before recording.
 
-Confirme em uma frase: com caminhos, diga que ela chega ao agente antes de ele editar esses arquivos (já nesta sessão); sem caminhos, que todo agente recebe a regra a partir da próxima sessão.
+Confirm in one sentence: with paths, say it reaches the agent before it edits those files (already in this session); without paths, that every agent gets the rule from the next session on.
 
-Se a regra proíbe algo que dá para achar pelo texto do código (uma biblioteca, uma função, um jeito de escrever: "não usar axios", "sem console.log nas telas", "nada de chave do Stripe no front"), acrescente `--forbid "<expressão regular>"` (ex.: `--forbid "from ['\"]axios['\"]"`). Assim o Faundr avisa antes de uma edição que traga isso e a checagem de qualidade aponta onde já existe. Diga ao usuário o padrão que usou.
+If the rule forbids something that can be found by the code's text (a library, a function, a way of writing: "do not use axios", "no console.log in screens", "no Stripe key in the front end"), add `--forbid "<regular expression>"` (e.g. `--forbid "from ['\"]axios['\"]"`). That way Faundr warns before an edit that brings it in and the quality check points out where it already exists. Tell the user the pattern you used.
 
-Se a regra muda uma anterior, acrescente `--replaces "<trecho do título da antiga>"`: a antiga fica obsoleta. Se o comando avisar que ela "parece com" outra, diga ao usuário qual e pergunte se a antiga deve ser aposentada (`faundr memory-edit <id> --obsolete`).
+If the rule changes an earlier one, add `--replaces "<part of the old one's title>"`: the old one becomes obsolete. If the command warns that it "parece com" another one, tell the user which and ask whether the old one should be retired (`faundr memory-edit <id> --obsolete`).

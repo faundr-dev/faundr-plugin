@@ -32,14 +32,14 @@ export function liveOthers(team, sid, now = Date.now()) {
 const minutes = (iso, now) => Math.max(1, Math.round((now - Date.parse(iso)) / 60_000))
 
 function where(s) {
-  return [AGENT_LABEL[s.agent] ?? s.agent, s.machine && `em ${s.machine}`, s.branch && `na branch ${s.branch}`].filter(Boolean).join(' ')
+  return [AGENT_LABEL[s.agent] ?? s.agent, s.machine && `on ${s.machine}`, s.branch && `on branch ${s.branch}`].filter(Boolean).join(' ')
 }
 
 function doing(s) {
-  if (s.status === 'editing' && s.detail) return `editando ${s.detail}`
-  if (s.files?.length) return `mexendo em ${s.files.slice(0, 3).map((f) => f.path).join(', ')}`
-  if (s.status === 'running') return 'rodando um comando'
-  return s.status === 'idle' ? 'parado, esperando o próximo pedido' : 'trabalhando'
+  if (s.status === 'editing' && s.detail) return `editing ${s.detail}`
+  if (s.files?.length) return `working on ${s.files.slice(0, 3).map((f) => f.path).join(', ')}`
+  if (s.status === 'running') return 'running a command'
+  return s.status === 'idle' ? 'idle, waiting for the next request' : 'working'
 }
 
 const signature = (others) => others.map((s) => `${s.id}:${(s.files ?? []).slice(0, 3).map((f) => f.path).join(',')}`).sort().join('|')
@@ -53,10 +53,10 @@ export function teamPromptNote(team, sid, lastSig, now = Date.now()) {
   const sig = signature(others)
   if (sig === (lastSig ?? '')) return { note: null, sig }
   const seen = new Set((lastSig ?? '').split('|').filter(Boolean).map((x) => x.split(':')[0]))
-  if (!others.length) return { note: seen.size ? '[Faundr] Time: ninguém mais está trabalhando no projeto agora.' : null, sig }
-  const lines = others.map((s) => `${seen.has(s.id) ? '' : 'entrou: '}${s.name} (${where(s)}): ${doing(s)}`)
+  if (!others.length) return { note: seen.size ? '[Faundr] Team: nobody else is working on the project right now.' : null, sig }
+  const lines = others.map((s) => `${seen.has(s.id) ? '' : 'joined: '}${s.name} (${where(s)}): ${doing(s)}`)
   const age = minutes(team.at, now)
-  const text = `[Faundr] Time agora${age > 5 ? ` (foto de ${age} min atrás)` : ''}: ${lines.join('; ')}. Evite mexer nos mesmos arquivos sem combinar; se precisar, avise o usuário.`
+  const text = `[Faundr] Team now${age > 5 ? ` (snapshot from ${age} min ago)` : ''}: ${lines.join('; ')}. Avoid touching the same files without agreeing first; if you need to, tell the user.`
   return { note: text.length > 700 ? `${text.slice(0, 690)}…` : text, sig }
 }
 
@@ -66,8 +66,8 @@ export function fileWarning(team, sid, rel, now = Date.now()) {
     .map((s) => ({ s, f: (s.files ?? []).find((f) => f.path === rel) ?? (s.status === 'editing' && s.detail === rel ? { path: rel, at: s.lastAt } : null) }))
     .filter((h) => h.f)
   if (!hits.length) return null
-  const who = hits.map(({ s, f }) => `${s.name}${s.user === team.you ? ' (outra sessão sua)' : ''}, ${where(s)}, mexeu nele há ${minutes(f.at, now)} min e agora está ${doing(s)}`).join('; ')
-  return `[Faundr] Atenção: ${rel} está sendo mexido por outra sessão: ${who}. Se vocês mudarem as mesmas linhas, uma mudança pode apagar a outra. Mude só o necessário, diga ao usuário que este arquivo também está com outra pessoa e, se a mudança for grande, pergunte se ele quer combinar antes.`
+  const who = hits.map(({ s, f }) => `${s.name}${s.user === team.you ? ' (another session of yours)' : ''}, ${where(s)}, changed it ${minutes(f.at, now)} min ago and is now ${doing(s)}`).join('; ')
+  return `[Faundr] Warning: ${rel} is being changed by another session: ${who}. If you both change the same lines, one change can wipe out the other. Change only what is needed, tell the user this file is also being worked on by someone else and, if the change is large, ask whether they want to coordinate first.`
 }
 
 /** Push direto na main com outra pessoa ativa: pede o OK do usuário (o combinado é juntar pela mesa de trabalho). */
@@ -77,15 +77,15 @@ export function pushWarning(team, sid, command, branch, now = Date.now()) {
   if (!MAIN_BRANCHES.has(target ?? '')) return null
   const people = liveOthers(team, sid, now).filter((s) => s.user !== team.you)
   if (!people.length) return null
-  return `[Faundr] ${people.map((s) => s.name).join(', ')} ${people.length === 1 ? 'está' : 'estão'} trabalhando no projeto agora. Mandar direto para o projeto principal (${target}) pode atrapalhar o trabalho ${people.length === 1 ? 'dela' : 'delas'}; o combinado é juntar pela mesa de trabalho (skill "mesa" do Faundr). Confirme com o usuário antes.`
+  return `[Faundr] ${people.map((s) => s.name).join(', ')} ${people.length === 1 ? 'is' : 'are'} working on the project right now. Pushing straight to the main project (${target}) can get in the way of their work; the agreement is to merge through the workbench (Faundr "merge" skill). Confirm with the user first.`
 }
 
 /** Linhas do `faundr team`. */
 export function teamLines(team, sid, now = Date.now()) {
   const others = (team?.sessions ?? []).filter((s) => s.id !== sid)
-  if (!others.length) return ['Ninguém mais está trabalhando no projeto agora.']
+  if (!others.length) return ['Nobody else is working on the project right now.']
   return others.map((s) => {
     const files = (s.files ?? []).map((f) => f.path)
-    return `- ${s.name}${s.user === team.you ? ' (você, outra sessão)' : ''} · ${where(s)} · ${doing(s)} · última notícia há ${minutes(s.lastAt, now)} min${files.length ? `\n  arquivos da última hora: ${files.join(', ')}` : ''}`
+    return `- ${s.name}${s.user === team.you ? ' (you, another session)' : ''} · ${where(s)} · ${doing(s)} · last seen ${minutes(s.lastAt, now)} min ago${files.length ? `\n  files from the last hour: ${files.join(', ')}` : ''}`
   })
 }

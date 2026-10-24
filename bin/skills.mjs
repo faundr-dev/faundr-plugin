@@ -152,17 +152,17 @@ export function skillsForPrompt(list, prompt, shownIds = [], max = 2) {
 
 // Quando usar a skill: o "quando" que o time escreveu ou, sem ele, a descrição.
 function skillWhen(s) {
-  if (s.when) return ` — quando: ${s.when}`
+  if (s.when) return ` — when: ${s.when}`
   return s.description ? ` — ${clip(s.description, 160)}` : ''
 }
 
 /** Linha de uma skill no aviso: a que só a pessoa chama vira um lembrete em uma linha para ela, nunca uma chamada. */
 const skillLine = (s) =>
-  `- ${onlyUser(s) ? `/${s.name} (só a pessoa chama: não rode; diga em uma linha "isso parece trabalho para /${s.name}, quer rodar?")` : `skill ${s.name}`}${skillWhen(s)}`
+  `- ${onlyUser(s) ? `/${s.name} (only the person calls it: do not run it; say in one line "this looks like a job for /${s.name}, want to run it?")` : `skill ${s.name}`}${skillWhen(s)}`
 
-export function skillNote(items, where = 'este tipo de pedido') {
+export function skillNote(items, where = 'this kind of request') {
   if (!items.length) return null
-  return [`[Faundr] O time usa estas skills para ${where} (chame antes de fazer na mão, se fizer sentido):`, ...items.map(skillLine)].join('\n')
+  return [`[Faundr] The team uses these skills for ${where} (call them before doing it by hand, if it makes sense):`, ...items.map(skillLine)].join('\n')
 }
 
 /** Skills com o momento "antes de editar" cujos arquivos batem com o arquivo editado. */
@@ -182,13 +182,57 @@ function skillsShownOnce(root, sid, pick, where) {
   return skillNote(items, where)
 }
 
-export const skillsOnce = (root, sid, prompt) => skillsShownOnce(root, sid, (list, ids) => skillsForPrompt(list, prompt, ids), 'este tipo de pedido')
+export const skillsOnce = (root, sid, prompt) => skillsShownOnce(root, sid, (list, ids) => skillsForPrompt(list, prompt, ids), 'this kind of request')
 
-export const skillsFileOnce = (root, sid, rel) => skillsShownOnce(root, sid, (list, ids) => skillsForFile(list, rel, ids), `a edição de ${rel}`)
+export const skillsFileOnce = (root, sid, rel) => skillsShownOnce(root, sid, (list, ids) => skillsForFile(list, rel, ids), `editing ${rel}`)
 
 /** Skill que o Claude não pode chamar sozinho (o time escolheu "Só você no terminal"); null quando pode. */
 export function blockedSkill(root, name) {
   const short = String(name ?? '').replace(/^\//, '')
   const s = readSkillIndex(root).find((x) => x.name === short || x.name.split(':').pop() === short)
   return s && s.call === 'user' ? s : null
+}
+
+// ---- Skills conectadas ao painel ---------------------------------------------------------------------------------
+// Skill de outra pessoa marcada como de segurança, testes, qualidade ou erros (faundr skills when --kind): quando ela
+// roda (o Claude chama ou a pessoa digita /nome), o fim da resposta pede para registrar o resultado com
+// faundr skill-report. A lista fica no estado da pasta, por sessão.
+
+export const CONNECTED_KINDS = { seguranca: 'security', testes: 'tests', qualidade: 'code quality', erros: 'app errors' }
+
+const stateFile = (root) => faundrPath(root, 'state')
+
+/** A skill do índice local, se ela é conectada (tem tipo e não é do Faundr). */
+export function connectedSkill(root, name) {
+  const clean = String(name ?? '').trim().replace(/^\//, '')
+  const s = readSkillIndex(root).find((x) => x.name === clean)
+  return s && Object.hasOwn(CONNECTED_KINDS, s.kind ?? '') && !s.name.startsWith('faundr:') ? s : null
+}
+
+/** "/nome args" digitado pela pessoa: o nome da skill, se for um. */
+export function typedSkill(prompt) {
+  return String(prompt ?? '').trim().match(/^\/([\w.:-]+)/)?.[1] ?? null
+}
+
+/** Anota que uma skill conectada rodou nesta sessão (devolve a skill, ou null se não é conectada). */
+export function noteSkillRan(root, sid, name) {
+  const s = sid ? connectedSkill(root, name) : null
+  if (!s) return null
+  const state = readJson(stateFile(root)) ?? {}
+  const list = state.skillsRan?.session === sid ? state.skillsRan.list : []
+  fs.mkdirSync(path.dirname(stateFile(root)), { recursive: true })
+  fs.writeFileSync(stateFile(root), JSON.stringify({ ...state, skillsRan: { session: sid, list: [...new Set([...list, s.name])] } }, null, 2))
+  return s
+}
+
+/** Passos do fim da resposta para as skills conectadas que rodaram; esvazia a lista (cada rodada pede uma vez). */
+export function takeSkillsRan(root, sid) {
+  const state = readJson(stateFile(root)) ?? {}
+  if (state.skillsRan?.session !== sid || !state.skillsRan.list?.length) return []
+  fs.writeFileSync(stateFile(root), JSON.stringify({ ...state, skillsRan: { session: sid, list: [] } }, null, 2))
+  return state.skillsRan.list.map((name) => connectedSkill(root, name)).filter(Boolean).map(skillReportStep)
+}
+
+export function skillReportStep(s) {
+  return `the /${s.name} skill (connected to Faundr: ${CONNECTED_KINDS[s.kind]}) ran in this response: record its result on the dashboard. Write a JSON list to a temporary file with each problem it found and each one fixed in this conversation: {"area":"seguranca|qualidade|testes|erros","status":"open|fixed","title":"<the problem, short>","severity":"critical|high|medium|low","file":"<path>","line":<n>,"detail":"<what it is, in plain language, in the user's language>","impact":"<what can happen>","fix":"<how to fix it>"} and run faundr skill-report "${s.name}" --areas ${s.kind} --file <file> (add --scope a,b if it looked at only some files). If it found nothing, run faundr skill-report "${s.name}" --areas ${s.kind} --none (closes what it had found before). Record only what is in its result, without making things up or repeating what Faundr already shows`
 }

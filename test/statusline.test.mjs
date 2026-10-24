@@ -4,6 +4,10 @@ import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
 import { bar, barPrefs, installStatusline, launcherSource, meterItems, metersSnapshot, resetText, statusFromBoard, statusLine, visible } from '../bin/statusline.mjs'
+import { setLang } from '../bin/i18n.mjs'
+
+// A barra sai na língua da pessoa; os textos abaixo são os em português (a prévia do painel também).
+setLang('pt')
 
 const board = {
   projectName: 'Lojinha',
@@ -20,6 +24,10 @@ test('barra: projeto, funcionalidade com progresso, passo atual, grafo e preocup
   assert.equal(statusLine(s, { graph: 'fresh' }), 'Faundr · Lojinha · Frete grátis 1/3 · agora: Testes · grafo em dia · 2 preocupação(ões)')
   assert.equal(statusLine(statusFromBoard(board, 'nada', null), { graph: null }), 'Faundr · sem funcionalidade atual · 2 preocupação(ões)')
   assert.equal(statusLine(undefined), 'Faundr · sem funcionalidade atual')
+  setLang('en')
+  assert.equal(statusLine(s, { graph: 'fresh' }), 'Faundr · Lojinha · Frete grátis 1/3 · now: Testes · map up to date · 2 concerns')
+  assert.equal(statusLine(undefined), 'Faundr · no current feature')
+  setLang('pt')
   assert.ok(statusLine(s, { width: 20 }).length <= 20)
 })
 

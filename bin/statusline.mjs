@@ -3,6 +3,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { t } from './i18n.mjs'
 
 /** Resumo para a barra a partir do quadro (faundr board): funcionalidade atual, progresso, próximo passo, preocupações. */
 export function statusFromBoard(board, currentFeatureId, projectName, now = Date.now()) {
@@ -59,13 +60,14 @@ export const bar = (pct) => {
   return '█'.repeat(on) + '░'.repeat(5 - on)
 }
 
-const WEEKDAY = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb']
-/** Quando a janela zera: "18:40" se for hoje, "sáb 09:00" se não. `resetsAt` em segundos (como o Claude Code manda). */
+const WEEKDAY_PT = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb']
+const WEEKDAY_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+/** Quando a janela zera: "18:40" se for hoje, "sáb 09:00" ("Sat 09:00") se não. `resetsAt` em segundos (como o Claude Code manda). */
 export function resetText(resetsAt, now = Date.now()) {
   const d = new Date(Number(resetsAt) * 1000)
   if (!Number.isFinite(d.getTime())) return null
   const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-  return new Date(now).toDateString() === d.toDateString() ? hm : `${WEEKDAY[d.getDay()]} ${hm}`
+  return new Date(now).toDateString() === d.toDateString() ? hm : `${t(WEEKDAY_EN, WEEKDAY_PT)[d.getDay()]} ${hm}`
 }
 
 const pctOf = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
@@ -86,18 +88,18 @@ export function meterItems(input, prefs = DEFAULT_BAR, now = Date.now()) {
   const { items, alerts } = barPrefs(prefs)
   const out = []
   const ctx = pctOf(input?.context_window?.used_percentage)
-  if (items.contexto && ctx !== null) out.push(meter('ctx', ctx, { alerts, hint: ctx >= 95 ? 'use /compact já' : 'hora de /compact' }))
+  if (items.contexto && ctx !== null) out.push(meter('ctx', ctx, { alerts, hint: ctx >= 95 ? t('use /compact now', 'use /compact já') : t('time to /compact', 'hora de /compact') }))
   const limit = (key, label, show) => {
     const w = input?.rate_limits?.[key]
     const p = pctOf(w?.used_percentage)
     if (!show || p === null) return
     const at = resetText(w?.resets_at, now)
-    out.push(meter(label, p, { alerts, hint: at ? `zera ${at}` : '' }))
+    out.push(meter(label, p, { alerts, hint: at ? t(`resets ${at}`, `zera ${at}`) : '' }))
   }
   limit('five_hour', '5h', items.cinco_horas)
-  limit('seven_day', 'sem', items.semana)
+  limit('seven_day', t('wk', 'sem'), items.semana)
   const usd = pctOf(input?.cost?.total_cost_usd)
-  if (items.custo && usd !== null) out.push(`US$ ${usd.toFixed(2).replace('.', ',')}`)
+  if (items.custo && usd !== null) out.push(t(`US$ ${usd.toFixed(2)}`, `US$ ${usd.toFixed(2).replace('.', ',')}`))
   return out
 }
 
@@ -137,11 +139,11 @@ export function statusLine(status, { graph = null, width = 120, input = null, pr
   const f = status?.feature
   if (items.funcionalidade) {
     if (f) parts.push(`${cut(f.title, 40)}${f.total ? ` ${f.done}/${f.total}` : ''}`)
-    else parts.push('sem funcionalidade atual')
+    else parts.push(t('no current feature', 'sem funcionalidade atual'))
   }
-  if (items.passo && f?.next) parts.push(`agora: ${cut(f.next, 40)}`)
-  if (items.grafo && graph) parts.push(graph === 'fresh' ? 'grafo em dia' : 'grafo atualizando')
-  if (items.preocupacoes && status?.concerns) parts.push(`${status.concerns} preocupação(ões)`)
+  if (items.passo && f?.next) parts.push(`${t('now', 'agora')}: ${cut(f.next, 40)}`)
+  if (items.grafo && graph) parts.push(graph === 'fresh' ? t('map up to date', 'grafo em dia') : t('map updating', 'grafo atualizando'))
+  if (items.preocupacoes && status?.concerns) parts.push(t(`${status.concerns} concern${status.concerns === 1 ? '' : 's'}`, `${status.concerns} preocupação(ões)`))
   const head = cut(parts.join(' · '), width)
   const meters = input ? meterItems(input, prefs, now) : []
   if (!meters.length) return head
@@ -161,6 +163,7 @@ export function launcherSource(fallback) {
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { t } from './i18n.mjs'
 import { pathToFileURL } from 'node:url'
 const base = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'plugins', 'cache', 'faundr', 'faundr')
 const num = (v) => v.split('.').map(Number)
@@ -185,12 +188,24 @@ export function installStatusline({ pluginFile, force = false, home = os.homedir
   try {
     settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8'))
   } catch (err) {
-    if (err.code !== 'ENOENT') return { ok: false, reason: `não consegui ler ${settingsFile}: ${err.message}` }
+    if (err.code !== 'ENOENT') return { ok: false, reason: t(`could not read ${settingsFile}: ${err.message}`, `não consegui ler ${settingsFile}: ${err.message}`) }
   }
   const command = `node "${launcher.split(path.sep).join('/')}"`
   const current = settings.statusLine
   if (current?.command === command) return { ok: true, already: true, settingsFile }
-  if (current && !force) return { ok: false, reason: `já existe uma barra de status (${current.command ?? JSON.stringify(current)}). Para trocar pela do Faundr: faundr statusline-install --force`, settingsFile }
+  if (current && !force) {
+    const other = current.command ?? JSON.stringify(current)
+    // `exists`: quem chama decide pelo campo, não pelo texto (que muda com a língua).
+    return {
+      ok: false,
+      exists: true,
+      reason: t(
+        `a status line already exists (${other}). To replace it with Faundr's: faundr statusline-install --force`,
+        `já existe uma barra de status (${other}). Para trocar pela do Faundr: faundr statusline-install --force`,
+      ),
+      settingsFile,
+    }
+  }
   settings.statusLine = { type: 'command', command, padding: 0 }
   fs.mkdirSync(path.dirname(settingsFile), { recursive: true })
   fs.writeFileSync(settingsFile, `${JSON.stringify(settings, null, 2)}\n`)

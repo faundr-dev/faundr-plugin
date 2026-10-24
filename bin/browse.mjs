@@ -59,13 +59,13 @@ export function parseBrowseArgs(argv, env = process.env) {
     else if (a === '--secret-env') {
       // Senha vem de variável de ambiente: não aparece no comando, no log nem para o Jev.
       const name = argv[++i]
-      if (!env[name]) throw new Error(`A variável ${name} está vazia.`)
+      if (!env[name]) throw new Error(`The variable ${name} is empty.`)
       out.secrets.push({ name, value: env[name] })
     }
   }
   if (!out.url || !out.goal)
     throw new Error(
-      'uso: faundr browse --url <endereço> --goal "<objetivo>" [--value "<texto>"]... [--secret-env VAR] [--show | --chrome] [--shot <arquivo.png>] [--style]',
+      'usage: faundr browse --url <address> --goal "<goal>" [--value "<text>"]... [--secret-env VAR] [--show | --chrome] [--shot <file.png>] [--style]',
     )
   // Valores entre aspas no próprio objetivo também valem.
   for (const m of out.goal.matchAll(/["“]([^"”]+)["”]/g)) if (!out.values.includes(m[1])) out.values.push(m[1])
@@ -140,9 +140,9 @@ class Browser {
     try {
       res = await this.call('Runtime.evaluate', { expression, returnByValue: true, ...extra })
     } catch {
-      throw new StalePage('Documento mudou durante a leitura')
+      throw new StalePage('Document changed while reading')
     }
-    if (res.exceptionDetails) throw new StalePage('Documento mudou durante a leitura')
+    if (res.exceptionDetails) throw new StalePage('Document changed while reading')
     return res.result?.value
   }
 
@@ -194,7 +194,7 @@ class Browser {
       }
       await sleep(50)
     }
-    throw new StalePage('A página não terminou de carregar')
+    throw new StalePage('The page did not finish loading')
   }
 
   async fresh(page, action) {
@@ -209,7 +209,7 @@ class Browser {
   }
 
   async act(action, page, text) {
-    if (!(await this.fresh(page, action))) throw new StalePage('A página mudou desde a decisão')
+    if (!(await this.fresh(page, action))) throw new StalePage('The page changed since the decision')
     if (action.kind === 'wait') {
       await sleep(100)
       return
@@ -234,7 +234,7 @@ class Browser {
         }
         return {x,y};
       })(${JSON.stringify(action)})`)
-      if (!target) throw new StalePage('O alvo mudou ou está coberto')
+      if (!target) throw new StalePage('The target changed or is covered')
       if (action.kind !== 'select') {
         for (const type of ['mousePressed', 'mouseReleased'])
           await this.call('Input.dispatchMouseEvent', { type, x: target.x, y: target.y, button: 'left', clickCount: 1 })
@@ -300,7 +300,7 @@ export function validateChoice(answer, ids) {
     ids.includes(answer.choice) &&
     Object.keys(p).length === ids.length &&
     ids.every((id) => typeof p[id] === 'number' && p[id] >= 0 && p[id] <= 1)
-  if (!ok) throw new Error('Resposta inválida do Jev; nada foi executado.')
+  if (!ok) throw new Error('Invalid answer from Jev; nothing was executed.')
   return answer
 }
 
@@ -326,7 +326,7 @@ class Jev {
         await sleep(500 * 2 ** attempt)
         continue
       }
-      if (!res.ok) throw new Error(`Jev respondeu HTTP ${res.status}; nada foi executado.`)
+      if (!res.ok) throw new Error(`Jev answered HTTP ${res.status}; nothing was executed.`)
       const json = await res.json()
       this.calls++
       this.inputTokens += json.usage?.input_tokens ?? 0
@@ -334,7 +334,7 @@ class Jev {
       this.ms += performance.now() - started
       return json.answers
     }
-    throw new Error('Jev indisponível')
+    throw new Error('Jev unavailable')
   }
 }
 
@@ -418,9 +418,9 @@ async function decideAndAct(run) {
   run.decisions++
   const { operation, action, state } = await choose(run.jev, run.page, args.goal, history, args.values, args.secrets, run.trace)
   if (operation === 'DONE' || operation === 'BLOCKED') {
-    if (!(await browser.fresh(run.page))) throw new StalePage('A página mudou antes de concluir')
+    if (!(await browser.fresh(run.page))) throw new StalePage('The page changed before finishing')
     run.status = operation === 'DONE' ? 'done' : 'blocked'
-    run.reason = operation === 'BLOCKED' ? 'o Jev não achou como avançar' : ''
+    run.reason = operation === 'BLOCKED' ? 'Jev found no way to move forward' : ''
     return
   }
   let text = null
@@ -429,7 +429,7 @@ async function decideAndAct(run) {
     const picked = await chooseValue(run.jev, state, args.goal, action, args.values, args.secrets)
     if (picked == null) {
       run.status = 'blocked'
-      run.reason = `nenhum valor serve para o campo "${action.label}"`
+      run.reason = `no value fits the field "${action.label}"`
       return
     }
     ;({ text, secret } = picked)
@@ -441,14 +441,14 @@ async function decideAndAct(run) {
     ms: Math.round(performance.now() - run.started),
     action: action.label,
     kind: action.kind,
-    ...(text != null ? { text: secret ? '[senha oculta]' : text } : {}),
+    ...(text != null ? { text: secret ? '[hidden password]' : text } : {}),
     page_changed: run.page.fingerprint !== before,
   }
   history.push(step)
   run.log(`${String(step.ms).padStart(6)} ms  ${operation.padEnd(11)} ${action.label}${step.text ? ` ← "${step.text}"` : ''}`)
   if (stuck(history)) {
     run.status = 'blocked'
-    run.reason = `repetiu "${step.action}" sem a página mudar`
+    run.reason = `repeated "${step.action}" without the page changing`
   }
 }
 
@@ -457,7 +457,7 @@ async function runSteps(run) {
   while (run.status === 'running') {
     if (run.decisions >= MAX_DECISIONS || run.history.length >= MAX_ACTIONS) {
       run.status = 'blocked'
-      run.reason = 'limite de passos'
+      run.reason = 'step limit reached'
       return
     }
     try {
@@ -471,7 +471,7 @@ async function runSteps(run) {
 }
 
 export async function browse(args, { key, profile, log = () => {} }) {
-  if (!key) throw new Error('Falta a chave do Jev: defina TYPESAFE_API_KEY ou rode faundr browse-key.')
+  if (!key) throw new Error('The Jev key is missing: set TYPESAFE_API_KEY or run faundr browse-key.')
   const jev = new Jev(key)
   // --chrome: o Chrome do dono, pela extensão do Faundr; senão um Chrome próprio, com perfil separado.
   let child = null

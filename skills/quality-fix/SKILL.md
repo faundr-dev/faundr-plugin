@@ -1,64 +1,64 @@
 ---
-description: Corrige um problema de qualidade registrado no Faundr (Q-n) sem mudar o comportamento do app, e só dá como resolvido quando a checagem não encontra mais o problema (ou, nos da revisão com IA, depois de reler e conferir). Sem argumento, corrige os altos abertos, um de cada vez; com --all, corrige todos os abertos, sem parar.
+description: Fixes a quality problem recorded in Faundr (Q-n) without changing the app's behavior, and only marks it resolved when the check no longer finds the problem (or, for AI review findings, after rereading and checking). With no argument, fixes the open high ones, one at a time; with --all, fixes all the open ones, without stopping.
 argument-hint: '"[Q-<n> | --all]"'
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *) Bash(npm run *) Bash(npx tsc *) Bash(npm uninstall *) Bash(git diff *) Bash(git status *) Bash(git ls-files *) Read Grep Glob Edit Write
 ---
 
-## Problema a corrigir
+## Problem to fix
 
-Argumentos: `$ARGUMENTS`
+Arguments: `$ARGUMENTS`
 
 !`node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" quality-show $ARGUMENTS`
 
-Se aparecer erro, "corrigido" ou "Nenhum problema", avise o usuário e pare. Sem argumento, a lista acima são os abertos: trabalhe só nos **altos**, um de cada vez (rode `faundr quality-show Q-<n>` para ver cada um). Com `--all`, trabalhe em **todos** os da lista, na ordem dela (altos primeiro), seguindo o "Modo --all" no fim.
+If an error, "fixed" or "No open quality problems" shows up, tell the user and stop. With no argument, the list above is the open ones: work only on the **high** ones, one at a time (run `faundr quality-show Q-<n>` to see each one). With `--all`, work on **all** of the list, in its order (high first), following "--all mode" at the end.
 
-## Regras (comportamento idêntico)
+## Rules (identical behavior)
 
-- **O app tem que fazer exatamente o mesmo depois.** Mesmas entradas, mesmas saídas, mesmos erros, mesma tela. Simplificar não é mudar o que acontece.
-- Corrija **na causa**: antes de editar uma função compartilhada, procure todos os que a chamam (Grep). Uma correção no lugar compartilhado é menor que uma em cada chamador e conserta os "irmãos".
-- Só o que o problema descreve. Não refatore o que não foi apontado nem "aproveite para arrumar" o resto do arquivo.
-- **Nunca corte**: validação de dados de fora, tratamento de erro que evita perda de dados, segurança, acessibilidade, o único teste de uma lógica. "Menos linhas" não é meta: código esperto que ninguém entende não é melhor.
-- Siga o padrão do projeto (CLAUDE.md, design.md, código vizinho): nomes, formato, componentes que já existem.
-- **Peça o OK antes** quando a correção mexer em mais de 2 arquivos, apagar um arquivo, remover um pacote ou mudar algo que outra pessoa usa (função exportada, rota, tabela). Mostre o plano em 3-5 linhas e espere.
-- Se o problema estiver em código gerado, de terceiros ou num teste, diga isso em vez de alterar.
-- **Arquivo fora do git** (`git status` mostra `??`) é trabalho em andamento da pessoa: não mexa, diga isso.
-- **Mudança no banco** (índice, função ou tabela nova) exige migração aplicada no banco de produção: não faça sem o OK; mostre o plano (uma migração só para todos os índices, por exemplo).
-- Simplificou de propósito e há um limite conhecido? Deixe o atalho marcado: `// faundr: <o limite>, <quando melhorar>`. Ele aparece em Qualidade → Atalhos, com dono e idade.
+- **The app has to do exactly the same afterwards.** Same inputs, same outputs, same errors, same screen. Simplifying isn't changing what happens.
+- Fix **at the cause**: before editing a shared function, find all its callers (Grep). A fix in the shared place is smaller than one in each caller and fixes the "siblings".
+- Only what the problem describes. Don't refactor what wasn't pointed out or "take the chance to tidy up" the rest of the file.
+- **Never cut**: validation of outside data, error handling that prevents data loss, security, accessibility, the only test of a piece of logic. "Fewer lines" isn't the goal: clever code nobody understands isn't better.
+- Follow the project's patterns (CLAUDE.md, design.md, neighboring code): names, format, components that already exist.
+- **Ask for the OK first** when the fix touches more than 2 files, deletes a file, removes a package or changes something someone else uses (exported function, route, table). Show the plan in 3-5 lines and wait.
+- If the problem is in generated code, third-party code or a test, say so instead of changing it.
+- **File outside git** (`git status` shows `??`) is the person's work in progress: don't touch it, say so.
+- **Database change** (new index, function or table) requires a migration applied to the production database: don't do it without the OK; show the plan (a single migration for all the indexes, for example).
+- Simplified on purpose and there's a known limit? Leave the shortcut marked: `// faundr: <the limit>, <when to improve>`. It shows up in Quality → Shortcuts, with owner and age.
 
-## Como corrigir, por tipo
+## How to fix, by type
 
-- **Erro engolido / que só loga / trocado por vazio**: trate de verdade (mostre um aviso, devolva o erro para quem chama, registre com contexto). Se ignorar for de propósito (ex.: apagar um arquivo temporário que pode não existir), deixe um comentário dentro do bloco dizendo por quê: isso é a correção.
-- **any / as any / @ts-ignore**: descreva o formato com um tipo; dado de fora vira `unknown` conferido antes de usar; use os tipos que a biblioteca exporta. `@ts-expect-error` só com o motivo na linha.
-- **Função complicada / longa / aninhada**: separe em funções com nomes que digam o que fazem; troque escadas de if por retorno antecipado ou uma tabela; mantenha a ordem dos efeitos (o que é salvo, chamado e mostrado).
-- **Ternário aninhado**: if/else, switch ou um objeto que mapeia o caso ao valor.
-- **Código comentado / código sem uso / export sem uso**: apague (o git guarda). Antes, confira com Grep que nada usa por nome ou por string.
-- **Trecho repetido**: junte numa função ou componente só, no lugar que os dois já importam, e use nos dois. **Antes, confira que os dois arquivos saem juntos**: mesmo pacote e mesmo build/deploy. Pastas publicadas separadas (ex.: o app e um plugin, uma extensão do navegador, um pacote do monorepo com `package.json` próprio, scripts de bench) e scripts injetados soltos numa página (sem `import`) não podem importar um do outro: juntar quebra quem roda separado. Nesse caso não mexa; é repetição de propósito: sugira `quality-ignore --reason de-proposito`.
-- **Pacote dispensável**: troque pelo recurso nativo citado em todos os lugares que usam o pacote e só então `npm uninstall <pacote>` (com o OK do usuário).
-- **Revisão com IA**: siga o "Como resolver" (o substituto concreto) e o tema em `${CLAUDE_PLUGIN_ROOT}/skills/quality/catalog.md`.
+- **Swallowed error / one that only logs / replaced by empty**: handle it for real (show a notice, return the error to the caller, log it with context). If ignoring is on purpose (e.g. deleting a temporary file that may not exist), leave a comment inside the block saying why: that's the fix.
+- **any / as any / @ts-ignore**: describe the shape with a type; outside data becomes `unknown` checked before use; use the types the library exports. `@ts-expect-error` only with the reason on the line.
+- **Complicated / long / nested function**: split it into functions whose names say what they do; replace if ladders with early returns or a table; keep the order of effects (what's saved, called and shown).
+- **Nested ternary**: if/else, switch or an object that maps the case to the value.
+- **Commented-out code / unused code / unused export**: delete it (git keeps it). First, check with Grep that nothing uses it by name or by string.
+- **Repeated snippet**: merge it into a single function or component, in a place both already import, and use it in both. **First, check that both files ship together**: same package and same build/deploy. Separately published folders (e.g. the app and a plugin, a browser extension, a monorepo package with its own `package.json`, bench scripts) and standalone scripts injected into a page (no `import`) can't import from each other: merging breaks whatever runs separately. In that case don't touch it; it's repetition on purpose: suggest `quality-ignore --reason on-purpose`.
+- **Unnecessary package**: replace it with the cited native feature everywhere the package is used and only then `npm uninstall <package>` (with the user's OK).
+- **AI review**: follow the "How to fix" (the concrete replacement) and the theme in `${CLAUDE_PLUGIN_ROOT}/skills/quality/catalog.md`.
 
-## Verificar e fechar
+## Verify and close
 
-1. Para desfazer uma tentativa, edite o arquivo de volta; nunca `git checkout`, `git restore`, `git stash` ou `git reset`, que apagam também mudanças da pessoa (e de outros problemas já corrigidos).
-2. Confira que nada mudou no comportamento: o projeto compila (`npx tsc --noEmit` se for TypeScript) e os testes passam, se existirem. Releia o diff (`git diff`) procurando mudança de comportamento sem querer.
-3. Feche:
-   - Achado da checagem automática: `faundr quality-resolve Q-<n>`. Ele refaz a checagem e só fecha se o problema sumiu; se disser que ainda aparece, revise. Regras que olham o projeto inteiro (trecho repetido, consulta dentro de laço, código/arquivo sem uso) não fecham pelo `quality-resolve`, que confere um arquivo só: fecham na checagem completa, `faundr quality-scan`.
-   - Achado da revisão com IA: releia o código corrigido e feche com `faundr quality-resolve Q-<n> --verified "<o que mudou e como conferiu que o comportamento é o mesmo>"`.
-4. Alarme falso: **não** ignore por conta própria. Explique ao usuário e sugira ignorar pelo painel (seção Qualidade) ou `faundr quality-ignore Q-<n> --reason falso-alarme|de-proposito --note "<por quê>"`, se ele concordar.
+1. To undo an attempt, edit the file back; never `git checkout`, `git restore`, `git stash` or `git reset`, which also wipe the person's changes (and other problems already fixed).
+2. Check that nothing changed in behavior: the project compiles (`npx tsc --noEmit` if it's TypeScript) and the tests pass, if there are any. Reread the diff (`git diff`) looking for unintended behavior changes.
+3. Close:
+   - Automatic check finding: `faundr quality-resolve Q-<n>`. It reruns the check and only closes if the problem is gone; if it says it still shows up, review. Rules that look at the whole project (repeated snippet, query inside a loop, unused code/file) don't close through `quality-resolve`, which checks a single file: they close on the full check, `faundr quality-scan`.
+   - AI review finding: reread the fixed code and close with `faundr quality-resolve Q-<n> --verified "<what changed and how you checked the behavior is the same>"`.
+4. False alarm: **don't** ignore it on your own. Explain to the user and suggest ignoring it from the dashboard (Quality section) or `faundr quality-ignore Q-<n> --reason false-alarm|on-purpose --note "<why>"`, if they agree.
 
-## Modo --all (todos, sem parar)
+## --all mode (all of them, without stopping)
 
-O usuário pediu para resolver tudo de uma vez: **não pare para perguntar** entre um problema e outro. Comece na hora.
+The user asked to resolve everything at once: **don't stop to ask** between one problem and the next. Start right away.
 
-- **Um por vez, na ordem da lista**, com as regras e o "Verificar e fechar" acima. A cada problema fechado, uma linha só: `Q-<n> corrigido (<feitos>/<total>): <o que mudou>`.
-- **O que pediria o OK antes não trava o resto** (mais de 2 arquivos, apagar arquivo, remover pacote, mudar algo que outra pessoa usa, alarme falso a ignorar): não faça; anote em "Esperam você", com o plano em uma linha, e siga para o próximo.
-- **Problemas no mesmo arquivo**: pode corrigir em sequência e compilar e testar uma vez para o grupo, mas só feche cada um depois que a compilação e os testes passarem.
-- **Quebrou e não sai em 2 tentativas** (compilação, teste, ou `quality-resolve` diz que ainda aparece): desfaça só a mudança daquele problema, anote em "Não deu" com o motivo e siga.
-- **Não termine a resposta enquanto houver problema aberto** que não esteja em "Esperam você" ou "Não deu". Se a conversa for resumida no meio do caminho, rode `faundr quality-show --all` de novo: os corrigidos já saíram da lista, e ela é o que falta.
-- **No fim**, rode `faundr quality-scan` (fecha os de projeto inteiro e pega o que a correção criou, como um arquivo que passou do limite ao ganhar funções) e `faundr quality-show --all` mais uma vez e corrija o que tiver aparecido de novo. Rode os testes inteiros uma última vez. Não faça commit.
+- **One at a time, in list order**, with the rules and "Verify and close" above. For each problem closed, a single line: `Q-<n> fixed (<done>/<total>): <what changed>`.
+- **What would need the OK first doesn't block the rest** (more than 2 files, deleting a file, removing a package, changing something someone else uses, a false alarm to ignore): don't do it; note it under "Waiting on you", with the plan in one line, and move on to the next.
+- **Problems in the same file**: you can fix them in sequence and compile and test once for the group, but only close each one after compilation and tests pass.
+- **Broke and won't come out in 2 attempts** (compilation, test, or `quality-resolve` says it still shows up): undo only that problem's change, note it under "Couldn't do" with the reason and move on.
+- **Don't end the response while there's an open problem** that isn't under "Waiting on you" or "Couldn't do". If the conversation gets summarized midway, run `faundr quality-show --all` again: the fixed ones have left the list, and it's what remains.
+- **At the end**, run `faundr quality-scan` (closes the whole-project ones and catches what the fix created, like a file that went over the limit by gaining functions) and `faundr quality-show --all` once more and fix whatever showed up again. Run the full tests one last time. Don't commit.
 
-Resposta final do modo --all: quantos corrigidos, as listas "Esperam você" e "Não deu" (Q-n e uma linha cada) e como conferiu que o comportamento continua o mesmo.
+Final answer in --all mode: how many fixed, the "Waiting on you" and "Couldn't do" lists (Q-n and one line each) and how you checked the behavior stays the same.
 
-## Resposta
+## Answer
 
-Responda em poucas linhas: o que estava errado, o que mudou (arquivos), como conferiu que o comportamento continua o mesmo e o que ficou de fora.
+Answer in a few lines, in the user's language: what was wrong, what changed (files), how you checked the behavior stays the same and what was left out.

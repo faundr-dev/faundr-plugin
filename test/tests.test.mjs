@@ -5,6 +5,10 @@ import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
 import { detectRunners, fromJestLike, fromPlaywright, fromPytest, insideDir, inventory, productionDbSignals } from '../bin/tests.mjs'
+import { setLang } from '../bin/i18n.mjs'
+
+// Os textos que vão para o painel saem na língua da pessoa: os testes fixam o português (e conferem o inglês onde marcado).
+setLang('pt')
 
 const root = path.resolve('/proj')
 
@@ -63,6 +67,9 @@ test('Playwright: instável, falha com mensagem, pulado com motivo e um por nave
   ])
   assert.equal(cases[0].durationMs, 7)
   assert.equal(cases[1].message, 'Pulado: ainda não funciona no Firefox')
+  setLang('en')
+  assert.equal(fromPlaywright(json, root)[1].message, 'Skipped: ainda não funciona no Firefox')
+  setLang('pt')
   assert.match(cases[2].message, /toBeVisible/)
 })
 
@@ -135,6 +142,9 @@ test('projeto dividido: Vitest em frontend/, pytest na raiz e banco de produçã
   const inv = inventory(dir)
   assert.deepEqual([inv.testFiles, inv.cases, inv.skipped], [3, 4, 1])
   assert.match(productionDbSignals(dir)[0], /test_rfm_rpc\.py usa SUPABASE_URL/)
+  setLang('en')
+  assert.match(productionDbSignals(dir)[0], /test_rfm_rpc\.py uses SUPABASE_URL, which points to a real server/)
+  setLang('pt')
   assert.deepEqual(productionDbSignals(dir, undefined, { exclude: ['backend/tests/test_rfm_rpc.py'] }), [])
   // Com a configuração do pytest em backend/, ele roda de dentro dela.
   write('backend/pytest.ini', '[pytest]\n')

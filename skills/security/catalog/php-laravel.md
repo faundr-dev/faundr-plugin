@@ -1,59 +1,59 @@
-# PHP e Laravel
-Quando ler: arquivos `.php`, `composer.json`, `artisan`, pastas `app/Http`, `routes/`, `resources/views/*.blade.php`. As regras gerais de PHP valem para qualquer projeto; as de Laravel, quando `laravel/framework` está no `composer.json`.
+# PHP and Laravel
+When to read: `.php` files, `composer.json`, `artisan`, `app/Http`, `routes/`, `resources/views/*.blade.php` folders. The general PHP rules apply to any project; the Laravel ones, when `laravel/framework` is in `composer.json`.
 
-Primeiro passo: anote a versão do PHP (`require.php` no `composer.json`) e do Laravel (`composer.lock`). Confira se `.env` está fora do git e se `APP_DEBUG=false` e `APP_ENV=production` no servidor (a checagem automática já procura `.env` versionado).
+First step: note the PHP version (`require.php` in `composer.json`) and the Laravel version (`composer.lock`). Check that `.env` is out of git and that `APP_DEBUG=false` and `APP_ENV=production` on the server (the automatic check already looks for a committed `.env`).
 
-## laravel-rota-sem-auth — Rota que muda dados sem middleware de login
-- Gravidade típica: alta; crítica se apaga, paga ou muda papéis.
-- Onde procurar: `routes/web.php` e `routes/api.php`. Grep: `Route::post`, `Route::put`, `Route::patch`, `Route::delete`, `Route::resource`, `->middleware(`, `Route::middleware(`, `Route::group(`.
-- Como confirmar lendo o código: para cada rota que muda dados, veja se ela está dentro de um grupo com `auth`/`auth:sanctum` (ou o controller chama `$this->middleware('auth')` no construtor). Rotas de `api.php` não recebem sessão: precisam de `auth:sanctum` ou token.
-- Descarta se: a rota é pública por desenho (cadastro, login, webhook com assinatura conferida).
-- Não descarta: o link para a rota só aparece para quem está logado; o botão está escondido na tela.
-- Como corrigir: `Route::middleware('auth')->group(function () { ... })` e, na API, `auth:sanctum`.
+## laravel-rota-sem-auth — Route that changes data without login middleware
+- Typical severity: high; critical if it deletes, pays or changes roles.
+- Where to look: `routes/web.php` and `routes/api.php`. Grep: `Route::post`, `Route::put`, `Route::patch`, `Route::delete`, `Route::resource`, `->middleware(`, `Route::middleware(`, `Route::group(`.
+- How to confirm by reading the code: for each route that changes data, see whether it is inside a group with `auth`/`auth:sanctum` (or the controller calls `$this->middleware('auth')` in the constructor). Routes in `api.php` don't get a session: they need `auth:sanctum` or a token.
+- Ruled out if: the route is public by design (sign-up, login, webhook with a checked signature).
+- Not ruled out by: the link to the route only shows for logged-in users; the button is hidden on the screen.
+- How to fix: `Route::middleware('auth')->group(function () { ... })` and, in the API, `auth:sanctum`.
 - CWE: CWE-306
 
-## laravel-idor — Controller busca pelo ID da URL sem conferir o dono
-- Gravidade típica: alta.
-- Onde procurar: `Model::find($id)`, `findOrFail($request->id)`, route model binding (`show(Pedido $pedido)`) em controllers.
-- Como confirmar lendo o código: depois de buscar, o controller confere `$pedido->user_id === auth()->id()`, usa uma Policy (`$this->authorize('view', $pedido)` / `Gate::authorize`) ou busca já filtrando pelo dono (`auth()->user()->pedidos()->findOrFail($id)`)?
-- Descarta se: há Policy registrada e chamada em cada ação, ou a consulta parte do usuário logado.
-- Não descarta: o ID é um UUID "difícil de adivinhar" (IDs vazam em URLs, e-mails e logs).
-- Como corrigir: `$pedido = auth()->user()->pedidos()->findOrFail($id);` ou uma Policy com `authorize`.
+## laravel-idor — Controller looks up by the URL ID without checking the owner
+- Typical severity: high.
+- Where to look: `Model::find($id)`, `findOrFail($request->id)`, route model binding (`show(Order $order)`) in controllers.
+- How to confirm by reading the code: after looking it up, does the controller check `$order->user_id === auth()->id()`, use a Policy (`$this->authorize('view', $order)` / `Gate::authorize`) or look it up already filtered by owner (`auth()->user()->orders()->findOrFail($id)`)?
+- Ruled out if: there is a Policy registered and called in each action, or the query starts from the logged-in user.
+- Not ruled out by: the ID is a UUID "hard to guess" (IDs leak in URLs, emails and logs).
+- How to fix: `$order = auth()->user()->orders()->findOrFail($id);` or a Policy with `authorize`.
 - CWE: CWE-639
 
-## laravel-mass-assignment — create/update com tudo o que veio do formulário
-- Gravidade típica: alta quando o modelo tem campos como `is_admin`, `role`, `user_id`, `saldo`.
-- Onde procurar: `Model::create($request->all())`, `->update($request->all())`, `->fill($request->all())`, `protected $guarded = []` (a checagem automática pega este último).
-- Como confirmar lendo o código: veja o `$fillable` do modelo; se ele lista campos sensíveis, ou se `$guarded` está vazio, a pessoa pode mandar esses campos no formulário.
-- Descarta se: usa `$request->validated()` com um FormRequest que só valida os campos permitidos, e `$fillable` não tem campos sensíveis.
-- Como corrigir: `$fillable` só com o que o formulário pode mudar e `Model::create($request->validated())`.
+## laravel-mass-assignment — create/update with everything that came from the form
+- Typical severity: high when the model has fields like `is_admin`, `role`, `user_id`, `balance`.
+- Where to look: `Model::create($request->all())`, `->update($request->all())`, `->fill($request->all())`, `protected $guarded = []` (the automatic check catches this last one).
+- How to confirm by reading the code: look at the model's `$fillable`; if it lists sensitive fields, or if `$guarded` is empty, the person can send those fields in the form.
+- Ruled out if: it uses `$request->validated()` with a FormRequest that only validates the allowed fields, and `$fillable` has no sensitive fields.
+- How to fix: `$fillable` with only what the form can change, and `Model::create($request->validated())`.
 - CWE: CWE-915
 
-## php-sql-injection — Consulta montada com texto do usuário
-- Gravidade típica: alta; crítica em rota pública.
-- Onde procurar: `DB::raw`, `DB::select/statement`, `whereRaw`, `orderByRaw`, `selectRaw`, `$pdo->query`, `mysqli_query`. A checagem automática pega os casos com a variável na mesma linha; leia também consultas montadas em várias linhas (`$sql .= " AND nome = '$nome'"`).
-- Descarta se: os valores vão como parâmetros (`?` ou `:nome`) e nomes de coluna/ordem vêm de uma lista fixa.
-- Não descarta: `addslashes`, `str_replace` de aspas ou `intval` só em alguns campos.
-- Como corrigir: query builder (`->where('nome', $nome)`) ou `DB::select('... where id = ?', [$id])`; para `orderBy` dinâmico, compare com uma lista de colunas permitidas.
+## php-sql-injection — Query built with user text
+- Typical severity: high; critical on a public route.
+- Where to look: `DB::raw`, `DB::select/statement`, `whereRaw`, `orderByRaw`, `selectRaw`, `$pdo->query`, `mysqli_query`. The automatic check catches cases with the variable on the same line; also read queries built across several lines (`$sql .= " AND name = '$name'"`).
+- Ruled out if: values go in as parameters (`?` or `:name`) and column/order names come from a fixed list.
+- Not ruled out by: `addslashes`, `str_replace` of quotes or `intval` on only some fields.
+- How to fix: query builder (`->where('name', $name)`) or `DB::select('... where id = ?', [$id])`; for a dynamic `orderBy`, compare against a list of allowed columns.
 - CWE: CWE-89
 
-## php-upload-inseguro — Upload que aceita qualquer arquivo ou grava na pasta pública
-- Gravidade típica: crítica se dá para enviar `.php` para uma pasta servida pelo servidor.
-- Onde procurar: `$request->file(`, `->store(`, `->move(`, `move_uploaded_file`, `$_FILES`.
-- Como confirmar lendo o código: há validação de tipo e tamanho (`'arquivo' => 'required|mimes:jpg,png,pdf|max:5120'`)? O nome final é gerado pelo servidor (não o nome enviado)? O destino fica fora de `public/` ou num disco que não executa PHP?
-- Como corrigir: valide `mimes` e `max`, use `->store('uploads', 's3')` ou `storage/app`, e sirva por uma rota que confere o dono.
+## php-upload-inseguro — Upload that accepts any file or writes to the public folder
+- Typical severity: critical if you can send a `.php` to a folder served by the server.
+- Where to look: `$request->file(`, `->store(`, `->move(`, `move_uploaded_file`, `$_FILES`.
+- How to confirm by reading the code: is there type and size validation (`'file' => 'required|mimes:jpg,png,pdf|max:5120'`)? Is the final name generated by the server (not the uploaded name)? Is the destination outside `public/` or on a disk that doesn't execute PHP?
+- How to fix: validate `mimes` and `max`, use `->store('uploads', 's3')` or `storage/app`, and serve through a route that checks the owner.
 - CWE: CWE-434
 
-## laravel-debug-em-producao — APP_DEBUG ligado ou página de erro detalhada no ar
-- Gravidade típica: alta (mostra variáveis de ambiente, consultas e o código).
-- Onde procurar: `.env.example`, configs de deploy (`fly.toml`, Dockerfile, `render.yaml`), `config/app.php` com `'debug' => true` fixo.
-- Descarta se: `APP_DEBUG` vem de variável de ambiente e o ambiente de produção define `false`.
-- Como corrigir: `APP_DEBUG=false` em produção; erros vão para o log ou para o Sentry (`sentry/sentry-laravel`).
+## laravel-debug-em-producao — APP_DEBUG on or detailed error page live
+- Typical severity: high (shows environment variables, queries and the code).
+- Where to look: `.env.example`, deploy configs (`fly.toml`, Dockerfile, `render.yaml`), `config/app.php` with a hard-coded `'debug' => true`.
+- Ruled out if: `APP_DEBUG` comes from an environment variable and the production environment sets `false`.
+- How to fix: `APP_DEBUG=false` in production; errors go to the log or to Sentry (`sentry/sentry-laravel`).
 - CWE: CWE-489
 
-## laravel-csrf-desligado — Rotas de formulário fora da proteção CSRF
-- Gravidade típica: média; alta se a rota muda senha, e-mail ou pagamento.
-- Onde procurar: `$except` em `VerifyCsrfToken` (ou `validateCsrfTokens(except: [...])` no `bootstrap/app.php` do Laravel 11), formulários Blade sem `@csrf`.
-- Descarta se: a exceção é um webhook que confere a assinatura do provedor.
-- Como corrigir: tire a rota do `$except`; em formulários, `@csrf`.
+## laravel-csrf-desligado — Form routes outside CSRF protection
+- Typical severity: medium; high if the route changes password, email or payment.
+- Where to look: `$except` in `VerifyCsrfToken` (or `validateCsrfTokens(except: [...])` in Laravel 11's `bootstrap/app.php`), Blade forms without `@csrf`.
+- Ruled out if: the exception is a webhook that checks the provider's signature.
+- How to fix: take the route out of `$except`; in forms, `@csrf`.
 - CWE: CWE-352

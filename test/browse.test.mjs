@@ -11,7 +11,7 @@ test('argumentos: valores, aspas do objetivo e senha por variável', () => {
   assert.deepEqual(opts.secrets, [{ name: 'PASS', value: 'segredo' }])
   assert.equal(opts.headless, true)
   assert.throws(() => parseBrowseArgs(['--url', 'https://x.dev', '--goal', 'g', '--secret-env', 'VAZIA'], {}), /VAZIA/)
-  assert.throws(() => parseBrowseArgs(['--goal', 'g'], {}), /uso/)
+  assert.throws(() => parseBrowseArgs(['--goal', 'g'], {}), /usage/)
 })
 
 test('cada elemento ganha um índice; cada operação, seus alvos', () => {

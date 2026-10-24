@@ -206,7 +206,14 @@ export function supportGaps(stack, feature) {
 /** Arquivo de código de qualquer linguagem da tabela (para a revisão do Claude, que lê qualquer uma). */
 export const SOURCE_FILE = /\.(m?[jt]sx?|c[jt]s|py|go|rs|java|kts?|php|cs|dart|c|h|cc|cpp|cxx|hpp|hh|hxx|vue|svelte|astro|html?|css|scss|rb|swift|sql)$|(^|\/)Dockerfile[\w.-]*$/i
 
+// As notas da tabela ficam em português (o painel mostra); para o Claude, em inglês.
+const NOTE_EN = {
+  'só com Conan (conan.lock); o vcpkg não tem base pública de falhas conhecidas': 'only with Conan (conan.lock); vcpkg has no public database of known vulnerabilities',
+  'as imagens base não têm base pública de falhas conhecidas (OSV); a Qualidade avisa imagem sem versão fixa': 'base images have no public database of known vulnerabilities (OSV); Quality flags images without a pinned version',
+  'o Claude audita lendo as telas (/faundr:design)': 'Claude audits it by reading the screens (/faundr:design)',
+}
+
 /** Linhas para o pacote de contexto do Claude: onde a checagem automática não cobre e ele precisa ler. */
 export function gapLines(stack, feature) {
-  return supportGaps(stack, feature).map((g) => `- ${g.name}: ${g.status === 'parcial' ? `a checagem automática cobre só uma parte (${g.note})` : 'a checagem automática ainda não cobre'}; revise lendo o código`)
+  return supportGaps(stack, feature).map((g) => `- ${g.name.replace(' e ', ' and ')}: ${g.status === 'parcial' ? `the automatic check covers only part of it (${NOTE_EN[g.note] ?? g.note})` : "the automatic check doesn't cover it yet"}; review it by reading the code`)
 }

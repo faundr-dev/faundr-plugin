@@ -44,11 +44,11 @@ test('cada workflow chega uma vez por sessão', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-wf-'))
   writeWorkflows(root, LIST)
   const pick = (list, ids) => workflowsForPrompt(list, 'design da home', ids)
-  const first = workflowsOnce(root, 's1', pick, 'Este pedido')
+  const first = workflowsOnce(root, 's1', pick, 'This request')
   assert.match(first, /W-2 Design/)
   assert.match(first, /faundr workflow show W-2/)
-  assert.equal(workflowsOnce(root, 's1', pick, 'Este pedido'), null)
-  assert.match(workflowsOnce(root, 's2', pick, 'Este pedido'), /W-2/)
+  assert.equal(workflowsOnce(root, 's1', pick, 'This request'), null)
+  assert.match(workflowsOnce(root, 's2', pick, 'This request'), /W-2/)
 })
 
 test('passo do draft: tipo na frente e detalhe depois do travessão', () => {

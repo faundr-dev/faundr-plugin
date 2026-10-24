@@ -1,88 +1,88 @@
 ---
-description: Liga o app publicado ao Faundr para os erros que acontecem com os usuários aparecerem na seção Erros (E-n). Instala o SDK oficial do Sentry (gratuito, MIT) apontando para o Faundr, sem conta no Sentry, sem enviar desempenho nem gravação de tela, e confere com um erro de teste. Use quando o usuário pedir para acompanhar os erros do app publicado ou quando a seção Erros sugerir.
+description: Connects the published app to Faundr so the errors that happen to users show up in the Errors section (E-n). Installs the official Sentry SDK (free, MIT) pointing at Faundr, with no Sentry account, without sending performance data or screen recordings, and checks it with a test error. Use when the user asks to track the published app's errors or when the Errors section suggests it.
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *) Bash(npm install *) Bash(pnpm add *) Bash(yarn add *) Bash(bun add *) Bash(pip install *) Bash(uv add *) Bash(poetry add *) Bash(flutter pub add *) Bash(dart pub add *) Bash(composer require *) Read Grep Glob Edit Write
 ---
 
-## Endereço de recebimento deste projeto
+## This project's receiving address
 
 !`node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" errors-dsn`
 
-Se aparecer erro, avise o usuário e pare. O endereço acima (DSN) é público por natureza (vai no JavaScript do site): pode ficar no código ou numa variável pública.
+If an error shows up, tell the user and stop. The address above (DSN) is public by nature (it goes in the site's JavaScript): it can stay in the code or in a public variable.
 
-## Regras
+## Rules
 
-- **Não use o assistente do Sentry** (`npx @sentry/wizard`) nem crie conta no Sentry: ele cria projeto lá e pede token. Aqui o SDK só manda os erros para o Faundr.
-- **Só erros.** Nada de desempenho, gravação de tela ou perfis: `tracesSampleRate: 0` (ou sem a opção), sem `replayIntegration`, sem `browserTracingIntegration`, sem `profilesSampleRate`.
-- **Privacidade:** `sendDefaultPii: false`. Não mande e-mail, nome ou IP do usuário. Se o app tiver login, pode mandar só o id: `Sentry.setUser({ id })`. O Faundr ainda limpa senhas, tokens, cartões, e-mails e IPs antes de gravar.
-- **Só em produção:** `enabled` ligado apenas no build de produção, para os erros do desenvolvimento não se misturarem (esses o Faundr já pega pelos comandos).
-- **Versão = commit:** `release` com o hash do commit do build, para o Faundr ligar o erro à sessão que fez a mudança. Use o que a plataforma já oferece (Vercel: `VERCEL_GIT_COMMIT_SHA`; Cloudflare: `CF_PAGES_COMMIT_SHA` ou `WORKERS_CI_COMMIT_SHA`; Netlify: `COMMIT_REF`) ou injete no build (`git rev-parse --short HEAD`).
-- **Sem upload de source maps** e sem `authToken`/`SENTRY_AUTH_TOKEN`: o Faundr resolve a pilha no computador do usuário na hora de corrigir.
-- Mudança mínima: não reorganize arquivos do projeto.
+- **Don't use the Sentry wizard** (`npx @sentry/wizard`) or create a Sentry account: it creates a project there and asks for a token. Here the SDK only sends errors to Faundr.
+- **Errors only.** No performance, screen recording or profiles: `tracesSampleRate: 0` (or no option), no `replayIntegration`, no `browserTracingIntegration`, no `profilesSampleRate`.
+- **Privacy:** `sendDefaultPii: false`. Don't send the user's email, name or IP. If the app has login, you may send only the id: `Sentry.setUser({ id })`. Faundr also scrubs passwords, tokens, cards, emails and IPs before storing.
+- **Production only:** `enabled` on only in the production build, so development errors don't get mixed in (Faundr already catches those through the commands).
+- **Version = commit:** `release` with the build's commit hash, so Faundr links the error to the session that made the change. Use what the platform already offers (Vercel: `VERCEL_GIT_COMMIT_SHA`; Cloudflare: `CF_PAGES_COMMIT_SHA` or `WORKERS_CI_COMMIT_SHA`; Netlify: `COMMIT_REF`) or inject it in the build (`git rev-parse --short HEAD`).
+- **No source map upload** and no `authToken`/`SENTRY_AUTH_TOKEN`: Faundr resolves the stack on the user's computer when fixing.
+- Minimal change: don't reorganize the project's files.
 
-## 1. Descubra o que o app usa
+## 1. Find out what the app uses
 
-Leia o `package.json` (e os arquivos de configuração) e escolha **um** pacote:
+Read the `package.json` (and the configuration files) and choose **one** package:
 
-| O app é | Pacote | Onde iniciar |
+| The app is | Package | Where to initialize |
 |---|---|---|
-| Next.js | `@sentry/nextjs` | `instrumentation-client.ts` (navegador) e `instrumentation.ts` com `register()` (servidor/edge) |
-| React com Vite, SPA comum | `@sentry/react` | no começo do `main.tsx`/`main.jsx`, antes de renderizar |
-| TanStack Start, Remix, React Router | `@sentry/react` no navegador (entrada do cliente) + `@sentry/cloudflare` ou `@sentry/node` no servidor, conforme onde roda |
-| SvelteKit | `@sentry/sveltekit` | `hooks.client.ts` e `hooks.server.ts` |
-| Vue / Nuxt | `@sentry/vue` / `@sentry/nuxt` | entrada do app / `sentry.client.config.ts` |
-| Worker da Cloudflare | `@sentry/cloudflare` | `withSentry(() => ({ dsn, ... }), handler)` no `export default` |
-| Node (Express, Fastify, scripts) | `@sentry/node` | um `instrument.mjs` importado antes de tudo |
+| Next.js | `@sentry/nextjs` | `instrumentation-client.ts` (browser) and `instrumentation.ts` with `register()` (server/edge) |
+| React with Vite, plain SPA | `@sentry/react` | at the top of `main.tsx`/`main.jsx`, before rendering |
+| TanStack Start, Remix, React Router | `@sentry/react` in the browser (client entry) + `@sentry/cloudflare` or `@sentry/node` on the server, depending on where it runs |
+| SvelteKit | `@sentry/sveltekit` | `hooks.client.ts` and `hooks.server.ts` |
+| Vue / Nuxt | `@sentry/vue` / `@sentry/nuxt` | app entry / `sentry.client.config.ts` |
+| Cloudflare Worker | `@sentry/cloudflare` | `withSentry(() => ({ dsn, ... }), handler)` on the `export default` |
+| Node (Express, Fastify, scripts) | `@sentry/node` | an `instrument.mjs` imported before everything |
 | Expo / React Native | `@sentry/react-native` | `App.tsx` |
-| Angular | `@sentry/angular` | `main.ts`, antes do `bootstrapApplication`, e o `ErrorHandler` do Sentry nos providers |
-| Site em HTML puro (sem framework) | o Loader Script do Sentry (sem instalar nada) | `<script src="https://js.sentry-cdn.com/<chave>.min.js" crossorigin="anonymous"></script>` no `<head>` de cada página, antes dos outros scripts; a chave é a parte do DSN antes do @ |
-| Python (FastAPI, Django, Flask, scripts) | `sentry-sdk` (no requirements/pyproject) | `sentry_sdk.init(...)` no começo do `main.py`/`app.py`, ou no `settings.py` do Django; as integrações de FastAPI, Django e Flask ligam sozinhas |
+| Angular | `@sentry/angular` | `main.ts`, before `bootstrapApplication`, and Sentry's `ErrorHandler` in the providers |
+| Plain HTML site (no framework) | Sentry's Loader Script (nothing to install) | `<script src="https://js.sentry-cdn.com/<key>.min.js" crossorigin="anonymous"></script>` in the `<head>` of each page, before the other scripts; the key is the part of the DSN before the @ |
+| Python (FastAPI, Django, Flask, scripts) | `sentry-sdk` (in requirements/pyproject) | `sentry_sdk.init(...)` at the top of `main.py`/`app.py`, or in Django's `settings.py`; the FastAPI, Django and Flask integrations turn on by themselves |
 | Flutter | `sentry_flutter` (`flutter pub add sentry_flutter`) | `main()`: `await SentryFlutter.init((o) {…}, appRunner: () => runApp(const App()))` |
-| Dart no servidor | `sentry` (`dart pub add sentry`) | `main()`: `await Sentry.init((o) {…}, appRunner: …)` |
-| Laravel | `sentry/sentry-laravel` (`composer require sentry/sentry-laravel`) | `SENTRY_LARAVEL_DSN` no `.env` e, no Laravel 11+, `Integration::handles($exceptions)` em `bootstrap/app.php` |
-| PHP sem framework | `sentry/sentry` (`composer require sentry/sentry`) | `\Sentry\init([...])` no ponto de entrada (`public/index.php`) |
-| Go (net/http, Gin, Echo, Fiber) | `github.com/getsentry/sentry-go` (`go get github.com/getsentry/sentry-go`) e o pacote do framework (`sentry-go/gin`, `/echo`, `/fiber`, `/http`) | `sentry.Init(...)` no começo do `main()`, `defer sentry.Flush(2 * time.Second)` e o middleware do framework (com `Repanic: true`) |
-| Spring Boot (Java/Kotlin) | `io.sentry:sentry-spring-boot-starter-jakarta` (Boot 3) no `pom.xml`/`build.gradle` | só configuração: `sentry.dsn` e as demais chaves no `application.properties`/`.yml`; o starter captura os erros dos controladores |
-| Android (Kotlin/Java) | plugin Gradle `io.sentry.android.gradle` | `io.sentry.dsn` no `AndroidManifest.xml` (`<meta-data>`); o plugin liga sozinho |
-| ASP.NET Core (C#) | `Sentry.AspNetCore` (`dotnet add package Sentry.AspNetCore`) | `builder.WebHost.UseSentry(o => {…})` no `Program.cs` |
-| .NET sem ASP.NET (console, worker) | `Sentry` (`dotnet add package Sentry`) | `using var _ = SentrySdk.Init(o => {…})` no começo do `Main` |
-| Rust (Axum, Actix Web, programas) | `sentry` (`cargo add sentry`) e, no Axum, `sentry-tower` (`cargo add sentry-tower --features http`) | `let _guard = sentry::init(...)` na primeira linha do `main()`, antes do runtime do tokio (sem o `#[tokio::main]`; monte o runtime depois do init); no Axum, `.layer(NewSentryLayer::new_from_top())` e `.layer(SentryHttpLayer::new())` |
-| C e C++ | `sentry-native` (pelo vcpkg `sentry-native`, Conan `sentry-native` ou o FetchContent do CMake) | `sentry_init(options)` no começo do `main()` e `sentry_close()` antes de sair; o build precisa dos símbolos (`-g` ou `RelWithDebInfo`) para o erro trazer arquivo e linha |
+| Server-side Dart | `sentry` (`dart pub add sentry`) | `main()`: `await Sentry.init((o) {…}, appRunner: …)` |
+| Laravel | `sentry/sentry-laravel` (`composer require sentry/sentry-laravel`) | `SENTRY_LARAVEL_DSN` in `.env` and, on Laravel 11+, `Integration::handles($exceptions)` in `bootstrap/app.php` |
+| PHP without a framework | `sentry/sentry` (`composer require sentry/sentry`) | `\Sentry\init([...])` at the entry point (`public/index.php`) |
+| Go (net/http, Gin, Echo, Fiber) | `github.com/getsentry/sentry-go` (`go get github.com/getsentry/sentry-go`) and the framework package (`sentry-go/gin`, `/echo`, `/fiber`, `/http`) | `sentry.Init(...)` at the top of `main()`, `defer sentry.Flush(2 * time.Second)` and the framework middleware (with `Repanic: true`) |
+| Spring Boot (Java/Kotlin) | `io.sentry:sentry-spring-boot-starter-jakarta` (Boot 3) in `pom.xml`/`build.gradle` | configuration only: `sentry.dsn` and the other keys in `application.properties`/`.yml`; the starter captures the controllers' errors |
+| Android (Kotlin/Java) | Gradle plugin `io.sentry.android.gradle` | `io.sentry.dsn` in `AndroidManifest.xml` (`<meta-data>`); the plugin turns it on by itself |
+| ASP.NET Core (C#) | `Sentry.AspNetCore` (`dotnet add package Sentry.AspNetCore`) | `builder.WebHost.UseSentry(o => {…})` in `Program.cs` |
+| .NET without ASP.NET (console, worker) | `Sentry` (`dotnet add package Sentry`) | `using var _ = SentrySdk.Init(o => {…})` at the top of `Main` |
+| Rust (Axum, Actix Web, programs) | `sentry` (`cargo add sentry`) and, on Axum, `sentry-tower` (`cargo add sentry-tower --features http`) | `let _guard = sentry::init(...)` on the first line of `main()`, before the tokio runtime (without `#[tokio::main]`; build the runtime after the init); on Axum, `.layer(NewSentryLayer::new_from_top())` and `.layer(SentryHttpLayer::new())` |
+| C and C++ | `sentry-native` (via vcpkg `sentry-native`, Conan `sentry-native` or CMake's FetchContent) | `sentry_init(options)` at the top of `main()` and `sentry_close()` before exiting; the build needs symbols (`-g` or `RelWithDebInfo`) for the error to carry file and line |
 
-Se o app tem navegador e servidor, ligue os dois (é o mesmo DSN).
+If the app has a browser and a server, connect both (it's the same DSN).
 
-## 2. Instale e configure
+## 2. Install and configure
 
-Instale com o gerenciador que o projeto já usa (veja o lockfile). Configuração mínima, adaptando ao pacote:
+Install with the package manager the project already uses (check the lockfile). Minimal configuration, adapting to the package:
 
 ```ts
-import * as Sentry from '@sentry/react' // o pacote escolhido
+import * as Sentry from '@sentry/react' // the chosen package
 Sentry.init({
-  dsn: '<DSN acima>',
+  dsn: '<DSN above>',
   enabled: import.meta.env.PROD, // Next.js: process.env.NODE_ENV === 'production'
   environment: 'production',
-  release: import.meta.env.VITE_COMMIT_SHA, // o hash do commit do build
+  release: import.meta.env.VITE_COMMIT_SHA, // the build's commit hash
   sendDefaultPii: false,
   tracesSampleRate: 0,
 })
 ```
 
-No React, se o app tiver um error boundary, envolva com `Sentry.ErrorBoundary` ou chame `Sentry.captureException(error)` dentro dele; senão, erros de renderização não chegam.
+In React, if the app has an error boundary, wrap it with `Sentry.ErrorBoundary` or call `Sentry.captureException(error)` inside it; otherwise, rendering errors don't arrive.
 
-As mesmas regras nas outras linguagens (só erros, sem dado pessoal, só em produção, versão = commit):
+The same rules in the other languages (errors only, no personal data, production only, version = commit):
 
 ```python
 # Python: sentry-sdk
 import os, sentry_sdk
 if os.environ.get("ENV") == "production":
-    sentry_sdk.init(dsn="<DSN acima>", environment="production", release=os.environ.get("COMMIT_SHA"),
+    sentry_sdk.init(dsn="<DSN above>", environment="production", release=os.environ.get("COMMIT_SHA"),
                     send_default_pii=False, traces_sample_rate=0)
 ```
 
 ```dart
-// Flutter: sentry_flutter (kReleaseMode = build de produção)
+// Flutter: sentry_flutter (kReleaseMode = production build)
 await SentryFlutter.init((o) {
-  o.dsn = kReleaseMode ? '<DSN acima>' : '';
+  o.dsn = kReleaseMode ? '<DSN above>' : '';
   o.environment = 'production';
   o.release = const String.fromEnvironment('COMMIT_SHA'); // flutter build … --dart-define=COMMIT_SHA=$(git rev-parse --short HEAD)
   o.sendDefaultPii = false;
@@ -91,33 +91,33 @@ await SentryFlutter.init((o) {
 ```
 
 ```php
-// Laravel: config/sentry.php já lê o .env; deixe assim no servidor de produção
-// SENTRY_LARAVEL_DSN=<DSN acima>
+// Laravel: config/sentry.php already reads the .env; leave it like this on the production server
+// SENTRY_LARAVEL_DSN=<DSN above>
 // SENTRY_ENVIRONMENT=production
-// SENTRY_RELEASE=<hash do commit>
+// SENTRY_RELEASE=<commit hash>
 // SENTRY_SEND_DEFAULT_PII=false
 // SENTRY_TRACES_SAMPLE_RATE=0
 ```
 
 ```go
-// Go: sentry-go (APP_ENV e COMMIT_SHA vêm do ambiente do servidor)
+// Go: sentry-go (APP_ENV and COMMIT_SHA come from the server environment)
 if os.Getenv("APP_ENV") == "production" {
-	if err := sentry.Init(sentry.ClientOptions{Dsn: "<DSN acima>", Environment: "production", Release: os.Getenv("COMMIT_SHA"), SendDefaultPII: false, TracesSampleRate: 0}); err != nil {
+	if err := sentry.Init(sentry.ClientOptions{Dsn: "<DSN above>", Environment: "production", Release: os.Getenv("COMMIT_SHA"), SendDefaultPII: false, TracesSampleRate: 0}); err != nil {
 		log.Printf("sentry: %v", err)
 	}
 	defer sentry.Flush(2 * time.Second)
 }
-r.Use(sentrygin.New(sentrygin.Options{Repanic: true})) // Gin; no net/http: sentryhttp.New(...).Handle(mux)
+r.Use(sentrygin.New(sentrygin.Options{Repanic: true})) // Gin; on net/http: sentryhttp.New(...).Handle(mux)
 ```
 
 ```properties
-# Spring Boot: application-prod.properties (só no perfil de produção)
-sentry.dsn=<DSN acima>
+# Spring Boot: application-prod.properties (production profile only)
+sentry.dsn=<DSN above>
 sentry.environment=production
 sentry.release=${COMMIT_SHA:}
 sentry.send-default-pii=false
 sentry.traces-sample-rate=0
-sentry.in-app-includes=com.suaempresa
+sentry.in-app-includes=com.yourcompany
 ```
 
 ```csharp
@@ -125,7 +125,7 @@ sentry.in-app-includes=com.suaempresa
 if (builder.Environment.IsProduction())
     builder.WebHost.UseSentry(o =>
     {
-        o.Dsn = "<DSN acima>";
+        o.Dsn = "<DSN above>";
         o.Environment = "production";
         o.Release = Environment.GetEnvironmentVariable("COMMIT_SHA");
         o.SendDefaultPii = false;
@@ -134,9 +134,9 @@ if (builder.Environment.IsProduction())
 ```
 
 ```rust
-// Rust: sentry (APP_ENV e COMMIT_SHA vêm do ambiente do servidor). O guard precisa viver até o fim do main.
+// Rust: sentry (APP_ENV and COMMIT_SHA come from the server environment). The guard must live until the end of main.
 let _guard = (std::env::var("APP_ENV").as_deref() == Ok("production")).then(|| {
-    sentry::init(("<DSN acima>", sentry::ClientOptions {
+    sentry::init(("<DSN above>", sentry::ClientOptions {
         environment: Some("production".into()),
         release: std::env::var("COMMIT_SHA").ok().map(Into::into),
         send_default_pii: false,
@@ -147,28 +147,28 @@ let _guard = (std::env::var("APP_ENV").as_deref() == Ok("production")).then(|| {
 ```
 
 ```c
-// C/C++: sentry-native (só no build de produção)
+// C/C++: sentry-native (production build only)
 #ifdef NDEBUG
 sentry_options_t *options = sentry_options_new();
-sentry_options_set_dsn(options, "<DSN acima>");
+sentry_options_set_dsn(options, "<DSN above>");
 sentry_options_set_environment(options, "production");
 sentry_options_set_release(options, getenv("COMMIT_SHA") ? getenv("COMMIT_SHA") : "dev");
 sentry_init(options);
 #endif
-// … e no fim do main: sentry_close();
+// … and at the end of main: sentry_close();
 ```
 
-## 3. Confira com um erro de teste
+## 3. Check with a test error
 
-1. Publique (ou rode o build de produção localmente com `enabled: true` só para o teste) e dispare um erro de propósito: um botão temporário que faz `throw new Error('Teste do Faundr')`, ou `Sentry.captureException(new Error('Teste do Faundr'))`. **Não teste pelo console do navegador**: erros digitados lá não são capturados. Nas outras linguagens: `sentry_sdk.capture_exception(Exception("Teste do Faundr"))` (Python), `Sentry.captureException(Exception('Teste do Faundr'))` (Flutter/Dart), `\Sentry\captureException(new \Exception('Teste do Faundr'))` (PHP) ou `php artisan sentry:test` (Laravel), `sentry.CaptureException(errors.New("Teste do Faundr"))` (Go), `Sentry.captureException(RuntimeException("Teste do Faundr"))` (Java/Kotlin), `SentrySdk.CaptureException(new Exception("Teste do Faundr"))` (C#), `sentry::capture_message("Teste do Faundr", sentry::Level::Error)` (Rust) ou `sentry_capture_event(sentry_value_new_message_event(SENTRY_LEVEL_ERROR, NULL, "Teste do Faundr"))` (C/C++).
-2. Rode `faundr errors` e veja se apareceu um E-n "[app publicado]". Pode levar alguns segundos.
-3. Tire o botão de teste e arquive o E-n do teste: `faundr error-archive E-<n>`.
+1. Publish (or run the production build locally with `enabled: true` just for the test) and trigger an error on purpose: a temporary button that does `throw new Error('Faundr test')`, or `Sentry.captureException(new Error('Faundr test'))`. **Don't test from the browser console**: errors typed there aren't captured. In the other languages: `sentry_sdk.capture_exception(Exception("Faundr test"))` (Python), `Sentry.captureException(Exception('Faundr test'))` (Flutter/Dart), `\Sentry\captureException(new \Exception('Faundr test'))` (PHP) or `php artisan sentry:test` (Laravel), `sentry.CaptureException(errors.New("Faundr test"))` (Go), `Sentry.captureException(RuntimeException("Faundr test"))` (Java/Kotlin), `SentrySdk.CaptureException(new Exception("Faundr test"))` (C#), `sentry::capture_message("Faundr test", sentry::Level::Error)` (Rust) or `sentry_capture_event(sentry_value_new_message_event(SENTRY_LEVEL_ERROR, NULL, "Faundr test"))` (C/C++).
+2. Run `faundr errors` and see whether an E-n "[app publicado]" (published app) showed up. It may take a few seconds.
+3. Remove the test button and archive the test E-n: `faundr error-archive E-<n>`.
 
-## 4. Extras (pergunte ao usuário antes)
+## 4. Extras (ask the user first)
 
-- **Site no ar:** `faundr errors-uptime https://<endereço do site>` — o Faundr abre o site a cada 5 minutos; se cair, vira E-n e avisa.
-- **Avisos no Slack ou Discord:** o usuário cola o webhook na seção Erros → App publicado do painel (você não precisa do endereço).
-- **CSP:** se o site já tem Content-Security-Policy, acrescente o `report-uri` que aparece na mesma aba do painel.
-- **Já usa o Sentry?** `faundr errors-import-sentry --org <org> --project <projeto>` com `SENTRY_AUTH_TOKEN` definido pelo usuário no terminal (não peça o token no chat).
+- **Site up:** `faundr errors-uptime https://<site address>` — Faundr opens the site every 5 minutes; if it goes down, it becomes an E-n and alerts.
+- **Alerts on Slack or Discord:** the user pastes the webhook in the dashboard's Errors → Published app section (you don't need the address).
+- **CSP:** if the site already has a Content-Security-Policy, add the `report-uri` shown on the same dashboard tab.
+- **Already uses Sentry?** `faundr errors-import-sentry --org <org> --project <project>` with `SENTRY_AUTH_TOKEN` set by the user in the terminal (don't ask for the token in the chat).
 
-Responda em poucas linhas: o que foi instalado e onde, como confirmou que chegou, e o que o usuário precisa fazer (publicar de novo, se ainda não publicou).
+Answer in a few lines, in the user's language: what was installed and where, how you confirmed it arrived, and what the user needs to do (publish again, if they haven't yet).

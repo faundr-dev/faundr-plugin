@@ -20,6 +20,7 @@ import { changesDatabase, remoteDatabases, remoteNote } from './env-target.mjs'
 import { takeLoopAlerts } from './loop.mjs'
 import { guardInstall } from './package-guard.mjs'
 import { pushWarning, readTeam } from './team.mjs'
+import { t } from './i18n.mjs'
 
 const CONFIG_DIR = path.join(os.homedir(), '.faundr')
 
@@ -51,7 +52,7 @@ async function readStdin() {
 // Onde o comando de banco vai rodar, para o aviso dizer se são os dados reais.
 function databaseNote(root, verdict, sql) {
   if (!verdict.database) return null
-  if (sql) return 'Esta ferramenta roda direto no banco do Supabase na nuvem (o do projeto ligado a ela).'
+  if (sql) return 'This tool runs directly on the Supabase database in the cloud (the one of the project linked to it).'
   try {
     return remoteNote(remoteDatabases(root))
   } catch {
@@ -65,11 +66,11 @@ function restoreReason(cwd, which) {
   try {
     const repo = gitRoot(cwd)
     const c = repo && findCheckpoint(repo, which)
-    if (c) return `[Faundr] ${restoreSummary(c, changesSince(repo, c))}\nAprove só se for isso mesmo.`
+    if (c) return `[Faundr] ${restoreSummary(c, changesSince(repo, c))}\nApprove only if this is really what you want.`
   } catch (err) {
     log(`volta: ${err.message}`)
   }
-  return '[Faundr] Atenção: este comando volta os arquivos para um ponto de volta. As mudanças feitas depois dele saem dos arquivos (o estado de agora fica salvo). Aprove só se for isso mesmo.'
+  return '[Faundr] Warning: this command restores the files to a restore point. The changes made after it leave the files (the current state is saved). Approve only if this is really what you want.'
 }
 
 // Branch atual lida do .git/HEAD (sem abrir o git).
@@ -89,13 +90,13 @@ function currentBranch(cwd) {
 
 const reply = (output) => process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', ...output } }))
 
-// Comando perigoso: barra ou pergunta, com o motivo em português.
+// Comando perigoso: barra ou pergunta, com o motivo.
 function replyVerdict(verdict, { payload, cwd, root, command, sql }) {
   // Risco nos arquivos: um ponto de volta antes (o usuário ainda vai decidir; se aprovar, dá para desfazer).
   let checkpoint = null
   if (verdict.files && verdict.level === 'ask' && gitRoot(cwd)) {
     try {
-      checkpoint = createCheckpoint(gitRoot(cwd), { reason: `antes de: ${command.replace(/\s+/g, ' ').slice(0, 120)}`, session: payload.session_id })
+      checkpoint = createCheckpoint(gitRoot(cwd), { reason: `${t('before', 'antes de')}: ${command.replace(/\s+/g, ' ').slice(0, 120)}`, session: payload.session_id })
     } catch (err) {
       log(`ponto de volta: ${err.message}`)
     }
@@ -129,7 +130,7 @@ async function main() {
     const note = remoteNote(remoteDatabases(root))
     if (note) {
       log(`ask: banco na nuvem :: ${command.slice(0, 200)}`)
-      return reply({ permissionDecision: 'ask', permissionDecisionReason: guardMessage({ level: 'ask', what: 'muda o banco de dados (migração, seed ou script de banco)', database: true }, { note }) })
+      return reply({ permissionDecision: 'ask', permissionDecisionReason: guardMessage({ level: 'ask', what: 'changes the database (migration, seed or database script)', database: true }, { note }) })
     }
   }
 
@@ -144,7 +145,7 @@ async function main() {
   const context = takeLoopAlerts(CONFIG_DIR, payload.session_id)
   if (!sql && !isReadOnly(command)) {
     const checkpoint = ensureSessionCheckpoint(cwd, payload.session_id, { configDir: CONFIG_DIR })
-    if (checkpoint) context.push('[Faundr] Ponto de volta dos arquivos salvo antes da primeira mudança desta sessão (para desfazer: /faundr:undo).')
+    if (checkpoint) context.push('[Faundr] Restore point of the files saved before the first change of this session (to undo: /faundr:undo).')
   }
   if (context.length) reply({ additionalContext: context.join('\n\n') })
 }

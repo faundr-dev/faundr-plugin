@@ -1,6 +1,7 @@
 // Leitores de erro das linguagens fora de JS/TS e Python: Go, Rust, Dart/Flutter, Java/Kotlin (Maven e
 // Gradle), C# (.NET), PHP, C/C++ (gcc, clang, MSVC, ctest) e Docker. Mesmo formato dos leitores de
 // errors.mjs: { tool, code, message, file, line, index, key? }.
+import { t as tr } from './i18n.mjs'
 
 // Arquivo:linha:coluna: mensagem — gcc/clang, go build/vet, Dart (compilação).
 const C_LIKE = /^\s*((?:[a-z]:)?[^\s:()]+?\.(c|h|cc|cpp|cxx|hpp|hh|hxx|m|mm|go|dart)):(\d+):(?:\d+:)?\s*(fatal error|error|Error)?:?\s*(.+)$/i
@@ -27,7 +28,7 @@ export function goErrors(lines) {
       if (/^\s*(---|===|FAIL|ok)\b/.test(lines[k])) break
     }
     // O pacote vem no "FAIL\tmodulo/pasta" do fim; o arquivo fica relativo à pasta do teste.
-    out.push({ tool: 'go', code: null, message: `Teste falhou: ${t[1]}${reason ? ` (${reason})` : ''}`, file, line, index: i, key: t[1] })
+    out.push({ tool: 'go', code: null, message: `${tr('Test failed', 'Teste falhou')}: ${t[1]}${reason ? ` (${reason})` : ''}`, file, line, index: i, key: t[1] })
   })
   return out
 }
@@ -46,7 +47,7 @@ export function rustErrors(lines) {
     const p = l.match(/^thread '([^']+)' panicked at (?:'(.*)', )?(.+?):(\d+):\d+:?$/)
     if (p) {
       const reason = p[2] ?? lines[i + 1]?.trim() ?? ''
-      out.push({ tool: 'cargo', code: null, message: `Teste falhou: ${p[1]}${reason ? ` (${reason})` : ''}`, file: p[3], line: Number(p[4]), index: i, key: p[1] })
+      out.push({ tool: 'cargo', code: null, message: `${tr('Test failed', 'Teste falhou')}: ${p[1]}${reason ? ` (${reason})` : ''}`, file: p[3], line: Number(p[4]), index: i, key: p[1] })
     }
   })
   return out
@@ -78,7 +79,7 @@ export function dartErrors(lines) {
       }
       if (/^\d+:\d+\s+\+\d+/.test(r)) break
     }
-    out.push({ tool: 'flutter', code: null, message: `Teste falhou: ${t[1]}${reason ? ` (${reason})` : ''}`, file, line, index: i, key: t[1] })
+    out.push({ tool: 'flutter', code: null, message: `${tr('Test failed', 'Teste falhou')}: ${t[1]}${reason ? ` (${reason})` : ''}`, file, line, index: i, key: t[1] })
   })
   return out
 }
@@ -101,11 +102,11 @@ export function jvmErrors(lines) {
       const near = lines.slice(i + 1, i + 8).map((x) => x.trim())
       const at = near.map((x) => x.match(/\bat\s+\S*?\(([\w$]+\.(?:java|kt)):(\d+)\)/)).find(Boolean)
       const reason = near.find((x) => /(Error|Exception|expected)/.test(x)) ?? ''
-      return out.push({ tool: 'gradle', code: null, message: `Teste falhou: ${gt[1]} > ${gt[2]}${reason ? ` (${reason})` : ''}`, file: at?.[1] ?? null, line: at ? Number(at[2]) : null, index: i, key: `${gt[1]}.${gt[2]}` })
+      return out.push({ tool: 'gradle', code: null, message: `${tr('Test failed', 'Teste falhou')}: ${gt[1]} > ${gt[2]}${reason ? ` (${reason})` : ''}`, file: at?.[1] ?? null, line: at ? Number(at[2]) : null, index: i, key: `${gt[1]}.${gt[2]}` })
     }
     // Maven (Surefire): "[ERROR]   AppTest.soma:15 expected: <3> but was: <4>"
     const sf = l.match(/^\[ERROR\]\s{2,}([\w$]+)\.([\w$]+):(\d+)\s+(.+)$/)
-    if (sf) out.push({ tool: 'maven', code: null, message: `Teste falhou: ${sf[1]}.${sf[2]} (${sf[4].trim()})`, file: `${sf[1]}.java`, line: Number(sf[3]), index: i, key: `${sf[1]}.${sf[2]}` })
+    if (sf) out.push({ tool: 'maven', code: null, message: `${tr('Test failed', 'Teste falhou')}: ${sf[1]}.${sf[2]} (${sf[4].trim()})`, file: `${sf[1]}.java`, line: Number(sf[3]), index: i, key: `${sf[1]}.${sf[2]}` })
   })
   return out
 }
@@ -123,7 +124,7 @@ export function dotnetErrors(lines) {
     const msgAt = near.findIndex((x) => /^Error Message:/.test(x))
     const reason = msgAt >= 0 ? near[msgAt + 1] ?? '' : ''
     const at = near.map((x) => x.match(/\bin\s+(.+?\.cs):line\s+(\d+)/)).find(Boolean)
-    out.push({ tool: 'dotnet', code: null, message: `Teste falhou: ${t[1]}${reason ? ` (${reason})` : ''}`, file: at?.[1] ?? null, line: at ? Number(at[2]) : null, index: i, key: t[1] })
+    out.push({ tool: 'dotnet', code: null, message: `${tr('Test failed', 'Teste falhou')}: ${t[1]}${reason ? ` (${reason})` : ''}`, file: at?.[1] ?? null, line: at ? Number(at[2]) : null, index: i, key: t[1] })
   })
   return out
 }
@@ -141,7 +142,7 @@ export function phpErrors(lines) {
       const near = lines.slice(i + 1, i + 15).map((x) => x.trim())
       const reason = near.find((x) => x && !/^(\/|[a-z]:)/i.test(x)) ?? ''
       const at = near.map((x) => x.match(/^((?:[a-z]:)?\S+?\.php):(\d+)$/i)).find(Boolean)
-      return out.push({ tool: 'phpunit', code: null, message: `Teste falhou: ${u[1]}${reason ? ` (${reason})` : ''}`, file: at?.[1] ?? null, line: at ? Number(at[2]) : null, index: i, key: u[1] })
+      return out.push({ tool: 'phpunit', code: null, message: `${tr('Test failed', 'Teste falhou')}: ${u[1]}${reason ? ` (${reason})` : ''}`, file: at?.[1] ?? null, line: at ? Number(at[2]) : null, index: i, key: u[1] })
     }
     // PHPStan (tabela): "  Line   src/Soma.php" e depois "  12     Mensagem"
     const h = l.match(/^\s*Line\s+(\S+\.php)\s*$/)
@@ -165,10 +166,10 @@ export function cErrors(lines) {
     if (ms) return out.push({ tool: 'msvc', code: ms[3], message: ms[4].trim(), file: ms[1], line: Number(ms[2]), index: i })
     // ctest: "  1 - soma (Failed)"
     const ct = l.match(/^\s*\d+\s+-\s+(\S+)\s+\((Failed|SEGFAULT|Timeout|Exception|Not Run)\)/)
-    if (ct) out.push({ tool: 'ctest', code: null, message: `Teste falhou: ${ct[1]} (${ct[2]})`, file: null, line: null, index: i, key: ct[1] })
+    if (ct) out.push({ tool: 'ctest', code: null, message: `${tr('Test failed', 'Teste falhou')}: ${ct[1]} (${ct[2]})`, file: null, line: null, index: i, key: ct[1] })
     // Linker: "undefined reference to `soma'"
     const ld = l.match(/undefined reference to [`'"]([^`'"]+)[`'"]|Undefined symbols? .*?"([^"]+)"/)
-    if (ld) out.push({ tool: 'ld', code: 'link', message: `Referência não encontrada na ligação: ${ld[1] ?? ld[2]}`, file: null, line: null, index: i, key: ld[1] ?? ld[2] })
+    if (ld) out.push({ tool: 'ld', code: 'link', message: `${tr('Reference not found at link time', 'Referência não encontrada na ligação')}: ${ld[1] ?? ld[2]}`, file: null, line: null, index: i, key: ld[1] ?? ld[2] })
   })
   return out
 }
@@ -202,7 +203,7 @@ export function angularErrors(lines) {
     if (m) out.push({ tool: 'ng', code: m[3], message: m[4].trim(), file: m[1], line: Number(m[2]), index: i })
     // ng test (Karma): "Chrome 120 (Linux) AppComponent deve criar FAILED"
     const k = l.match(/^\s*(?:Chrome|Firefox|Edge|Safari|ChromeHeadless)[^)]*\)\s+(.+?)\s+FAILED\s*$/)
-    if (k) out.push({ tool: 'karma', code: null, message: `Teste falhou: ${k[1]}`, file: null, line: null, index: i, key: k[1] })
+    if (k) out.push({ tool: 'karma', code: null, message: `${tr('Test failed', 'Teste falhou')}: ${k[1]}`, file: null, line: null, index: i, key: k[1] })
   })
   return out
 }

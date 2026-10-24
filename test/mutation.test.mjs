@@ -3,6 +3,10 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import { test } from 'node:test'
 import { mutateTargets, mutationFindings, readReport } from '../bin/mutation.mjs'
+import { setLang } from '../bin/i18n.mjs'
+
+// Os achados vão para o painel na língua da pessoa: fixa o português (e confere o inglês abaixo).
+setLang('pt')
 
 const root = path.resolve('/proj')
 
@@ -29,6 +33,11 @@ test('relatório: contas, as duas notas e os defeitos que escaparam', () => {
   assert.equal(survived.original, 'export const frete = (v) => (v >= 100 ? 0 : 15)')
   assert.equal(uncovered.kind, 'no_coverage')
   assert.match(uncovered.detail, /Nenhum teste executa esta linha/)
+  setLang('en')
+  const [enSurvived, enUncovered] = mutationFindings(r.escaped)
+  assert.match(enSurvived.detail, /right at the limit.*v > 100/)
+  assert.equal(enUncovered.title, 'No test reaches this line (line 1)')
+  setLang('pt')
   assert.notEqual(survived.fingerprint, uncovered.fingerprint)
 })
 

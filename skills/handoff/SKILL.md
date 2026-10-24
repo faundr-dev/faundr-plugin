@@ -1,13 +1,13 @@
 ---
-description: Escreve o bilhete de passagem de bastão da sessão no Faundr — o que ficou pela metade, o que falta e cuidados para quem continuar. Aparece em Atividade → Onde parei e no início da próxima sessão.
-argument-hint: [o que você quer que fique registrado]
+description: Writes the session's handoff note in Faundr — what was left half-done, what is missing and things to watch out for whoever continues. It appears under Activity → Where I left off and at the start of the next session.
+argument-hint: [what you want recorded]
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *)
 ---
 
-Pedido do usuário: $ARGUMENTS
+User request: $ARGUMENTS
 
-Escreva um bilhete de 1 a 3 frases, em português simples, com o que ficou pela metade nesta sessão, o que falta fazer e qualquer cuidado para quem continuar. Use o que o usuário disse acima (se disse algo) e o que aconteceu nesta conversa. Não liste arquivos: o Faundr já registra isso sozinho. Rode com a ferramenta Bash, com aspas:
-`node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" handoff "<bilhete>"`
+Write a note of 1 to 3 sentences, in plain language, in the user's language, with what was left half-done in this session, what is left to do and anything to watch out for whoever continues. Use what the user said above (if they said anything) and what happened in this conversation. Do not list files: Faundr already records that on its own. Run with the Bash tool, with quotes:
+`node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" handoff "<note>"`
 
-Mostre o bilhete ao usuário em uma linha.
+Show the note to the user in one line.

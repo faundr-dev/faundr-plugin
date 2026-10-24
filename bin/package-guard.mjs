@@ -149,16 +149,16 @@ export async function guardInstall(command, { configDir, fetchImpl, now = Date.n
   if (missing.length)
     return {
       level: 'deny',
-      message: `[Faundr] Barrado: ${missing.map((x) => `"${x.name}"`).join(', ')} não existe${missing.length > 1 ? 'm' : ''} no ${registry(missing[0])}. Deve ser um nome inventado ou digitado errado; golpistas registram esses nomes com código malicioso. Confira o nome certo na documentação oficial da biblioteca antes de instalar.`,
+      message: `[Faundr] Blocked: ${missing.map((x) => `"${x.name}"`).join(', ')} ${missing.length > 1 ? 'do' : 'does'} not exist on ${registry(missing[0])}. It is probably a made-up or mistyped name; scammers register such names with malicious code. Check the right name in the library's official docs before installing.`,
     }
   const risky = results.filter((x) => x.r?.status === 'new' || x.r?.status === 'unpopular')
   if (!risky.length) return null
   const why = (x) =>
     x.r.status === 'new'
-      ? `"${x.name}" foi criado há ${Math.max(1, Math.floor((now - x.r.created) / 86400_000))} dia(s)`
-      : `"${x.name}" tem só ${x.r.weekly} download(s) por semana`
+      ? `"${x.name}" was created ${Math.max(1, Math.floor((now - x.r.created) / 86400_000))} day(s) ago`
+      : `"${x.name}" has only ${x.r.weekly} download(s) per week`
   return {
     level: 'ask',
-    message: `[Faundr] Atenção: ${risky.map(why).join('; ')} no ${registry(risky[0])}. Pacote novo ou quase sem uso pode ser um nome inventado pela IA e registrado por golpistas. Aprove só se você conhece o pacote ou conferiu o nome na documentação oficial.`,
+    message: `[Faundr] Heads-up: ${risky.map(why).join('; ')} on ${registry(risky[0])}. A new or barely used package may be a name the AI made up and scammers registered. Approve only if you know the package or checked the name in the official docs.`,
   }
 }

@@ -26,9 +26,9 @@ test('o hook do pedido não sugere planejar quando "prompt.feature" está deslig
   const hook = fileURLToPath(new URL('../bin/prompt-check.mjs', import.meta.url))
   const run = () =>
     spawnSync(process.execPath, [hook], { input: JSON.stringify({ cwd: root, session_id: 's1', prompt: 'quero criar uma tela nova de pedidos com filtros e exportar' }), encoding: 'utf8' }).stdout
-  assert.match(run(), /trabalho novo/)
+  assert.match(run(), /new multi-step work/)
   writeFlows(root, ['prompt.feature'])
-  assert.doesNotMatch(run(), /trabalho novo/)
+  assert.doesNotMatch(run(), /new multi-step work/)
 })
 
 // ---- Gatilho em campos e quem chama ---------------------------------------------------------------------------
@@ -49,7 +49,7 @@ test('skill "Só você": o guard barra o Claude e o aviso vira lembrete em uma l
   const out = spawnSync(process.execPath, [hook], { input: JSON.stringify({ cwd: root, tool_input: { skill: 'code-review' } }), encoding: 'utf8' }).stdout
   assert.match(out, /"permissionDecision":"deny"/)
   assert.equal(spawnSync(process.execPath, [hook], { input: JSON.stringify({ cwd: root, tool_input: { skill: 'copywriting' } }), encoding: 'utf8' }).stdout, '')
-  assert.match(skillNote([{ name: 'code-review', call: 'user', when: '' }]), /não rode; diga em uma linha "isso parece trabalho para \/code-review, quer rodar\?"/)
+  assert.match(skillNote([{ name: 'code-review', call: 'user', when: '' }]), /do not run it; say in one line "this looks like a job for \/code-review, want to run it\?"/)
 })
 
 test('momentos: o pedido só vale com "prompt", o arquivo só com "edit"', () => {
@@ -76,14 +76,14 @@ test('passo desligado numa skill do Faundr: o aviso chega pela ferramenta Skill 
   writeSkillIndex(root, [])
   assert.equal(skillStepsNote(root, 'faundr:design'), null)
   writeFlows(root, ['skill.design.browser'])
-  assert.match(skillStepsNote(root, 'faundr:design'), /desligou estes passos de \/faundr:design: medir as telas no navegador/)
+  assert.match(skillStepsNote(root, 'faundr:design'), /turned off these steps of \/faundr:design: measuring the screens in the browser/)
   assert.equal(skillStepsNote(root, 'faundr:tests'), null)
   const guard = fileURLToPath(new URL('../bin/skill-guard.mjs', import.meta.url))
   const out = spawnSync(process.execPath, [guard], { input: JSON.stringify({ cwd: root, tool_input: { skill: 'faundr:design' } }), encoding: 'utf8' }).stdout
-  assert.match(out, /"additionalContext":"\[Faundr\] Neste projeto/)
+  assert.match(out, /"additionalContext":"\[Faundr\] In this project/)
   const hook = fileURLToPath(new URL('../bin/prompt-check.mjs', import.meta.url))
   const typed = spawnSync(process.execPath, [hook], { input: JSON.stringify({ cwd: root, session_id: 's9', prompt: '/faundr:design' }), encoding: 'utf8' }).stdout
-  assert.match(typed, /medir as telas no navegador/)
+  assert.match(typed, /measuring the screens in the browser/)
 })
 
 // ---- Gatilhos por evento ---------------------------------------------------------------------------------------
@@ -97,10 +97,10 @@ test('evento: commit e deploy que deram certo pedem o que o time ligou, uma vez;
   const hook = (p) => spawnSync(process.execPath, [faundr, 'hook', 'claude'], { input: JSON.stringify({ session_id: sid, cwd: root, tool_name: 'Bash', ...p }), encoding: 'utf8' })
   const gate = () => spawnSync(process.execPath, [faundr, 'gate', 'claude'], { input: JSON.stringify({ hook_event_name: 'Stop', session_id: sid, cwd: root }), encoding: 'utf8' }).stdout
   hook({ hook_event_name: 'PostToolUse', tool_input: { command: 'git commit -m "x"' } })
-  assert.match(gate(), /rode a skill code-review: o time pediu depois do commit/)
+  assert.match(gate(), /run the code-review skill: the team asked for it after the commit/)
   assert.equal(gate(), '')
   hook({ hook_event_name: 'PostToolUseFailure', tool_input: { command: 'git push origin main' } })
   assert.equal(gate(), '')
   hook({ hook_event_name: 'PostToolUse', tool_input: { command: 'vercel --prod' } })
-  assert.match(gate(), /W-9 Publicar depois do push ou deploy, mas só quando a pessoa pedir/)
+  assert.match(gate(), /W-9 Publicar after the push or deploy, but only when the person asks/)
 })

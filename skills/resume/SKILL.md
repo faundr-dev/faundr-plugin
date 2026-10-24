@@ -1,14 +1,14 @@
 ---
-description: Onde paramos — busca no Faundr o que aconteceu na sessão anterior (pedidos, commits, tarefas, bilhete de passagem) e tudo o que está em aberto no projeto (tarefas, preocupações, achados de design, problemas de segurança, erros nos comandos, Visão desatualizada). Use quando o usuário perguntar "onde paramos?", "o que falta?" ou quiser retomar o trabalho.
+description: Where we left off — fetches from Faundr what happened in the previous session (requests, commits, tasks, handoff note) and everything open in the project (tasks, concerns, design findings, security problems, errors in commands, outdated Overview). Use when the user asks "where did we leave off?", "what is left?" or wants to resume work.
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *)
 ---
 
 !`node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" resume`
 
-Responda em português simples, a partir só do que está acima (não invente nada):
+Answer in plain language, in the user's language, based only on what is above (do not make anything up):
 
-1. **Onde paramos**: em 2 a 4 frases, o que foi feito na sessão anterior, citando o último commit e o bilhete de passagem, se houver.
-2. **O que ficou pendente**: lista curta e numerada, começando pelo bilhete e pelas tarefas em aberto, depois as próximas etapas planejadas (diga qual é a próxima de cada funcionalidade em etapas, pelo nome); se houver funcionalidades paradas, sugira conferir o quadro com /faundr:quadro; depois erros nos comandos (E-n, primeiro os que voltaram), problemas de segurança, achados de design e a Visão desatualizada.
-3. **Cuidados**: preocupações abertas que afetam o próximo passo, em uma linha cada.
+1. **Where we left off**: in 2 to 4 sentences, what was done in the previous session, citing the last commit and the handoff note, if any.
+2. **What is pending**: a short numbered list, starting with the handoff note and the open tasks, then the planned next stages (say which is the next one of each staged feature, by name); if there are stalled features, suggest checking the board with /faundr:tidy-board; then errors in commands (E-n, the ones that came back first), security problems, design findings and the outdated Overview.
+3. **Watch out**: open concerns that affect the next step, one line each.
 
-Termine perguntando por qual pendência o usuário quer começar, sugerindo uma (se uma etapa acabou de terminar, a sugestão natural é a próxima etapa dela). Não comece a trabalhar sem ele escolher.
+End by asking which pending item the user wants to start with, suggesting one (if a stage just finished, the natural suggestion is its next stage). Do not start working until they choose.

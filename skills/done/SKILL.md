@@ -1,6 +1,6 @@
 ---
-description: Marca uma tarefa do checklist do Faundr como concluída (pelo trecho do nome ou número).
-argument-hint: '<trecho do nome ou nº>'
+description: Marks a task in the Faundr checklist as done (by part of its name or its number).
+argument-hint: '<part of the name or no.>'
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *)
 ---
@@ -9,4 +9,4 @@ allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *
 
 !`node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" board`
 
-Confirme qual tarefa foi concluída e o que ainda falta, em poucas linhas.
+Confirm which task was done and what is still left, in a few lines.

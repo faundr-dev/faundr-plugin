@@ -13,10 +13,10 @@ const items = [
 
 test('bloco: regras com onde valem e decisões', () => {
   const b = agentsBlock(items, 'Lojinha')
-  assert.match(b, /^## Memória do time \(Lojinha\), pelo Faundr/)
-  assert.match(b, /- Rotas conferem o acesso — use assertProjectAccess \(vale para: src\/routes\/api\/\*\*\)/)
-  assert.match(b, /Decisões técnicas já tomadas[^\n]*\n- Deploy na Cloudflare — Workers/)
-  assert.match(agentsBlock([], null), /Nenhuma regra ou decisão/)
+  assert.match(b, /^## Team memory \(Lojinha\), by Faundr/)
+  assert.match(b, /- Rotas conferem o acesso — use assertProjectAccess \(applies to: src\/routes\/api\/\*\*\)/)
+  assert.match(b, /Technical decisions already made[^\n]*\n- Deploy na Cloudflare — Workers/)
+  assert.match(agentsBlock([], null), /No rules or decisions/)
 })
 
 test('cria, mantém o resto do arquivo, troca no lugar, não regrava se igual, e remove', () => {

@@ -46,22 +46,51 @@ const BUILD = new RegExp(
       'preciso (de um|de uma|que|criar|fazer)',
       'gostaria (de|que)',
       'vamos (fazer|criar|construir|montar|adicionar|implementar|para|pra|dar|desenhar|iniciar|comecar)',
+      // Os mesmos pedidos em inglês.
+      'creat(e|ing)',
+      'add(ing)?',
+      'build(ing)?',
+      'develop\\w*',
+      'make (a|an|some|this|that|these|those|the|it)',
+      'set up',
+      'start(ing)? (a|an|the|on|with|building|working)',
+      'modify\\w*',
+      'chang(e|ing) (the|how|it|this|that)',
+      'integrat\\w*',
+      'automat\\w*',
+      'improv(e|ing)',
+      'enhanc\\w*',
+      'optimiz\\w*',
+      'redesign\\w*',
+      'rework\\w*',
+      'migrat\\w*',
+      'replac(e|ing)',
+      'swap',
+      'allow(ing)?',
+      'let (users|people|me|the user)',
+      '(has|have|needs?) to (be|have)',
+      'should (be|have)',
+      'is missing (a|an)',
+      '(we|i) need (a|an|to)',
+      'i (want|would like|d like) (to|a|an|you)',
+      'let.?s (make|create|build|add|implement|design|start|begin|do|go)',
     ].join('|') +
     ')\\b',
 )
 // Peça nova do produto, ou a próxima parte de um trabalho.
 const NEW_THING =
-  /\b(nov[oa]s?|outr[oa]|proxim[oa]) (parte|passo|tela|pagina|funcao|funcionalidade|aba|integracao|botao|fluxo|relatorio|area|secao|rota|modulo|recurso|comando|etapa|fase|painel|cadastro|formulario)\b/
-// "fase 2", "etapa 3": seguir para a próxima parte do trabalho.
-const NEXT_STEP = /\b(fase|etapa) \d/
+  /\b((nov[oa]s?|outr[oa]|proxim[oa]) (parte|passo|tela|pagina|funcao|funcionalidade|aba|integracao|botao|fluxo|relatorio|area|secao|rota|modulo|recurso|comando|etapa|fase|painel|cadastro|formulario)|(new|another|next) (part|step|screen|page|function|feature|tab|integration|button|flow|report|area|section|route|module|command|stage|phase|panel|dashboard|signup|form))\b/
+// "fase 2", "etapa 3", "phase 2": seguir para a próxima parte do trabalho.
+const NEXT_STEP = /\b(fase|etapa|phase|stage) \d/
 // Conserto pontual: vira tarefa, não funcionalidade.
-const FIX = /\b(corrig\w*|consert\w*|bug|erro|falh\w*|quebr\w*|nao (funciona|abre|carrega|aparece))\b/
+const FIX =
+  /\b(corrig\w*|consert\w*|bug|erro|falh\w*|quebr\w*|nao (funciona|abre|carrega|aparece)|fix\w*|error\w*|fail\w*|broke\w*|crash\w*|(doesn.?t|does not|isn.?t|won.?t|can.?t) (work|open|load|show))\b/
 // Pedido de rotina (commit, publicar, bilhete), mesmo com "faça": não é trabalho novo.
-const ROUTINE = /\b(commit|push|publi\w*|deploy|handoff|bilhete)\b/
+const ROUTINE = /\b(commit|push|publi\w*|deploy|handoff|bilhete|release)\b/
 // Resumo que o Claude Code põe no lugar da conversa quando ela é compactada.
 const CONTINUED = /^this session is being continued/
 // Pergunta ou análise, sem pedir para construir.
-const QUESTION = /^(quero saber|queria saber|qual|quais|como|por ?que|porque|onde|quando|quanto|o que|sera|explic\w*|me (explica|diz|fala)|veja|analis\w*|avali\w*|compar\w*|resum\w*)\b/
+const QUESTION = /^(quero saber|queria saber|qual|quais|como|por ?que|porque|onde|quando|quanto|o que|sera|explic\w*|me (explica|diz|fala)|veja|analis\w*|avali\w*|compar\w*|resum\w*|what|which|how|why|where|when|who|is|are|does|do|can|could|explain\w*|tell me|show me|analy[sz]\w*|evaluat\w*|summari[sz]\w*|i (want|d like) to know)\b/
 
 /** 'feature' quando o pedido parece trabalho novo de vários passos; null quando não. */
 export function featureIntent(prompt) {
@@ -80,11 +109,11 @@ export function featureIntent(prompt) {
 /** O aviso para o agente (curto: entra só nos pedidos que batem). */
 export function featureNudge(current) {
   return [
-    '[Faundr] Este pedido parece trabalho novo de vários passos. Antes de começar:',
-    '- Se não for (pergunta, ajuste pequeno, correção pontual), ignore este aviso.',
-    current ? `- Se for continuação da funcionalidade atual ("${current}"), só adicione os passos novos: faundr task "<passo>".` : null,
-    '- Se for nova: planeje com a skill faundr:planning antes de construir (ela mede o tamanho, olha o projeto antes de perguntar, faz poucas perguntas com recomendação e mostra um resumo para o dono aprovar; pedido claro e pequeno não precisa de pergunta).',
-    '- Registre antes de construir: faundr feature "<título curto>" --desc "<objetivo>" --done-when "<critério>; <critério>" e um faundr task "<passo>" por passo. Com fases (MVP e depois, agora X e depois Y), registre já cada etapa seguinte: faundr feature "<etapa>" --after atual --desc "<o que entra>".',
+    '[Faundr] This request looks like new multi-step work. Before you start:',
+    '- If it is not (a question, a small tweak, a one-off fix), ignore this note.',
+    current ? `- If it continues the current feature ("${current}"), just add the new steps: faundr task "<step>".` : null,
+    '- If it is new: plan it with the faundr:planning skill before building (it sizes the request, looks at the project before asking, asks a few questions with a recommendation and shows a short summary for the owner to approve; a clear, small request needs no questions).',
+    '- Record it before building: faundr feature "<short title>" --desc "<goal>" --done-when "<criterion>; <criterion>" and one faundr task "<step>" per step. With phases (MVP and later, X now and Y later), record each next stage right away: faundr feature "<stage>" --after current --desc "<what goes in>".',
   ]
     .filter(Boolean)
     .join('\n')
@@ -105,6 +134,19 @@ const RULE = new RegExp(
     '(e|eh) proibido',
     'cuidado,? (com|que|pra|para)',
     'nao (quero|aceito) (mais )?que (voce|o claude|ele|isso) (use|faca|mude|apague|mexa|coloque|rode|publique|crie|instale)',
+    // As mesmas regras ditas em inglês.
+    'from now on',
+    'going forward',
+    'from here on',
+    'every time (you|we|that)',
+    'whenever (you|we)',
+    '(always|never) (use|do|put|leave|change|delete|remove|run|publish|push|deploy|touch|create|ask|show|write|install|commit|trust|forget|alter|expose|store|save|send|accept|ignore|edit|add)',
+    '(don.?t|do not) ever',
+    '(must|should) (not|never) (use|have|touch|delete|change|alter|push|publish|expose|show up|appear)',
+    '(is|are) (forbidden|not allowed)',
+    'be careful (with|about|that|to|not)',
+    'watch out (for|with)',
+    'i (don.?t|do not) want (you|claude|it|this) to (use|do|change|delete|touch|put|run|publish|create|install)',
   ]
     .map((p) => `\\b${p}\\b`)
     .join('|'),
@@ -120,5 +162,5 @@ export function ruleIntent(prompt) {
 }
 
 export function ruleNudge() {
-  return '[Faundr] O usuário parece ter dado uma regra para continuar valendo. Se for algo para as próximas conversas e para o time (não só para agora), registre: faundr rule "<regra curta e afirmativa>" --why "<porquê>" (com --file "<pasta ou padrão>" se valer só para uma parte do código; se substitui uma anterior, --replaces "<trecho do título>") e diga ao usuário em uma frase que registrou. Se for só para este pedido, ignore este aviso.'
+  return '[Faundr] The user seems to have given a rule meant to keep applying. If it is for future conversations and for the team (not just for now), record it: faundr rule "<short, affirmative rule>" --why "<reason>" (add --file "<folder or pattern>" if it applies to only part of the code; if it replaces an earlier one, --replaces "<part of its title>") and tell the user in one sentence that you recorded it. If it is just for this request, ignore this note.'
 }

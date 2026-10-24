@@ -18,7 +18,7 @@ export const findChrome = () => CHROME_PATHS.find((p) => existsSync(p))
 
 export async function launchChrome({ headless = true, profile = join(tmpdir(), 'faundr-browse-profile') } = {}) {
   const exe = findChrome()
-  if (!exe) throw new Error('Chrome não encontrado; defina CHROME_PATH.')
+  if (!exe) throw new Error('Chrome not found; set CHROME_PATH.')
   mkdirSync(profile, { recursive: true })
   const portFile = join(profile, 'DevToolsActivePort')
   const before = existsSync(portFile) ? readFileSync(portFile, 'utf8') : null
@@ -44,14 +44,14 @@ export async function launchChrome({ headless = true, profile = join(tmpdir(), '
     await sleep(50)
   }
   child.kill()
-  throw new Error('Chrome não abriu a porta de depuração a tempo.')
+  throw new Error('Chrome did not open the debugging port in time.')
 }
 
 export async function connect(wsUrl) {
   const ws = new WebSocket(wsUrl)
   await new Promise((ok, fail) => {
     ws.onopen = ok
-    ws.onerror = () => fail(new Error('Falha ao conectar no Chrome.'))
+    ws.onerror = () => fail(new Error('Could not connect to Chrome.'))
   })
   let next = 1
   const pending = new Map()

@@ -2,6 +2,7 @@
 // de tipos, testes, lint, scripts) e separa cada erro, com uma impressão digital estável (sem número de
 // linha) para o mesmo erro manter o mesmo E-n entre execuções. Chaves na saída saem mascaradas.
 import path from 'node:path'
+import { t as tr } from './i18n.mjs'
 import { LANG_READERS, LANG_TOOL_KIND } from './errors-langs.mjs'
 import { findSecrets, mask } from './security.mjs'
 
@@ -209,7 +210,7 @@ function testErrors(lines) {
     const n = !v && !j && (l.match(/^\s*✖\s+(?!failing tests:)(.+?)(?:\s+\([\d.]+m?s\))?$/) || l.match(/^\s*not ok \d+ - (.+?)(?:\s+#.*)?$/))
     if (n) {
       const reason = lines.slice(i + 1, i + 12).map((x) => x.trim()).find((r) => /^(\w*Error|AssertionError)\b/.test(r)) ?? ''
-      if (!out.some((o) => o.key === n[1])) out.push({ tool: 'node', code: null, message: `Teste falhou: ${n[1]}${reason ? ` (${reason})` : ''}`, file: null, line: null, index: i, key: n[1] })
+      if (!out.some((o) => o.key === n[1])) out.push({ tool: 'node', code: null, message: `${tr('Test failed', 'Teste falhou')}: ${n[1]}${reason ? ` (${reason})` : ''}`, file: null, line: null, index: i, key: n[1] })
     } else if (v || j) {
       let reason = ''
       for (let k = i + 1; k < Math.min(lines.length, i + 12); k++) {
@@ -220,9 +221,9 @@ function testErrors(lines) {
         }
       }
       const name = (v ? v[2] : j[1]).replace(/\s*\d+ms$/, '').trim()
-      out.push({ tool: v ? 'vitest' : 'jest', code: null, message: `Teste falhou: ${name}${reason ? ` (${reason})` : ''}`, file: v ? v[1] : null, line: null, index: i, key: name })
+      out.push({ tool: v ? 'vitest' : 'jest', code: null, message: `${tr('Test failed', 'Teste falhou')}: ${name}${reason ? ` (${reason})` : ''}`, file: v ? v[1] : null, line: null, index: i, key: name })
     } else if (p) {
-      out.push({ tool: 'pytest', code: null, message: `Teste falhou: ${p[2]}${p[3] ? ` (${p[3]})` : ''}`, file: p[1], line: null, index: i, key: p[2] })
+      out.push({ tool: 'pytest', code: null, message: `${tr('Test failed', 'Teste falhou')}: ${p[2]}${p[3] ? ` (${p[3]})` : ''}`, file: p[1], line: null, index: i, key: p[2] })
     }
   })
   return out
@@ -348,7 +349,7 @@ export function parseErrors(output, { kind, root, failed = true, cwd = root } = 
       kind: TOOL_KIND[e.tool] ?? kind,
       tool: e.tool,
       code: e.code ?? null,
-      title: (firstLine.length > 160 ? `${firstLine.slice(0, 157)}…` : firstLine) || 'Erro sem mensagem',
+      title: (firstLine.length > 160 ? `${firstLine.slice(0, 157)}…` : firstLine) || tr('Error with no message', 'Erro sem mensagem'),
       message,
       file,
       line: Number.isInteger(e.line) && e.line > 0 ? e.line : null,

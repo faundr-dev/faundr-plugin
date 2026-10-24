@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { COVERAGE_DIR } from './coverage.mjs'
+import { t as tr } from './i18n.mjs'
 import { karmaRunner, runKarma } from './tests-karma.mjs'
 
 export const DART_TEST_FILE = /_test\.dart$/
@@ -185,9 +186,9 @@ export function runLangTests(root, runner, { dir = '', files = null, out, timeou
   // flutter, dart, mvnw.cmd e gradlew.bat são .bat/.cmd no Windows: precisam do shell para abrir.
   const r = spawnSync(cmd, args, { cwd, encoding: 'utf8', windowsHide: true, timeout, maxBuffer: 64 * 1024 * 1024, shell, env: { ...process.env, CI: '1', NO_COLOR: '1' } })
   const durationMs = Date.now() - started
-  if (r.error?.code === 'ETIMEDOUT') return { runner, durationMs, error: `passou do tempo limite (${Math.round(timeout / 60000)} min)` }
-  if (r.error?.code === 'ENOENT') return { runner, durationMs, error: `não consegui abrir o ${cmd} (ele está instalado e no PATH?)` }
-  const noResult = (what) => ({ runner, durationMs, error: lastLine(r.stderr) || lastLine(r.stdout) || `o ${runner} terminou sem ${what} (código ${r.status})` })
+  if (r.error?.code === 'ETIMEDOUT') return { runner, durationMs, error: tr(`went over the time limit (${Math.round(timeout / 60000)} min)`, `passou do tempo limite (${Math.round(timeout / 60000)} min)`) }
+  if (r.error?.code === 'ENOENT') return { runner, durationMs, error: tr(`couldn't start ${cmd} (is it installed and on the PATH?)`, `não consegui abrir o ${cmd} (ele está instalado e no PATH?)`) }
+  const noResult = (what) => ({ runner, durationMs, error: lastLine(r.stderr) || lastLine(r.stdout) || tr(`${runner} finished without ${what === 'relatório' ? 'a report' : 'results'} (code ${r.status})`, `o ${runner} terminou sem ${what} (código ${r.status})`) })
   if (runner === 'phpunit' || runner === 'pest') {
     const xml = read(out)
     return xml ? { runner, durationMs, cases: null, junit: xml, error: null } : noResult('relatório')
@@ -234,10 +235,10 @@ function stepFailed(runner, what, r, { timeout, started }) {
   const tool = runner === 'make' ? 'make' : 'cmake'
   const error =
     r.error?.code === 'ETIMEDOUT'
-      ? `passou do tempo limite (${Math.round(timeout / 60000)} min)`
+      ? tr(`went over the time limit (${Math.round(timeout / 60000)} min)`, `passou do tempo limite (${Math.round(timeout / 60000)} min)`)
       : r.error?.code === 'ENOENT'
-        ? `não consegui abrir o ${tool} (ele está instalado e no PATH?)`
-        : `${what} falhou: ${lastLine(r.stderr) || lastLine(r.stdout)}`
+        ? tr(`couldn't start ${tool} (is it installed and on the PATH?)`, `não consegui abrir o ${tool} (ele está instalado e no PATH?)`)
+        : `${tr(what.en, what.pt)} ${tr('failed', 'falhou')}: ${lastLine(r.stderr) || lastLine(r.stdout)}`
   return { runner, durationMs: Date.now() - started, error }
 }
 
@@ -251,16 +252,16 @@ function runCtest(cwd, { out, timeout, started, coverageArgs = [] }) {
   const step = stepper(cwd, timeout, started)
   if (!fs.existsSync(path.join(cwd, build, 'CMakeCache.txt'))) {
     const conf = step('cmake', ['-S', '.', '-B', build, ...(coverageArgs.length ? COVERAGE_FLAGS : [])])
-    if (conf.status !== 0) return stepFailed('ctest', 'a configuração do CMake', conf, ctx)
+    if (conf.status !== 0) return stepFailed('ctest', { en: 'the CMake configuration', pt: 'a configuração do CMake' }, conf, ctx)
   }
   const compiled = step('cmake', ['--build', build])
-  if (compiled.status !== 0) return stepFailed('ctest', 'a compilação', compiled, ctx)
+  if (compiled.status !== 0) return stepFailed('ctest', { en: 'the build', pt: 'a compilação' }, compiled, ctx)
   const r = step('ctest', ['--test-dir', build, '--output-junit', out, '--output-on-failure'])
-  if (r.error) return stepFailed('ctest', 'o ctest', r, ctx)
+  if (r.error) return stepFailed('ctest', { en: 'ctest', pt: 'o ctest' }, r, ctx)
   // Cobertura: o gcovr junta os .gcda da pasta de build e grava o lcov; se falhar, os testes valem sem ela.
   if (coverageArgs.length) step('gcovr', ['--root', '.', '--object-directory', build, ...coverageArgs])
   const xml = read(out)
-  return xml ? { runner: 'ctest', durationMs: Date.now() - started, cases: null, junit: xml, error: null } : stepFailed('ctest', 'o ctest', r, ctx)
+  return xml ? { runner: 'ctest', durationMs: Date.now() - started, cases: null, junit: xml, error: null } : stepFailed('ctest', { en: 'ctest', pt: 'o ctest' }, r, ctx)
 }
 
 /**
@@ -272,7 +273,7 @@ function runMake(cwd, { out, timeout, started, target }) {
   fs.rmSync(xmlDir, { recursive: true, force: true })
   fs.mkdirSync(xmlDir, { recursive: true })
   const r = stepper(cwd, timeout, started, { GTEST_OUTPUT: `xml:${xmlDir}/` })('make', [target])
-  if (r.error) return stepFailed('make', `o make ${target}`, r, { timeout, started })
+  if (r.error) return stepFailed('make', { en: `make ${target}`, pt: `o make ${target}` }, r, { timeout, started })
   const xml = freshReports(xmlDir, /\.xml$/, started)
   if (xml) return { runner: 'make', durationMs: Date.now() - started, cases: null, junit: xml, error: null }
   return { runner: 'make', durationMs: Date.now() - started, cases: makeCases({ status: r.status, output: `${r.stdout}\n${r.stderr}`, target }), error: null }
@@ -287,7 +288,7 @@ export function makeCases({ status, output, target }) {
       name: `make ${target}`,
       status: status === 0 ? 'passed' : 'failed',
       durationMs: 0,
-      message: status === 0 ? null : lines.slice(-15).join('\n').slice(0, 2000) || 'falhou',
+      message: status === 0 ? null : lines.slice(-15).join('\n').slice(0, 2000) || tr('failed', 'falhou'),
     },
   ]
 }
@@ -418,7 +419,7 @@ export function fromDartJson(stdout, root, cwd = root) {
   const relTo = (file) => (file ? path.relative(root, path.resolve(cwd, file)).split(path.sep).join('/') : null)
   return [...tests.values()]
     .filter((t) => t.status)
-    .map((t) => ({ file: relTo(suites.get(t.suite)), name: t.name, status: t.status, durationMs: t.durationMs, message: t.status === 'failed' ? t.errors.join('\n').slice(0, 2000) || 'falhou' : null }))
+    .map((t) => ({ file: relTo(suites.get(t.suite)), name: t.name, status: t.status, durationMs: t.durationMs, message: t.status === 'failed' ? t.errors.join('\n').slice(0, 2000) || tr('failed', 'falhou') : null }))
 }
 
 /**
@@ -463,7 +464,7 @@ export function fromGoJson(stdout, root, cwd = root) {
 /** O que o teste escreveu: o motivo da falha, ou o do t.Skip. */
 function goMessage(t) {
   const text = t.output.filter(Boolean).join('\n')
-  if (t.status === 'failed') return text.slice(0, 2000) || 'falhou'
+  if (t.status === 'failed') return text.slice(0, 2000) || tr('failed', 'falhou')
   if (t.status === 'skipped') return text.slice(0, 300) || null
   return null
 }
@@ -504,7 +505,7 @@ export function fromTrx(xml, root, cwd = root) {
       name: short ? `${short} › ${method}` : method,
       status,
       durationMs: durationOf(get('duration')),
-      message: status === 'failed' ? message.slice(0, 2000) || 'falhou' : null,
+      message: status === 'failed' ? message.slice(0, 2000) || tr('failed', 'falhou') : null,
     })
   }
   return out
@@ -654,7 +655,7 @@ export function fromCargoTest(text, root, cwd = root) {
   }
   return tests.map(({ key, note, ...c }) => ({
     ...c,
-    message: c.status === 'failed' ? (messages.get(key) ?? []).join('\n').trim().slice(0, 2000) || 'falhou' : c.status === 'skipped' && note ? `Pulado: ${note}` : null,
+    message: c.status === 'failed' ? (messages.get(key) ?? []).join('\n').trim().slice(0, 2000) || tr('failed', 'falhou') : c.status === 'skipped' && note ? `${tr('Skipped', 'Pulado')}: ${note}` : null,
   }))
 }
 

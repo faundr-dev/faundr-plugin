@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { outputSaysFailed, parseErrors } from '../bin/errors.mjs'
+import { setLang } from '../bin/i18n.mjs'
+
+// Os títulos dos E-n vão para o painel na língua da pessoa: os testes fixam o português.
+setLang('pt')
 
 // Saída real do node --test que passou (o resumo sempre escreve "fail 0").
 const NODE_PASSED = `✔ wordsOf separa camelCase (1.2ms)

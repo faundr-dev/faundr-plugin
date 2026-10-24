@@ -5,7 +5,11 @@ import path from 'node:path'
 import { test } from 'node:test'
 import { themeSupport } from '../bin/design-rules.mjs'
 import { lintProject, measurePlan } from '../bin/design.mjs'
+import { setLang } from '../bin/i18n.mjs'
 import { measureFindings } from '../bin/measure-findings.mjs'
+
+// Os achados saem na língua da pessoa: os testes fixam o português (e conferem o inglês onde muda).
+setLang('pt')
 
 const proj = (files) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-tema-'))
@@ -103,6 +107,14 @@ test('regras: cor da paleta fixa num app de dois temas, menos com variante ou re
   assert.ok(hit)
   assert.equal(hit.line, 3)
   assert.match(hit.detail, /Linhas: 3\./)
+  setLang('en')
+  try {
+    const en = lintProject(dir).findings.find((f) => f.rule === 'design/cor-fixa-sem-tema')
+    assert.match(en.title, /fixed color that does not change with the theme/i)
+    assert.match(en.detail, /Lines: 3\./)
+  } finally {
+    setLang('pt')
+  }
 })
 
 test('plano de medição: escopo, detecção e larguras', () => {
@@ -126,6 +138,15 @@ test('medição com tema: o tema vai no título do achado', () => {
   const [f] = measureFindings(
     { url: '/app', largura: 375, tema: 'claro', contraste: [{ el: 'p', cor: '#aaa', fundo: '#fff', razao: 2.3, minimo: 4.5 }] },
     'Projetos',
+    'pt',
   )
   assert.match(f.title, /Projetos em 375 px \(tema claro\)/)
+  assert.match(f.title, /mínimo 2,3:1/)
+  const [en] = measureFindings(
+    { url: '/app', largura: 375, tema: 'claro', contraste: [{ el: 'p', cor: '#aaa', fundo: '#fff', razao: 2.3, minimo: 4.5 }] },
+    'Projects',
+    'en',
+  )
+  assert.equal(en.title, 'Low contrast on screen (lowest 2.3:1): Projects at 375 px (light theme)')
+  assert.match(en.detail, /Page: \/app\.$/)
 })

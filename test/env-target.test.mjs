@@ -4,6 +4,9 @@ import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
 import { changesDatabase, remoteDatabaseFindings, remoteDatabases, remoteNote } from '../bin/env-target.mjs'
+import { setLang } from '../bin/i18n.mjs'
+
+setLang('pt')
 
 function project(files) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-env-'))
@@ -26,10 +29,14 @@ test('mesmo servidor do .env de produção ou da configuração do deploy = banc
   })
   const [d] = remoteDatabases(root)
   assert.equal(d.sameAsProduction, true)
-  assert.match(remoteNote([d]), /o mesmo banco do app no ar/)
+  assert.match(remoteNote([d]), /the same database as the live app/)
   const [f] = remoteDatabaseFindings(root)
   assert.equal(f.severity, 'high')
   assert.equal(f.rule_id, 'local-env-remote-db')
+  assert.match(f.title, /banco de produção/)
+  setLang('en')
+  assert.match(remoteDatabaseFindings(root)[0].title, /uses the production database/)
+  setLang('pt')
   assert.doesNotMatch(JSON.stringify(f), /senha|outra/)
   const viaConfig = project({ '.dev.vars': 'SUPABASE_URL=https://xyz.supabase.co\n', 'wrangler.jsonc': '{ "vars": { "SUPABASE_URL": "https://xyz.supabase.co" } }' })
   assert.equal(remoteDatabases(viaConfig)[0].sameAsProduction, true)

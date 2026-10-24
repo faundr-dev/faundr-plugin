@@ -16,7 +16,8 @@ import { foreignKeysWithoutIndex, queriesInLoops, unboundedQueries } from './per
 import { matchesPath, readRules } from './rules.mjs'
 import { DOCKERFILE } from './security-langs.mjs'
 import { projectFiles } from './security.mjs'
-import { houseText, TEXT } from './quality-texts.mjs'
+import { t } from './i18n.mjs'
+import { functionList, houseText, lineList, TEXT } from './quality-texts.mjs'
 
 const MAX_FILE = 400_000
 // Linha só de comentário, por linguagem (não conta como linha de código).
@@ -80,28 +81,34 @@ export const RULES = {
 }
 
 // Dependências que a linguagem, o Node ou o navegador já resolvem (tabela do Ponytail, docs/platform-native.md).
-const NATIVE = {
-  uuid: ['crypto.randomUUID()', 'Node 19+ e todos os navegadores atuais'],
-  'node-uuid': ['crypto.randomUUID()', 'Node 19+ e todos os navegadores atuais'],
-  'lodash.clonedeep': ['structuredClone(obj)', 'Node 17+ e navegadores atuais'],
-  'clone-deep': ['structuredClone(obj)', 'Node 17+ e navegadores atuais'],
-  qs: ['URLSearchParams', 'para parâmetros simples (sem objetos aninhados)'],
-  'query-string': ['URLSearchParams', 'para parâmetros simples (sem objetos aninhados)'],
-  rimraf: ['fs.rm(caminho, { recursive: true, force: true })', 'Node 14.14+'],
-  mkdirp: ['fs.mkdir(caminho, { recursive: true })', 'Node 10.12+'],
-  'node-fetch': ['fetch nativo', 'Node 18+'],
-  'cross-fetch': ['fetch nativo', 'Node 18+ e navegadores'],
-  'isomorphic-fetch': ['fetch nativo', 'Node 18+ e navegadores'],
-  'left-pad': ["texto.padStart(n, ' ')", 'qualquer ambiente atual'],
-  'object-assign': ['Object.assign ou { ...obj }', 'qualquer ambiente atual'],
-  'array-flatten': ['lista.flat(Infinity)', 'qualquer ambiente atual'],
-  'lodash.flatten': ['lista.flat()', 'qualquer ambiente atual'],
-  'es6-promise': ['Promise nativa', 'qualquer ambiente atual'],
-  'promise-polyfill': ['Promise nativa', 'qualquer ambiente atual'],
-  'body-parser': ['express.json() / express.urlencoded()', 'Express 4.16+'],
-  'is-number': ["typeof x === 'number' && Number.isFinite(x)", 'qualquer ambiente atual'],
-  'abort-controller': ['AbortController nativo', 'Node 15+ e navegadores'],
-  'url-parse': ['new URL(texto)', 'qualquer ambiente atual'],
+// Função: o texto vai para o painel na língua da pessoa, decidida na hora.
+const NATIVE = () => {
+  const anyEnv = t('any current environment', 'qualquer ambiente atual')
+  const nodeBrowsers = (v) => t(`Node ${v}+ and browsers`, `Node ${v}+ e navegadores`)
+  const simpleParams = t('for simple parameters (no nested objects)', 'para parâmetros simples (sem objetos aninhados)')
+  return {
+    uuid: ['crypto.randomUUID()', t('Node 19+ and all current browsers', 'Node 19+ e todos os navegadores atuais')],
+    'node-uuid': ['crypto.randomUUID()', t('Node 19+ and all current browsers', 'Node 19+ e todos os navegadores atuais')],
+    'lodash.clonedeep': ['structuredClone(obj)', t('Node 17+ and current browsers', 'Node 17+ e navegadores atuais')],
+    'clone-deep': ['structuredClone(obj)', t('Node 17+ and current browsers', 'Node 17+ e navegadores atuais')],
+    qs: ['URLSearchParams', simpleParams],
+    'query-string': ['URLSearchParams', simpleParams],
+    rimraf: [t('fs.rm(path, { recursive: true, force: true })', 'fs.rm(caminho, { recursive: true, force: true })'), 'Node 14.14+'],
+    mkdirp: [t('fs.mkdir(path, { recursive: true })', 'fs.mkdir(caminho, { recursive: true })'), 'Node 10.12+'],
+    'node-fetch': [t('native fetch', 'fetch nativo'), 'Node 18+'],
+    'cross-fetch': [t('native fetch', 'fetch nativo'), nodeBrowsers(18)],
+    'isomorphic-fetch': [t('native fetch', 'fetch nativo'), nodeBrowsers(18)],
+    'left-pad': [t("text.padStart(n, ' ')", "texto.padStart(n, ' ')"), anyEnv],
+    'object-assign': [t('Object.assign or { ...obj }', 'Object.assign ou { ...obj }'), anyEnv],
+    'array-flatten': [t('list.flat(Infinity)', 'lista.flat(Infinity)'), anyEnv],
+    'lodash.flatten': [t('list.flat()', 'lista.flat()'), anyEnv],
+    'es6-promise': [t('native Promise', 'Promise nativa'), anyEnv],
+    'promise-polyfill': [t('native Promise', 'Promise nativa'), anyEnv],
+    'body-parser': ['express.json() / express.urlencoded()', 'Express 4.16+'],
+    'is-number': ["typeof x === 'number' && Number.isFinite(x)", anyEnv],
+    'abort-controller': [t('native AbortController', 'AbortController nativo'), nodeBrowsers(15)],
+    'url-parse': [t('new URL(text)', 'new URL(texto)'), anyEnv],
+  }
 }
 
 // Pacotes usados sem import no código (ferramentas, plugins por nome na configuração, CSS).
@@ -139,8 +146,6 @@ function makeCollector() {
     },
   }
 }
-
-const lineList = (lines) => (lines.length ? ` Linhas: ${lines.slice(0, 12).join(', ')}${lines.length > 12 ? '…' : ''}.` : '')
 
 /** Arquivos de código que entram na checagem (sem gerados, minificados e pastas de build). */
 export function qualityFiles(root) {
@@ -272,7 +277,7 @@ function toFindings(c) {
     const measure = { 'complexidade/funcao': 'complexity', 'complexidade/funcao-longa': 'lines', 'complexidade/aninhamento': 'depth' }[h.rule]
     const list =
       measure && h.all.length > 1
-        ? ` Funções: ${[...h.all].sort((a, b) => b[measure] - a[measure]).slice(0, 10).map((x) => `${x.name} (${x[measure]}, linha ${x.line})`).join('; ')}.`
+        ? functionList([...h.all].sort((a, b) => b[measure] - a[measure]).slice(0, 10), measure)
         : ''
     findings.push({
       kind: meta.kind,
@@ -460,7 +465,7 @@ function runEslint(eslint, { root, dir, cwd }, c, errors, ran) {
     for (const file of JSON.parse(r.stdout)) {
       const rel = path.relative(root, file.filePath).split(path.sep).join('/')
       for (const msg of file.messages ?? [])
-        c.add(msg.severity === 2 ? 'eslint/erro' : 'eslint/aviso', rel, msg.line ?? null, { rule: msg.ruleId ?? 'sintaxe', message: msg.message })
+        c.add(msg.severity === 2 ? 'eslint/erro' : 'eslint/aviso', rel, msg.line ?? null, { rule: msg.ruleId, message: msg.message })
     }
     ran.push(toolLabel('eslint', dir))
   } catch {
@@ -550,8 +555,9 @@ function projectRules(root, files, c) {
   for (const { dir, pkg } of parts) {
     const manifest = [dir, 'package.json'].filter(Boolean).join('/')
     const deps = Object.keys(pkg.dependencies ?? {})
+    const native = NATIVE()
     for (const name of [...deps, ...Object.keys(pkg.devDependencies ?? {})])
-      if (NATIVE[name]) c.add('demais/dependencia-dispensavel', manifest, null, { pkg: name, native: NATIVE[name][0], where: NATIVE[name][1] })
+      if (native[name]) c.add('demais/dependencia-dispensavel', manifest, null, { pkg: name, native: native[name][0], where: native[name][1] })
     // Raiz de monorepo (workspaces): os pacotes de verdade estão nas partes.
     if (pkg.workspaces) continue
     // Os arquivos da parte; os da raiz são todos menos os das outras partes.
@@ -692,10 +698,13 @@ export function houseRules(root) {
     const meta = Object.fromEntries(
       m[1].split(/\r?\n/).map((l) => l.match(/^(\w+):\s*(.*)$/)).filter(Boolean).map(([, k, v]) => [k, v.trim().replace(/^["']|["']$/g, '')]),
     )
-    if (!meta.padrao || meta.ativo === 'nao' || meta.ativo === 'false') continue
+    // Chaves em português (como o faundr quality-rule grava) ou em inglês.
+    const pattern = meta.padrao ?? meta.pattern
+    const active = meta.ativo ?? meta.active
+    if (!pattern || active === 'nao' || active === 'no' || active === 'false') continue
     let re
     try {
-      re = new RegExp(meta.padrao.replace(/\\\\/g, '\\'))
+      re = new RegExp(pattern.replace(/\\\\/g, '\\'))
     } catch {
       // Padrão inválido: a regra fica de fora (o comando quality-rule avisa ao criar).
       continue
@@ -703,8 +712,8 @@ export function houseRules(root) {
     const id = name.replace(/\.md$/, '')
     out.push({
       rule: `casa/${id}`,
-      files: globToRegex(meta.arquivos || '**/*'),
-      ctx: { name: meta.nome || id, message: m[2].trim().slice(0, 1500), severity: SEVERITY_PT_IN[meta.gravidade?.toLowerCase()] ?? 'medium', file: `${HOUSE_DIR}/${name}` },
+      files: globToRegex(meta.arquivos || meta.files || '**/*'),
+      ctx: { name: meta.nome || meta.name || id, message: m[2].trim().slice(0, 1500), severity: SEVERITY_PT_IN[(meta.gravidade ?? meta.severity)?.toLowerCase()] ?? 'medium', file: `${HOUSE_DIR}/${name}` },
       lines: (text2) => text2.split('\n').flatMap((l, i) => (re.test(l) ? [i + 1] : [])),
     })
   }
@@ -715,7 +724,7 @@ export function houseRules(root) {
 
 // O comentário começa a linha ou vem depois do código (não conta texto dentro de aspas).
 const SHORTCUT = /(?:^\s*|[;{}),]\s*)(?:\/\/|\/\*|#|\*)\s*faundr:\s*(.+?)\s*(?:\*\/)?$/
-const TRIGGER = /,\s*\S.*|\b(quando|se|depois|até|assim que|when|if|once)\b/i
+const TRIGGER = /,\s*\S.*|\b(quando|se|depois|até|assim que|when|if|once|after|until|as soon as)\b/i
 
 /** Comentários que registram uma simplificação consciente. Sem gatilho ("quando…"), viram achado. */
 export function shortcutsIn(text) {

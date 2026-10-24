@@ -4,6 +4,7 @@
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
+import { t } from './i18n.mjs'
 
 const readJson = (file) => {
   try {
@@ -92,11 +93,11 @@ export function runKarma(root, dir, { out, timeout }) {
     env: { ...process.env, CI: '1', NO_COLOR: '1', NG_CLI_ANALYTICS: 'false' },
   })
   const durationMs = Date.now() - started
-  if (r.error?.code === 'ETIMEDOUT') return { runner: 'karma', durationMs, error: `passou do tempo limite (${Math.round(timeout / 60000)} min)` }
+  if (r.error?.code === 'ETIMEDOUT') return { runner: 'karma', durationMs, error: t(`went over the time limit (${Math.round(timeout / 60000)} min)`, `passou do tempo limite (${Math.round(timeout / 60000)} min)`) }
   const text = read(json)
   if (!text) {
     const last = `${r.stderr}\n${r.stdout}`.split('\n').map((l) => l.trim()).filter(Boolean).at(-1) ?? ''
-    return { runner: 'karma', durationMs, error: last.slice(0, 300) || `o ng test terminou sem resultados (código ${r.status})` }
+    return { runner: 'karma', durationMs, error: last.slice(0, 300) || t(`ng test finished without results (code ${r.status})`, `o ng test terminou sem resultados (código ${r.status})`) }
   }
   return { runner: 'karma', durationMs, cases: fromKarmaJson(text, root, dir), error: null }
 }
@@ -120,7 +121,7 @@ export function fromKarmaJson(text, root, dir = '') {
       fileOf.set(top, specFiles.find((f) => decl.test(f.text))?.rel ?? null)
     }
     const status = s.skipped ? 'skipped' : s.success ? 'passed' : 'failed'
-    const message = status === 'failed' ? (s.log ?? []).join('\n').split('\n').filter((l) => !/^\s*at <Jasmine>/.test(l)).join('\n').trim().slice(0, 2000) || 'falhou' : null
+    const message = status === 'failed' ? (s.log ?? []).join('\n').split('\n').filter((l) => !/^\s*at <Jasmine>/.test(l)).join('\n').trim().slice(0, 2000) || t('failed', 'falhou') : null
     return { file: fileOf.get(top), name: [...(s.suite ?? []), s.description].join(' › '), status, durationMs: Math.round(s.time ?? 0), message }
   })
 }

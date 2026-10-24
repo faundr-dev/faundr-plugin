@@ -73,7 +73,7 @@ test('aviso pelo assunto: tópicos, nome quando não há tópicos e nada quando 
   assert.deepEqual(skillsForPrompt(INDEX, '/faundr:design arruma a tela'), [])
   assert.deepEqual(skillsForPrompt(INDEX, 'mexe no design da tela', ['faundr:design']), [])
   const note = skillNote(skillsForPrompt(INDEX, 'qual skill eu uso aqui?'))
-  assert.match(note, /\/ask-matt \(só a pessoa chama/)
+  assert.match(note, /\/ask-matt \(only the person calls it/)
 })
 
 test('cada skill avisa uma vez por sessão', () => {

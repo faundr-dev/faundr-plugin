@@ -1,74 +1,74 @@
 ---
 name: design-showcase
-description: Gera ou atualiza a Vitrine do design no Faundr — réplicas visuais dos componentes do projeto (botões, campos, cards, menus, etiquetas…) com as variantes lado a lado, lidas do design.md e do código de cada componente. Aparecem em Design → Vitrine no painel. Use quando o usuário pedir, ou quando o painel mostrar réplicas desatualizadas.
-argument-hint: '"[nome do componente]  (sem argumento: todos os desatualizados e os que faltam)"'
+description: Generates or updates the design Showcase in Faundr — visual replicas of the project's components (buttons, fields, cards, menus, tags…) with the variants side by side, read from design.md and from each component's code. They appear under Design → Showcase in the dashboard. Use when the user asks, or when the dashboard shows outdated replicas.
+argument-hint: '"[component name]  (no argument: all outdated and missing ones)"'
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *)
 ---
 
-## Contexto
+## Context
 
 !`node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" showcase-context`
 
-Use a CLI com a ferramenta Bash, sempre com aspas: `faundr ...` (se não estiver no PATH, `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" ...`).
+Use the CLI with the Bash tool, always with quotes: `faundr ...` (if it is not on the PATH, `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" ...`).
 
-## O que é
+## What it is
 
-Cada réplica é HTML estático que reproduz o visual de um componente, desenhado pelo painel num quadro isolado com o CSS e as fontes do próprio projeto. Não é o componente rodando: é uma cópia fiel, feita por você lendo o código. Por isso precisa ser **fiel**: as mesmas classes, a mesma estrutura, os mesmos textos típicos.
+Each replica is static HTML that reproduces a component's look, drawn by the dashboard in an isolated frame with the project's own CSS and fonts. It is not the component running: it is a faithful copy, made by you reading the code. That is why it needs to be **faithful**: the same classes, the same structure, the same typical texts.
 
-## 1. Escolha os componentes
+## 1. Choose the components
 
-- Com design.md: todos da tabela de componentes (exceto moldura de página inteira, como AppShell — no máximo uma versão reduzida).
-- Sem design.md: os componentes reutilizados em várias telas (botões, campos, cards, menus, etiquetas, modais, avisos). Sugira criar o design.md com /faundr:design.
-- Com argumento: só aquele componente. Sem argumento e com vitrine existente: só os que não estão "atual" no contexto, mais os que faltam. Mantenha as outras réplicas como estão no arquivo.
+- With design.md: all of the components table (except whole-page frames, like AppShell — at most a reduced version).
+- Without design.md: the components reused across several screens (buttons, fields, cards, menus, tags, modals, notices). Suggest creating design.md with /faundr:design.
+- With an argument: only that component. Without an argument and with an existing showcase: only the ones that are not "atual" (up to date) in the context, plus the missing ones. Keep the other replicas as they are in the file.
 
-## 2. Leia o código de cada um
+## 2. Read each one's code
 
-Abra o arquivo do componente (e o CSS da classe, quando for classe global) antes de escrever. Nunca replique pelo nome: pegue as classes e a estrutura reais.
+Open the component's file (and the class's CSS, when it is a global class) before writing. Never replicate by name: take the real classes and structure.
 
-## 3. Escreva `.faundr/painel/showcase.json`
+## 3. Write `.faundr/painel/showcase.json`
 
 ```json
 {
   "version": 1,
   "components": [
     {
-      "name": "Botão principal (.f-btn)",
+      "name": "Primary button (.f-btn)",
       "file": "src/styles.css",
       "files": ["src/styles.css"],
-      "group": "Botões",
-      "usage": "Ação principal da tela (uma por área).",
+      "group": "Buttons",
+      "usage": "The screen's main action (one per area).",
       "background": "#151515",
       "width": 480,
       "variants": [
-        { "name": "Padrão", "html": "<button class=\"f-btn\">Novo projeto</button>" },
-        { "name": "Com ícone", "html": "<button class=\"f-btn\"><svg …></svg>Novo projeto</button>" },
-        { "name": "Desabilitado", "html": "<button class=\"f-btn\" disabled>Novo projeto</button>" }
+        { "name": "Default", "html": "<button class=\"f-btn\">New project</button>" },
+        { "name": "With icon", "html": "<button class=\"f-btn\"><svg …></svg>New project</button>" },
+        { "name": "Disabled", "html": "<button class=\"f-btn\" disabled>New project</button>" }
       ]
     }
   ]
 }
 ```
 
-- `file`: o arquivo principal do componente; `files`: todos os arquivos cujo visual a réplica copia (o componente e o CSS das classes). **É por eles que o Faundr marca a réplica como desatualizada quando o código muda**; não esqueça o CSS.
-- `group`: agrupa no canvas (Botões, Campos, Cards, Navegação, Etiquetas, Feedback, Modais, Outros).
-- `usage`: quando usar, em português simples (do design.md).
-- `background`: fundo onde o componente aparece de verdade (ex.: o fundo das telas escuras). Sem ele, vale o fundo do `body` do projeto.
-- `width`: largura do quadro em px (200–1400; padrão 480). Use mais para cards e cabeçalhos.
-- `variants`: 1 a 8 estados lado a lado: padrão, com ícone, tamanhos, ativo, desabilitado, vazio, com conteúdo longo… Para hover/foco, escreva a variante com as classes do estado já aplicadas (ex.: `bg-neutral-200` no lugar de `hover:bg-neutral-200`) e diga no nome ("Ao passar o mouse").
+- `file`: the component's main file; `files`: all the files whose look the replica copies (the component and the classes' CSS). **These are what Faundr uses to mark the replica as outdated when the code changes**; do not forget the CSS.
+- `group`: groups on the canvas (Buttons, Fields, Cards, Navigation, Tags, Feedback, Modals, Other).
+- `usage`: when to use it, in plain language, in the user's language (from design.md).
+- `background`: the background where the component really appears (e.g. the background of the dark screens). Without it, the project's `body` background applies.
+- `width`: frame width in px (200–1400; default 480). Use more for cards and headers.
+- `variants`: 1 to 8 states side by side: default, with icon, sizes, active, disabled, empty, with long content… For hover/focus, write the variant with the state classes already applied (e.g. `bg-neutral-200` instead of `hover:bg-neutral-200`) and say so in the name ("On hover").
 
-Regras do HTML:
-- Use `class` (não `className`) e as classes exatas do código; siga o que o contexto diz sobre o CSS (Tailwind 4, 3 ou CSS puro).
-- Componente React: escreva o HTML que ele renderiza, com props de exemplo realistas (textos do próprio app, não "Lorem ipsum").
-- Ícones: SVG embutido com os mesmos traços do ícone original (ex.: Lucide: `viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"` e os paths do ícone).
-- Sem `<script>`, sem imagens externas (use um bloco de cor no lugar de foto) e sem depender de dados reais do usuário.
-- Menus, dropdowns e modais: desenhe-os já abertos, em posição normal (sem `fixed`), dentro da largura do quadro.
+HTML rules:
+- Use `class` (not `className`) and the exact classes from the code; follow what the context says about the CSS (Tailwind 4, 3 or plain CSS).
+- React component: write the HTML it renders, with realistic example props (texts from the app itself, not "Lorem ipsum").
+- Icons: inline SVG with the same strokes as the original icon (e.g. Lucide: `viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"` and the icon's paths).
+- No `<script>`, no external images (use a color block in place of a photo) and no dependence on real user data.
+- Menus, dropdowns and modals: draw them already open, in normal position (no `fixed`), within the frame width.
 
-## 4. Envie
+## 4. Send
 
 `faundr showcase-save`
 
-A CLI confere o formato, carimba a impressão digital de cada componente, junta o CSS e as fontes do projeto e envia. Se apontar problemas, corrija e rode de novo.
+The CLI checks the format, stamps each component's fingerprint, bundles the project's CSS and fonts and sends it. If it points out problems, fix them and run it again.
 
-## 5. Responda
+## 5. Answer
 
-Uma ou duas frases: quantas réplicas criou ou atualizou e onde ver (Design → Vitrine no painel). Se algum componente não deu para replicar com fidelidade (depende de dados, canvas, animação), diga qual e por quê.
+One or two sentences: how many replicas you created or updated and where to see them (Design → Showcase in the dashboard). If some component could not be replicated faithfully (depends on data, canvas, animation), say which and why.

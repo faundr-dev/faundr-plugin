@@ -3,7 +3,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
+import { setLang } from '../bin/i18n.mjs'
 import { checkDbTest, checkHeaders, checkPaymentWebhook, checkPrivacy, checkRateLimit, productionUrl } from '../bin/launch.mjs'
+
+setLang('pt')
 
 function project(files) {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-launch-'))
@@ -25,7 +28,11 @@ test('cabeçalhos: todos presentes = ok; nenhum = falta; sem https = falta', asy
   assert.equal(ok.status, 'ok')
   const none = await checkHeaders('https://a.dev', { fetchImpl: async () => new Response('') })
   assert.equal(none.status, 'falta')
-  assert.match(none.detail, /HSTS/)
+  assert.match(none.detail, /HSTS \(obriga o navegador/)
+  setLang('en')
+  const noneEn = await checkHeaders('https://a.dev', { fetchImpl: async () => new Response('') })
+  assert.match(noneEn.detail, /does not send: HSTS \(forces the browser/)
+  setLang('pt')
   const some = await checkHeaders('https://a.dev', { fetchImpl: async () => new Response('', { headers: { ...full, 'referrer-policy': '' } }) })
   assert.equal(some.status, 'aviso')
   assert.equal((await checkHeaders('http://a.dev')).status, 'falta')

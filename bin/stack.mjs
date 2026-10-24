@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
+import { t } from './i18n.mjs'
 import { LANG_BACK, LANG_CODE_FILE, LANG_ENV_USE, LANG_FRONT, LANG_SVC, LANG_TECH, langBuildTech, langDeps, langRuntime } from './stack-langs.mjs'
 
 const SKIP = /(^|\/)(node_modules|\.git|\.faundr|dist|build|out|vendor|third_party|\.next|\.nuxt|\.svelte-kit|\.wrangler|\.vercel|\.output|coverage|__pycache__|\.venv|venv)(\/|$)/
@@ -89,6 +90,17 @@ const SVC = {
 Object.assign(SVC, LANG_SVC)
 const SVC_PREFIX = [['@sentry/', 'Sentry', 'monitoramento', 'erros do app publicado']]
 
+// Para quê de cada serviço (SVC e LANG_SVC guardam em português): o texto em inglês, escolhido na hora de detectar.
+const PURPOSE_EN = {
+  'cobrança e pagamentos': 'billing and payments', 'envio de e-mails': 'sending emails', 'inteligência artificial': 'artificial intelligence',
+  'métricas de uso': 'usage analytics', 'SMS e WhatsApp': 'SMS and WhatsApp', 'mensagens no Slack': 'Slack messages', 'tempo real': 'real time',
+  'guardar arquivos': 'file storage', 'serviços da AWS': 'AWS services', 'imagens e vídeos': 'images and videos', 'upload de arquivos': 'file uploads',
+  mapas: 'maps', busca: 'search', cache: 'cache', 'login de usuários': 'user login', 'login dos usuários': 'user login',
+  'erros do app publicado': 'errors in the live app', 'erros em produção': 'errors in production', 'backend do app': 'app backend',
+  'banco de dados e backend': 'database and backend',
+}
+const purposeText = (pt) => t(PURPOSE_EN[pt] ?? pt, pt)
+
 // Prefixo da variável → serviço (para dizer de quem é cada chave).
 const ENV_SERVICE = [
   [/^(VITE_|NEXT_PUBLIC_|PUBLIC_)?SUPABASE_/, 'Supabase'], [/STRIPE_/, 'Stripe'], [/^OPENAI_/, 'OpenAI'],
@@ -98,6 +110,10 @@ const ENV_SERVICE = [
   [/MERCADO_?PAGO/, 'Mercado Pago'], [/^(DATABASE_URL|POSTGRES_|PG)/, 'Banco de dados'], [/^REDIS_/, 'Redis'],
   [/^(SMTP_|MAIL_|EMAIL_)/, 'E-mail'], [/^SLACK_/, 'Slack'], [/^DISCORD_/, 'Discord'],
 ]
+const envService = (name) => {
+  const s = ENV_SERVICE.find(([re]) => re.test(name))?.[1]
+  return s === 'Banco de dados' ? t('Database', s) : s
+}
 const PUBLIC_PREFIX = /^(VITE_|NEXT_PUBLIC_|PUBLIC_|NUXT_PUBLIC_|EXPO_PUBLIC_|REACT_APP_|GATSBY_)/
 // Variáveis do próprio sistema/ferramenta: não são configuração do projeto.
 const ENV_IGNORE = new Set([
@@ -106,9 +122,15 @@ const ENV_IGNORE = new Set([
 ])
 
 const SCRIPT_WHAT = {
-  dev: 'roda o projeto no seu computador', start: 'inicia o projeto', build: 'gera a versão para publicar',
-  preview: 'testa localmente a versão de publicação', deploy: 'publica o projeto', test: 'roda os testes',
-  lint: 'confere o estilo do código', typecheck: 'confere os tipos do TypeScript', format: 'formata o código',
+  dev: () => t('runs the project on your computer', 'roda o projeto no seu computador'),
+  start: () => t('starts the project', 'inicia o projeto'),
+  build: () => t('builds the version to publish', 'gera a versão para publicar'),
+  preview: () => t('tests the publish version locally', 'testa localmente a versão de publicação'),
+  deploy: () => t('publishes the project', 'publica o projeto'),
+  test: () => t('runs the tests', 'roda os testes'),
+  lint: () => t('checks the code style', 'confere o estilo do código'),
+  typecheck: () => t('checks the TypeScript types', 'confere os tipos do TypeScript'),
+  format: () => t('formats the code', 'formata o código'),
 }
 
 // ---- utilidades ------------------------------------------------------------------------------------
@@ -206,14 +228,14 @@ function techAndServices(stack, deps) {
   const techSeen = new Set()
   const svcSeen = new Map()
   for (const [n, d] of deps) {
-    const t = TECH[n] ?? TECH_PREFIX.find(([p]) => n.startsWith(p))?.slice(1)
-    if (t && !techSeen.has(t[0])) {
-      techSeen.add(t[0])
-      stack.tech.push({ name: t[0], category: t[1], ...(TECH[n] && d.version ? { version: d.version } : {}), evidence: [d.file] })
+    const tech = TECH[n] ?? TECH_PREFIX.find(([p]) => n.startsWith(p))?.slice(1)
+    if (tech && !techSeen.has(tech[0])) {
+      techSeen.add(tech[0])
+      stack.tech.push({ name: tech[0], category: tech[1], ...(TECH[n] && d.version ? { version: d.version } : {}), evidence: [d.file] })
     }
     const s = SVC[n] ?? SVC_PREFIX.find(([p]) => n.startsWith(p))?.slice(1)
     if (s && !svcSeen.has(s[0])) {
-      const svc = { name: s[0], category: s[1], purpose: s[2], env: [], evidence: [d.file] }
+      const svc = { name: s[0], category: s[1], purpose: purposeText(s[2]), env: [], evidence: [d.file] }
       svcSeen.set(s[0], svc)
       stack.services.push(svc)
     }
@@ -230,7 +252,7 @@ function nonNpmTech(ctx) {
   }
   if (has(/(^|\/)Gemfile$/).length && /['"]rails['"]/.test(read(root, has(/(^|\/)Gemfile$/)[0]))) stack.tech.push({ name: 'Ruby on Rails', category: 'framework', evidence: [has(/(^|\/)Gemfile$/)[0]] })
   // Laravel, Flutter, Spring e os outros vêm dos manifestos (stack-langs.mjs); aqui só o que não tem pacote.
-  for (const t of langBuildTech(ctx.files)) if (!stack.tech.some((x) => x.name === t.name)) stack.tech.push(t)
+  for (const tech of langBuildTech(ctx.files)) if (!stack.tech.some((x) => x.name === tech.name)) stack.tech.push(tech)
   for (const r of langRuntime(root, ctx.files)) if (!stack.runtime.some((x) => x.name === r.name)) stack.runtime.push(r)
 }
 
@@ -248,7 +270,7 @@ function detectRuntime(ctx, rootPkg) {
   const manager = rootPkg.packageManager?.split('@')[0] ?? LOCK_MANAGER.find(([f]) => files.includes(f))?.[1] ?? null
   if (manager) {
     const lock = { pnpm: 'pnpm-lock.yaml', yarn: 'yarn.lock', bun: 'bun.lock', npm: 'package-lock.json' }[manager]
-    stack.runtime.push({ name: 'Gerenciador de pacotes', version: manager, evidence: [rootPkg.packageManager ? 'package.json' : lock] })
+    stack.runtime.push({ name: t('Package manager', 'Gerenciador de pacotes'), version: manager, evidence: [rootPkg.packageManager ? 'package.json' : lock] })
   }
   return manager
 }
@@ -263,15 +285,15 @@ function wranglerHosting(ctx, providers) {
   const isPages = w ? !!w.pages_build_output_dir : /pages_build_output_dir/.test(text)
   const name = w?.name ?? tomlValue(text, 'name')
   const provider = isPages ? 'Cloudflare Pages' : 'Cloudflare Workers'
-  providers.push({ provider, file: wranglerFile, detail: name ? `projeto "${name}" na Cloudflare` : undefined })
+  providers.push({ provider, file: wranglerFile, detail: name ? t(`project "${name}" on Cloudflare`, `projeto "${name}" na Cloudflare`) : undefined })
   const crons = w?.triggers?.crons ?? (text.match(/crons\s*=\s*\[([^\]]*)\]/)?.[1]?.match(/"[^"]+"/g) ?? []).map((s) => s.slice(1, -1))
-  if (crons.length) addHosting('agendado', 'Cloudflare Cron Triggers', `tarefas automáticas: ${crons.join(', ')}`, [wranglerFile])
-  for (const db of w?.d1_databases ?? []) addHosting('banco', 'Cloudflare D1', db.database_name ? `banco "${db.database_name}"` : undefined, [wranglerFile])
+  if (crons.length) addHosting('agendado', 'Cloudflare Cron Triggers', t(`scheduled tasks: ${crons.join(', ')}`, `tarefas automáticas: ${crons.join(', ')}`), [wranglerFile])
+  for (const db of w?.d1_databases ?? []) addHosting('banco', 'Cloudflare D1', db.database_name ? t(`database "${db.database_name}"`, `banco "${db.database_name}"`) : undefined, [wranglerFile])
   for (const b of w?.r2_buckets ?? []) addHosting('arquivos', 'Cloudflare R2', b.bucket_name ? `bucket "${b.bucket_name}"` : undefined, [wranglerFile])
-  if ((w?.kv_namespaces ?? []).length) addHosting('banco', 'Cloudflare KV', 'chave-valor (cache/configuração)', [wranglerFile])
+  if ((w?.kv_namespaces ?? []).length) addHosting('banco', 'Cloudflare KV', t('key-value (cache/settings)', 'chave-valor (cache/configuração)'), [wranglerFile])
   const routes = [...(w?.routes ?? []), ...(w?.route ? [w.route] : [])].map((r) => (typeof r === 'string' ? r : r.pattern)).filter(Boolean)
-  if (routes.length) addHosting('dominio', 'Cloudflare', `endereços: ${routes.join(', ')}`, [wranglerFile])
-  for (const env of Object.keys(w?.env ?? {})) stack.environments.push({ name: env, detail: `ambiente "${env}" no ${wranglerFile}` })
+  if (routes.length) addHosting('dominio', 'Cloudflare', t(`addresses: ${routes.join(', ')}`, `endereços: ${routes.join(', ')}`), [wranglerFile])
+  for (const env of Object.keys(w?.env ?? {})) stack.environments.push({ name: env, detail: t(`"${env}" environment in ${wranglerFile}`, `ambiente "${env}" no ${wranglerFile}`) })
   for (const v of Object.keys(w?.vars ?? {})) addEnv(v, wranglerFile, true)
   for (const [k, v] of Object.entries(w?.vars ?? {}))
     if (typeof v === 'string' && /^https:\/\/[^\s]+$/.test(v) && /BASE_URL|SITE_URL|APP_URL|PUBLIC_URL/.test(k)) providers[providers.length - 1].url = v
@@ -295,12 +317,12 @@ function findProviders(ctx, rootPkg, dep) {
     const text = read(root, f)
     const app = provider === 'Fly.io' ? tomlValue(text, 'app') : null
     const region = provider === 'Fly.io' ? tomlValue(text, 'primary_region') : null
-    providers.push({ provider, file: f, detail: [app && `app "${app}"`, region && `região ${region}`].filter(Boolean).join(', ') || undefined })
+    providers.push({ provider, file: f, detail: [app && `app "${app}"`, region && t(`region ${region}`, `região ${region}`)].filter(Boolean).join(', ') || undefined })
   }
   if (!providers.length && dep('@cloudflare/vite-plugin')) providers.push({ provider: 'Cloudflare Workers', file: dep('@cloudflare/vite-plugin').file })
   if (!providers.length && files.includes('CNAME') && !rootPkg.dependencies) providers.push({ provider: 'GitHub Pages', file: 'CNAME' })
   const dockerFile = files.find((f) => /(^|\/)Dockerfile$/.test(f))
-  if (!providers.length && dockerFile) providers.push({ provider: 'Docker (contêiner)', file: dockerFile, detail: 'roda em contêiner; o provedor não aparece nos arquivos' })
+  if (!providers.length && dockerFile) providers.push({ provider: t('Docker (container)', 'Docker (contêiner)'), file: dockerFile, detail: t("runs in a container; the provider doesn't show in the files", 'roda em contêiner; o provedor não aparece nos arquivos') })
   return providers
 }
 
@@ -308,9 +330,9 @@ const fwName = (n) => TECH[n]?.[0] ?? n
 
 // Detalhe da camada "back": o framework do servidor, ou o full-stack que também entrega o servidor.
 function backDetail(backFw, fullStack) {
-  if (backFw) return `servidor em ${fwName(backFw)}`
-  if (fullStack) return `servidor do ${fwName(fullStack)} (rotas de API e páginas geradas no servidor)`
-  return 'servidor'
+  if (backFw) return t(`server in ${fwName(backFw)}`, `servidor em ${fwName(backFw)}`)
+  if (fullStack) return t(`${fwName(fullStack)} server (API routes and server-rendered pages)`, `servidor do ${fwName(fullStack)} (rotas de API e páginas geradas no servidor)`)
+  return t('server', 'servidor')
 }
 
 // O que o projeto tem — tela (front) e/ou servidor (back) — e onde cada parte roda.
@@ -321,7 +343,7 @@ function appHosting(ctx, providers, dep) {
   const frontFw = fullStack ?? ['react', 'vue', 'svelte', '@angular/core', 'solid-js', 'preact', ...LANG_FRONT].find((n) => dep(n))
   const main = providers[0]
   if (main && frontFw)
-    addHosting('front', main.provider, `telas feitas com ${fwName(frontFw)}${fullStack ? ' (o mesmo serviço também entrega o servidor)' : ''}${main.detail ? ` · ${main.detail}` : ''}`, [main.file, dep(frontFw)?.file], main.url)
+    addHosting('front', main.provider, `${t(`screens built with ${fwName(frontFw)}`, `telas feitas com ${fwName(frontFw)}`)}${fullStack ? t(' (the same service also runs the server)', ' (o mesmo serviço também entrega o servidor)') : ''}${main.detail ? ` · ${main.detail}` : ''}`, [main.file, dep(frontFw)?.file], main.url)
   else if (main && !backFw) addHosting('front', main.provider, main.detail, [main.file], main.url)
   if (main && (fullStack || backFw)) addHosting('back', main.provider, backDetail(backFw, fullStack), [main.file, dep(backFw ?? fullStack)?.file], main.url)
   for (const p of providers.slice(1)) addHosting(p.provider.startsWith('Docker') ? 'outro' : 'front', p.provider, p.detail, [p.file])
@@ -332,12 +354,12 @@ function supabaseHosting(ctx, supa, grepCode) {
   const { files, addHosting } = ctx
   const ev = [supa?.file, files.find((f) => f === 'supabase/config.toml') ?? files.find((f) => f.startsWith('supabase/migrations/'))]
   const migrations = files.filter((f) => /^supabase\/migrations\/.*\.sql$/.test(f)).length
-  addHosting('banco', 'Supabase', `Postgres gerenciado${migrations ? ` · ${migrations} migrações em supabase/migrations` : ''}`, ev)
+  addHosting('banco', 'Supabase', `${t('Managed Postgres', 'Postgres gerenciado')}${migrations ? t(` · ${migrations} migrations in supabase/migrations`, ` · ${migrations} migrações em supabase/migrations`) : ''}`, ev)
   const authFile = grepCode(/\bauth\.(signIn\w*|signUp|getUser|getSession|onAuthStateChange)\(/)
-  if (authFile) addHosting('auth', 'Supabase Auth', 'login dos usuários', [authFile])
+  if (authFile) addHosting('auth', 'Supabase Auth', t('user login', 'login dos usuários'), [authFile])
   const storageFile = grepCode(/\.storage\s*\.from\(/)
-  if (storageFile) addHosting('arquivos', 'Supabase Storage', 'arquivos enviados pelos usuários', [storageFile])
-  if (files.some((f) => /^supabase\/functions\//.test(f))) addHosting('back', 'Supabase Edge Functions', 'funções de servidor em supabase/functions', ['supabase/functions'])
+  if (storageFile) addHosting('arquivos', 'Supabase Storage', t('files uploaded by users', 'arquivos enviados pelos usuários'), [storageFile])
+  if (files.some((f) => /^supabase\/functions\//.test(f))) addHosting('back', 'Supabase Edge Functions', t('server functions in supabase/functions', 'funções de servidor em supabase/functions'), ['supabase/functions'])
 }
 
 const PRISMA_DB = { postgresql: 'PostgreSQL', mysql: 'MySQL', sqlite: 'SQLite', mongodb: 'MongoDB', sqlserver: 'SQL Server', cockroachdb: 'CockroachDB' }
@@ -355,15 +377,15 @@ function otherDatabases(ctx, supa, dep) {
   const prismaFile = has(/(^|\/)schema\.prisma$/)[0]
   if (prismaFile) {
     const provider = read(root, prismaFile).match(/datasource\s+\w+\s*\{[^}]*provider\s*=\s*"(\w+)"/)?.[1]
-    if (provider) addHosting('banco', PRISMA_DB[provider] ?? provider, 'via Prisma', [prismaFile])
+    if (provider) addHosting('banco', PRISMA_DB[provider] ?? provider, t('through Prisma', 'via Prisma'), [prismaFile])
   }
   for (const [n, name] of DB_DEPS)
     if (dep(n) && !(supa && name === 'PostgreSQL') && ![...hostingSeen].some((k) => k.startsWith('banco|') && k.includes(name.split(' ')[0])))
-      addHosting('banco', name, name === 'Redis' ? 'cache / filas' : undefined, [dep(n).file])
+      addHosting('banco', name, name === 'Redis' ? t('cache / queues', 'cache / filas') : undefined, [dep(n).file])
   const compose = has(/(^|\/)(docker-)?compose\.ya?ml$/)[0]
   if (compose) {
     const text = read(root, compose)
-    for (const [re, name] of COMPOSE_DB) if (re.test(text) && !hostingSeen.has(`banco|${name}`)) addHosting('banco', name, 'roda em Docker (docker compose)', [compose])
+    for (const [re, name] of COMPOSE_DB) if (re.test(text) && !hostingSeen.has(`banco|${name}`)) addHosting('banco', name, t('runs in Docker (docker compose)', 'roda em Docker (docker compose)'), [compose])
   }
 }
 
@@ -379,7 +401,7 @@ function deployHosting(ctx, rootPkg) {
   for (const f of has(/^\.github\/workflows\/.*\.ya?ml$/)) {
     const text = read(root, f)
     const target = CI_TARGETS.find(([re]) => re.test(text))?.[1] ?? null
-    addHosting('deploy', 'GitHub Actions', target ? `publica na ${target} (${path.posix.basename(f)})` : `automação ${path.posix.basename(f)}${/\btest|vitest|jest|pytest/.test(text) ? ' (roda testes)' : ''}`, [f])
+    addHosting('deploy', 'GitHub Actions', target ? t(`publishes to ${target} (${path.posix.basename(f)})`, `publica na ${target} (${path.posix.basename(f)})`) : `${t('automation', 'automação')} ${path.posix.basename(f)}${/\btest|vitest|jest|pytest/.test(text) ? t(' (runs tests)', ' (roda testes)') : ''}`, [f])
   }
   if (files.includes('.gitlab-ci.yml')) addHosting('deploy', 'GitLab CI', undefined, ['.gitlab-ci.yml'])
   const deployScript = Object.entries(rootPkg.scripts ?? {}).find(([k]) => /^deploy/.test(k))
@@ -410,7 +432,7 @@ function collectEnv(ctx, codeFiles, envMap, supa) {
   }
   for (const f of codeFiles) for (const m of read(root, f).matchAll(LANG_CODE_FILE.test(f) ? LANG_ENV_USE : ENV_USE)) addEnv(m[1], f, false)
   stack.env = [...envMap.values()]
-    .map((e) => ({ ...e, scope: PUBLIC_PREFIX.test(e.name) ? 'publica' : 'servidor', service: ENV_SERVICE.find(([re]) => re.test(e.name))?.[1] }))
+    .map((e) => ({ ...e, scope: PUBLIC_PREFIX.test(e.name) ? 'publica' : 'servidor', service: envService(e.name) }))
     .sort((a, b) => (a.service ?? 'zz').localeCompare(b.service ?? 'zz') || a.name.localeCompare(b.name))
     .slice(0, 150)
   for (const e of stack.env) {
@@ -419,14 +441,14 @@ function collectEnv(ctx, codeFiles, envMap, supa) {
     if (svc && svc.env.length < 15) svc.env.push(e.name)
   }
   if (supa && !stack.services.some((s) => s.name === 'Supabase'))
-    stack.services.unshift({ name: 'Supabase', category: 'outro', purpose: 'banco de dados e backend', env: stack.env.filter((e) => e.service === 'Supabase').map((e) => e.name), evidence: [supa.file] })
+    stack.services.unshift({ name: 'Supabase', category: 'outro', purpose: t('database and backend', 'banco de dados e backend'), env: stack.env.filter((e) => e.service === 'Supabase').map((e) => e.name), evidence: [supa.file] })
 }
 
 // Scripts: como rodar, testar e publicar.
 function collectScripts(ctx, rootPkg, manager) {
   const { root, files, stack } = ctx
   for (const [name, command] of Object.entries(rootPkg.scripts ?? {}).slice(0, 40))
-    stack.scripts.push({ name: `${manager === 'npm' || !manager ? 'npm run' : manager} ${name}`, command: String(command), ...(SCRIPT_WHAT[name] ? { what: SCRIPT_WHAT[name] } : {}) })
+    stack.scripts.push({ name: `${manager === 'npm' || !manager ? 'npm run' : manager} ${name}`, command: String(command), ...(SCRIPT_WHAT[name] ? { what: SCRIPT_WHAT[name]() } : {}) })
   const makefile = files.includes('Makefile') ? read(root, 'Makefile') : ''
   for (const m of makefile.matchAll(/^([a-zA-Z][\w-]*):(?!=)/gm)) if (stack.scripts.length < 40) stack.scripts.push({ name: `make ${m[1]}`, command: `make ${m[1]}` })
 }
@@ -463,7 +485,7 @@ export function detectStack(root) {
   const supa = dep('@supabase/supabase-js') ?? dep('supabase') ?? dep('@supabase/ssr') ?? dep('pub:supabase_flutter') ?? dep('go:github.com/supabase-community/supabase-go')
   if (supa || files.some((f) => f.startsWith('supabase/'))) supabaseHosting(ctx, supa, grepCode)
   otherDatabases(ctx, supa, dep)
-  for (const s of stack.services) if (s.category === 'auth') addHosting('auth', s.name, 'login dos usuários', s.evidence)
+  for (const s of stack.services) if (s.category === 'auth') addHosting('auth', s.name, t('user login', 'login dos usuários'), s.evidence)
   for (const s of stack.services) if (s.category === 'armazenamento' && s.name !== 'Upstash Redis') addHosting('arquivos', s.name, s.purpose, s.evidence)
 
   deployHosting(ctx, rootPkg)
@@ -473,14 +495,21 @@ export function detectStack(root) {
   return { stack, hash: stackHash(stack) }
 }
 
+// Nomes que mudam com a língua: na impressão digital valem sempre em português (trocar a língua não é mudar a Stack).
+const HASH_NAME = {
+  'Package manager': 'Gerenciador de pacotes', 'Docker (container)': 'Docker (contêiner)', 'Base image (Docker)': 'Imagem base (Docker)',
+  '.NET (solution)': '.NET (solução)',
+}
+const hashName = (n) => HASH_NAME[n] ?? n
+
 /** Impressão digital do que importa (não muda a cada linha editada; muda com pacote, deploy, serviço, variável). */
 export function stackHash(stack) {
   const key = {
-    hosting: stack.hosting.map((h) => `${h.layer}:${h.provider}`).sort(),
-    tech: stack.tech.map((t) => t.name).sort(),
+    hosting: stack.hosting.map((h) => `${h.layer}:${hashName(h.provider)}`).sort(),
+    tech: stack.tech.map((x) => hashName(x.name)).sort(),
     services: stack.services.map((s) => s.name).sort(),
     env: stack.env.map((e) => e.name).sort(),
-    runtime: stack.runtime.map((r) => `${r.name}:${r.version}`).sort(),
+    runtime: stack.runtime.map((r) => `${hashName(r.name)}:${String(r.version).replace(/^edition /, 'edição ')}`).sort(),
     languages: stack.languages.slice(0, 5).map((l) => l.name),
   }
   return createHash('sha256').update(JSON.stringify(key)).digest('hex').slice(0, 16)

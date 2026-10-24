@@ -42,7 +42,7 @@ Seção Testes (bin/tests.mjs):
   node --test; formatos e comandos estudados em docs/research/testes-vitest-playwright.md. Ideias de cobertura
   da mudança e de teste instável vêm do estudo do Codecov (docs/research/testes-mutacao-cobertura.md), só como
   conceito: a licença FSL do Codecov não permite reaproveitar código, telas ou textos, e nada foi copiado.
-  O guia das skills tests e tests-fix (skills/tests/guia.md) adapta a skill TDD de Matt Pocock (MIT) e o
+  O guia das skills tests e tests-fix (skills/tests/guide.md) adapta a skill TDD de Matt Pocock (MIT) e o
   pr-test-analyzer e o test-engineer dos plugins oficiais da Anthropic (Apache-2.0), reescritos em português.
   Teste de mutação (bin/mutation.mjs): roda o Stryker (stryker-mutator/stryker-js, Apache-2.0) instalado no projeto
   do usuário e lê o relatório JSON (mutation-testing-report-schema, Apache-2.0); nenhum código do Stryker é empacotado. O catálogo da revisão com IA (skills/quality/catalog.md) e as

@@ -1,5 +1,5 @@
 // Medição de design do Faundr: roda na página aberta (Claude in Chrome → javascript_tool), na largura atual da
-// janela, e devolve um JSON com números objetivos. Não muda nada na página. Limiares: piso de qualidade (piso.md).
+// janela, e devolve um JSON com números objetivos. Não muda nada na página. Limiares: piso de qualidade (quality-floor.md).
 // As medidas ficam nesta função; as ferramentas (visível, cor, contraste, fundo) vêm prontas da função de baixo.
 ;(({ visible, describe, label, rgba, ratio, hex, backgroundOf }) => {
   const W = window.innerWidth

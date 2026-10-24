@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
+import { setLang } from '../bin/i18n.mjs'
 import { projectMap, scanProject } from '../bin/security.mjs'
 
 // Projeto de exemplo no git; devolve as regras de código achadas em cada arquivo.
@@ -266,6 +267,28 @@ test('Revisão com IA: Rust, C/C++, Go, Java e C# puxam o tema do catálogo de c
   for (const t of topics) assert.ok(fs.existsSync(new URL(`../skills/security/catalog/${t}.md`, import.meta.url)), `catálogo ${t}.md existe`)
 })
 
+test('Revisão com IA: CI e front puxam ci-and-dependencies e navegador; ciclo de vida sempre; sem eles, não', () => {
+  const make = (files) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-tp-'))
+    for (const rel of files) {
+      fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true })
+      fs.writeFileSync(path.join(dir, rel), '\n')
+    }
+    spawnSync('git', ['init', '-q'], { cwd: dir })
+    spawnSync('git', ['add', '-A'], { cwd: dir })
+    return projectMap(dir)
+  }
+  const web = make(['.github/workflows/ci.yml', 'src/App.tsx', 'server/api.ts'])
+  for (const t of ['ci-and-dependencies', 'browser', 'data-lifecycle', 'least-privilege', 'logging-and-monitoring']) assert.ok(web.topics.includes(t), t)
+  assert.deepEqual(web.entry['CI and automation'], ['.github/workflows/ci.yml'])
+  for (const t of web.topics) assert.ok(fs.existsSync(new URL(`../skills/security/catalog/${t}.md`, import.meta.url)), `catálogo ${t}.md existe`)
+
+  const script = make(['tools/run.ts'])
+  assert.ok(!script.topics.includes('ci-and-dependencies'), 'sem CI nem manifesto de pacotes')
+  assert.ok(!script.topics.includes('browser'), 'sem front-end')
+  assert.ok(script.topics.includes('data-lifecycle'))
+})
+
 test('Angular: bypassSecurityTrust com variável e [innerHTML] com pipe que desliga a proteção', async () => {
   const found = await scan({
     'src/app/post.component.ts': [
@@ -323,4 +346,33 @@ test('Docker: contêiner como root, segredo no ENV/ARG, curl | sh e ADD de URL',
   })
   assert.deepEqual(found('Dockerfile'), ['docker-add-remote-url', 'docker-curl-pipe-shell', 'docker-runs-as-root', 'docker-secret-in-image'])
   assert.deepEqual(found('api/Dockerfile'), [], 'USER no fim, ARG sem valor e build em etapas')
+})
+
+test('texto dos achados na língua da pessoa (regra de linguagem, regra geral e achado de configuração)', async () => {
+  const files = {
+    'app/Ruim.php': '<?php\nshell_exec("convert " . $_GET["f"]);\n',
+    'src/a.ts': 'el.innerHTML = texto\n',
+    'supabase/migrations/1.sql': 'create table public.notas (id int);\n',
+  }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-sl-'))
+  for (const [rel, text] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true })
+    fs.writeFileSync(path.join(dir, rel), text)
+  }
+  spawnSync('git', ['init', '-q'], { cwd: dir })
+  spawnSync('git', ['add', '-A'], { cwd: dir })
+  const byRule = async (lang) => {
+    setLang(lang)
+    const { findings } = await scanProject(dir, { deps: false })
+    return Object.fromEntries(findings.map((f) => [f.rule_id, f]))
+  }
+  const pt = await byRule('pt')
+  assert.equal(pt['php-command-injection'].title, 'Comando do sistema com variável (PHP)')
+  assert.match(pt['xss-inner-html'].detail, /Confira se o valor pode vir de fora/)
+  assert.match(pt['rls-disabled'].title, /^Tabela notas sem proteção/)
+  const en = await byRule('en')
+  assert.equal(en['php-command-injection'].title, 'System command with a variable (PHP)')
+  assert.match(en['xss-inner-html'].detail, /Check whether the value can come from outside/)
+  assert.match(en['rls-disabled'].title, /^Table notas has no access protection/)
+  setLang(null)
 })

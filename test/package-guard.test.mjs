@@ -72,11 +72,11 @@ test('guardInstall: barra o inexistente, pergunta do novo, cacheia o que passou,
 
   const deny = await guardInstall('npm i react supabase-auth-helpers-ai', { configDir, fetchImpl, now: NOW })
   assert.equal(deny.level, 'deny')
-  assert.match(deny.message, /"supabase-auth-helpers-ai" não existe no npm/)
+  assert.match(deny.message, /"supabase-auth-helpers-ai" does not exist on npm/)
 
   const ask = await guardInstall('npm i leftpad-pro', { configDir, fetchImpl, now: NOW })
   assert.equal(ask.level, 'ask')
-  assert.match(ask.message, /criado há 7 dia/)
+  assert.match(ask.message, /created 7 day/)
 
   calls = 0
   assert.equal(await guardInstall('npm i react', { configDir, fetchImpl, now: NOW }), null)

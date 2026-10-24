@@ -1,56 +1,56 @@
 ---
-description: Revisão de qualidade do código com IA no projeto ligado ao Faundr — lê o que mudou (ou o projeto inteiro, com --full) atrás do que a checagem automática não enxerga (código demais com o substituto concreto, erro escondido, tipos que não protegem, nomes e funções confusos, comentários que mentem, testes que não protegem, regras do CLAUDE.md desobedecidas) e registra cada problema real como Q-n no painel, só com confiança 80 ou mais. Use quando o usuário pedir uma revisão de qualidade, "o código está bom?", "tem código demais?", ou quando o Faundr sugerir.
-argument-hint: '[--full | --files a.ts,b.ts]  (sem argumento: o que mudou)'
+description: AI code quality review in the project linked to Faundr — reads what changed (or the whole project, with --full) looking for what the automatic check can't see (too much code with the concrete replacement, hidden errors, types that don't protect, confusing names and functions, comments that lie, tests that don't protect, CLAUDE.md rules disobeyed) and records each real problem as Q-n on the dashboard, only with confidence 80 or higher. Use when the user asks for a quality review, "is the code good?", "is there too much code?", or when Faundr suggests it.
+argument-hint: '[--full | --files a.ts,b.ts]  (no argument: what changed)'
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *) Bash(git diff *) Bash(git log *) Read Grep Glob
 ---
 
-## Contexto
+## Context
 
 !`node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" quality-context $ARGUMENTS`
 
-Use a CLI com a ferramenta Bash, sempre com aspas: `faundr ...` (se não estiver no PATH, `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" ...`).
+Use the CLI with the Bash tool, always with quotes: `faundr ...` (if it's not on the PATH, `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" ...`).
 
-Você **só aponta**: não altere nenhum arquivo nesta revisão. A correção é o `/faundr:quality-fix`, quando o usuário pedir.
+You **only point things out**: don't change any file in this review. Fixing is `/faundr:quality-fix`, when the user asks.
 
 ## 1. Prepare
 
-1. Leia o **catálogo** (caminho no contexto) inteiro: a régua de confiança, o que não é achado, o que nunca cortar, a contraevidência e os temas.
-2. Leia as **regras do projeto** listadas (CLAUDE.md, AGENTS.md, design.md). Regra escrita ali vale mais que gosto pessoal.
-3. Modo **sessão** (padrão): revise só os arquivos listados, e dentro deles **só o que mudou** (`git diff HEAD -- <arquivo>` mostra as linhas). Problema em linha que ninguém mexeu não é cobrado agora. Se a lista estiver vazia, diga ao usuário e ofereça `/faundr:quality --full`.
-   Modo **projeto** (`--full`): inventário por tema, começando pelos arquivos mais complexos do contexto. Não tente ler tudo: amostre com a ferramenta Grep e com `faundr graph-query "<pergunta>"` (se existir `.faundr/`), e diga no fim o que não foi olhado.
-4. Antes de dizer que algo "já existe no projeto" ou "ninguém usa", **procure** (Grep) e cite onde.
+1. Read the whole **catalog** (path in the context): the confidence yardstick, what isn't a finding, what never to cut, the counter-evidence and the themes.
+2. Read the listed **project rules** (CLAUDE.md, AGENTS.md, design.md). A rule written there outweighs personal taste.
+3. **Session** mode (default): review only the listed files, and within them **only what changed** (`git diff HEAD -- <file>` shows the lines). A problem on a line nobody touched isn't charged now. If the list is empty, tell the user and offer `/faundr:quality --full`.
+   **Project** mode (`--full`): inventory by theme, starting with the most complex files in the context. Don't try to read everything: sample with the Grep tool and with `faundr graph-query "<question>"` (if `.faundr/` exists), and say at the end what wasn't looked at.
+4. Before saying something "already exists in the project" or "nobody uses it", **search** (Grep) and cite where.
 
-## 2. Procure, tema por tema
+## 2. Look, theme by theme
 
-Siga os temas do catálogo na ordem: `demais`, `falha`, `tipos`, `complexidade`, `comentarios`, `testes`, `instrucoes` (e `arquitetura` só no modo projeto). Não repita o que já está na lista "Já registrados e abertos" do contexto: se um deles for alarme falso, diga ao usuário e sugira ignorar pelo painel.
+Follow the catalog's themes in order: `demais`, `falha`, `tipos`, `complexidade`, `comentarios`, `testes`, `instrucoes` (and `arquitetura` only in project mode). Don't repeat what's already in the context's "already recorded and open" list: if one of them is a false alarm, tell the user and suggest ignoring it from the dashboard.
 
-## 3. Para cada suspeita
+## 3. For each suspicion
 
-1. **Contraevidência**: argumente contra o próprio achado, com as perguntas do catálogo. Sem conseguir apontar arquivo:linha da prova, descarte.
-2. **Nota de confiança** pela régua do catálogo. Abaixo de 80: não registre (pode citar na resposta como "talvez").
-3. **Gravidade pela régua**: `high` = esconde um erro que vai custar dado ou dinheiro, ou deixa o código frágil num ponto central (muitos chamadores); `medium` = atrapalha entender ou mudar, com contorno; `low` = polimento.
-4. Em código demais: uma etiqueta (`apagar`, `stdlib`, `nativo`, `yagni`, `encurtar`), **sempre o substituto concreto** no `--fix` (nomeie a função ou o recurso, ou mostre a forma curta) e as linhas que sairiam em `--saves`, contadas no código. Nunca invente número.
+1. **Counter-evidence**: argue against your own finding, with the catalog's questions. If you can't point to the file:line of the proof, discard it.
+2. **Confidence score** by the catalog's yardstick. Below 80: don't record it (you can mention it in the response as "maybe").
+3. **Severity by the yardstick**: `high` = hides an error that will cost data or money, or leaves the code fragile at a central point (many callers); `medium` = gets in the way of understanding or changing, with a workaround; `low` = polish.
+4. For too much code: one label (`apagar`, `stdlib`, `nativo`, `yagni`, `encurtar`), **always the concrete replacement** in `--fix` (name the function or feature, or show the short form) and the lines that would go in `--saves`, counted in the code. Never make up a number.
 
-## 4. Registre cada problema real
+## 4. Record each real problem
 
-Um comando por problema:
+One command per problem:
 
-`faundr quality-finding "<título curto: o problema>" --theme <tema> [--label <etiqueta>] --severity high|medium|low --confidence <80-100> --file <caminho> --line <n> --detail "<o que é e onde, em português simples>" --impact "<por que importa para quem usa ou mantém>" --fix "<o substituto concreto ou a mudança mínima>" [--saves <n>]`
+`faundr quality-finding "<short title: the problem>" --theme <theme> [--label <label>] --severity high|medium|low --confidence <80-100> --file <path> --line <n> --detail "<what it is and where, in plain language>" --impact "<why it matters for whoever uses or maintains it>" --fix "<the concrete replacement or the minimal change>" [--saves <n>]`
 
-Escreva `--detail`, `--impact` e `--fix` para quem **não programa** ler no painel, mas com o nome exato da função, componente ou recurso.
+Write `--detail`, `--impact` and `--fix` for people who **don't code** to read on the dashboard, in the user's language, but with the exact name of the function, component or feature.
 
-## 5. Registre a cobertura
+## 5. Record the coverage
 
-`faundr quality-review-done --areas "<o que revisou; separado por ;>" --clean "<o que conferiu e está bom; separado por ;>" --summary "<2 frases>" --net "<-N linhas, -M pacotes possíveis, ou vazio>" --scores "<tema>=<0-4>; …"` (acrescente `--full` no modo projeto)
+`faundr quality-review-done --areas "<what you reviewed; separated by ;>" --clean "<what you checked and is fine; separated by ;>" --summary "<2 sentences>" --net "<-N lines, -M possible packages, or empty>" --scores "<theme>=<0-4>; …"` (add `--full` in project mode)
 
-Nota por tema revisado (0 a 4): 4 = nada a corrigir; 3 = só polimento; 2 = problemas visíveis com contorno; 1 = atrapalha mudar o código com segurança; 0 = o tema está ruim em quase todo lugar. Seja honesto: tema que você não olhou fica de fora das notas.
+Score per reviewed theme (0 to 4): 4 = nothing to fix; 3 = polish only; 2 = visible problems with a workaround; 1 = gets in the way of changing the code safely; 0 = the theme is bad almost everywhere. Be honest: a theme you didn't look at stays out of the scores.
 
-## 6. Responda
+## 6. Answer
 
-Em português simples, poucas linhas:
-1. O que foi revisado e quantos achados por tema, o maior corte primeiro.
-2. Os mais importantes (Q-n e uma frase do porquê).
-3. No fim: `−N linhas, −M pacotes possíveis` (só o que você contou), ou **"Enxuto. Pode seguir."** se não houver nada.
-4. O que não deu para olhar (no modo projeto).
+In plain language, in the user's language, a few lines:
+1. What was reviewed and how many findings per theme, the biggest cut first.
+2. The most important ones (Q-n and one sentence on why).
+3. At the end: `−N lines, −M possible packages` (only what you counted), or **"Lean. Good to go."** if there's nothing.
+4. What couldn't be looked at (in project mode).
 
-Ofereça corrigir com `/faundr:quality-fix Q-<n>`. **Não saia corrigindo sem o usuário pedir.**
+Offer to fix with `/faundr:quality-fix Q-<n>`. **Don't go fixing without the user asking.**

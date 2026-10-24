@@ -1,19 +1,19 @@
 ---
-description: Cria uma funcionalidade no Faundr (com checklist de tarefas e critério de pronto) e a torna a atual desta pasta. Antes, planeja com o dono como em /faundr:planning e guarda as escolhas como decisões.
-argument-hint: '<título> [— descrição ou passos]'
+description: Creates a feature in Faundr (with a task checklist and a done-when criterion) and makes it the current one for this folder. First, plans with the owner as in /faundr:planning and saves the choices as decisions.
+argument-hint: '<title> [— description or steps]'
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *)
 ---
 
-Pedido do usuário: $ARGUMENTS
+User request: $ARGUMENTS
 
-1. **Planeje antes de registrar.** Leia `${CLAUDE_PLUGIN_ROOT}/skills/planning/SKILL.md` e siga os passos 1 a 6 (tamanho, olhar o projeto, poucas perguntas certeiras com recomendação, pronto quando conferível e o resumo para o dono aprovar). Pule se o usuário pediu para não perguntar ou se é uma etapa já planejada (faundr focus). Depois do OK, registre como abaixo.
-2. Registre a funcionalidade com o critério de pronto (os itens de "Pronto quando", separados por ponto e vírgula):
-   `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" feature "<título curto, até ~8 palavras>" --desc "<descrição>" --done-when "<critério 1>; <critério 2>"`
-3. Guarde cada escolha que muda o que vai ser feito como decisão (fica ligada à funcionalidade e volta para o agente nas próximas conversas):
-   `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" decision "<a escolha, ex.: Pagamento só com Pix nesta etapa>" --why "<o que o usuário respondeu e por quê>" --global`
-   O que ficou de fora vira decisão também ("Fora desta etapa: …"). Não registre como decisão o que é só detalhe.
-4. Se o pedido listar passos, adicione cada um como tarefa: `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" task "<passo>"`.
-5. Se o pedido for maior do que uma etapa (fases, "primeiro X, depois Y", MVP e depois o resto), a funcionalidade criada é só a primeira etapa: registre as seguintes, em ordem, cada uma depois da anterior:
-   `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" feature "<etapa 2>" --after atual --desc "<o que entra>"`, depois `feature "<etapa 3>" --after "<etapa 2>" …`. Elas ficam planejadas e não viram a atual.
-6. Mostre o checklist final com `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" board` e diga que ele já aparece no painel (Funcionalidades), com o critério de pronto e as próximas etapas. No fim da etapa, o Faundr pede para conferir o critério antes de dar como pronta.
+1. **Plan before recording.** Read `${CLAUDE_PLUGIN_ROOT}/skills/planning/SKILL.md` and follow steps 1 to 6 (size, look at the project, a few pointed questions with a recommendation, a checkable done-when and the summary for the owner to approve). Skip it if the user asked not to be asked questions or if it is an already planned stage (faundr focus). After the OK, record as below.
+2. Record the feature with the done-when criterion (the "Done when" items, separated by semicolons), in the user's language:
+   `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" feature "<short title, up to ~8 words>" --desc "<description>" --done-when "<criterion 1>; <criterion 2>"`
+3. Save each choice that changes what will be built as a decision (it stays linked to the feature and comes back to the agent in the next conversations):
+   `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" decision "<the choice, e.g. Payment only via Pix in this stage>" --why "<what the user answered and why>" --global`
+   What was left out becomes a decision too ("Out of this stage: …"). Do not record mere details as decisions.
+4. If the request lists steps, add each one as a task: `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" task "<step>"`.
+5. If the request is bigger than one stage (phases, "first X, then Y", MVP and then the rest), the feature created is only the first stage: record the following ones, in order, each one after the previous:
+   `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" feature "<stage 2>" --after current --desc "<what goes in>"`, then `feature "<stage 3>" --after "<stage 2>" …`. They stay planned and do not become the current one.
+6. Show the final checklist with `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" board` and say it already appears in the dashboard (Features), with the done-when criterion and the next stages. At the end of the stage, Faundr asks to check the criterion before marking it done.

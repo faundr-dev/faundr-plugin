@@ -18,7 +18,8 @@ import { memoryNote, readMemoryIndex, relevantMemory } from './rules.mjs'
 import { readTeam, teamPromptNote } from './team.mjs'
 import { takeInbox } from './inbox.mjs'
 import { workflowsForPrompt, workflowsOnce } from './workflows.mjs'
-import { skillsOnce } from './skills.mjs'
+import { noteSkillRan, readSkillIndex, skillsOnce, typedSkill } from './skills.mjs'
+import { markSkillStart } from './ai-cost.mjs'
 import { skillStepsNote, stepOff } from './flows.mjs'
 
 const readState = (root) => {
@@ -66,8 +67,17 @@ try {
     // /faundr:x digitado não passa pela ferramenta Skill: os passos desligados dela chegam por aqui.
     const typed = String(payload.prompt ?? '').trim().match(/^\/(faundr:[\w-]+)/)
     if (typed) notes.push(skillStepsNote(root, typed[1]))
+    // /nome de uma skill conectada (segurança, testes, qualidade, erros): o fim da resposta pede o registro do resultado.
     try {
-      notes.push(workflowsOnce(root, payload.session_id, (list, ids) => workflowsForPrompt(list, payload.prompt, ids), 'Este pedido'))
+      noteSkillRan(root, payload.session_id, typedSkill(payload.prompt))
+      // Custo da IA: /nome de uma skill conhecida (não um comando do Claude Code, como /clear) marca o começo.
+      const typedName = typedSkill(payload.prompt)
+      if (typedName && readSkillIndex(root).some((s) => s.name === typedName)) markSkillStart(root, payload.session_id, typedName, payload.transcript_path)
+    } catch {
+      // Um aviso que falha não impede os outros (o hook nunca quebra o agente).
+    }
+    try {
+      notes.push(workflowsOnce(root, payload.session_id, (list, ids) => workflowsForPrompt(list, payload.prompt, ids), 'This request'))
     } catch {
       // Um aviso que falha não impede os outros (o hook nunca quebra o agente).
     }

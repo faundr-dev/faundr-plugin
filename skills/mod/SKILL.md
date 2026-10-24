@@ -1,85 +1,85 @@
 ---
-description: Cria um mod do Claude Code bem feito — uma mudança na própria tela ou no jeito do Claude trabalhar (painel ao lado, faixa acima do prompt, item na linha de status, aviso rápido, comando com barra, regra que bloqueia ou reescreve uma ferramenta, som). Segue as melhores práticas — pergunta o essencial, separa a lógica para testar, valida, checa os tipos, testa no terminal e no app — e registra no Faundr. Use quando o usuário pedir para criar, mudar ou consertar um mod, ou quando o que ele quer só um mod resolve.
-argument-hint: [o que o mod faz]
+description: Creates a well-built Claude Code mod — a change to Claude Code's own screen or to the way Claude works (side panel, band above the prompt, status line item, quick notice, slash command, rule that blocks or rewrites a tool, sound). Follows best practices — asks the essentials, separates the logic so it can be tested, validates, type-checks, tests in the terminal and in the app — and records it in Faundr. Use when the user asks to create, change or fix a mod, or when what they want can only be done with a mod.
+argument-hint: [what the mod does]
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *) Bash(claude plugin validate *) Bash(claude plugin test *)
 ---
 
-Pedido do usuário: $ARGUMENTS
+User request: $ARGUMENTS
 
-Um **mod** é um plugin pequeno que muda o próprio Claude Code: o que aparece na tela (painel, faixa acima do prompt, linha de status, aviso rápido) ou o que acontece (antes de uma ferramenta rodar, quando um pedido chega, um comando novo com barra). Ele roda dentro do Claude Code, sem Node e sem navegador: tudo o que está fora dele chega por `$`.
+A **mod** is a small plugin that changes Claude Code itself: what appears on screen (panel, band above the prompt, status line, quick notice) or what happens (before a tool runs, when a request arrives, a new slash command). It runs inside Claude Code, with no Node and no browser: everything outside it comes through `$`.
 
-Fale com o usuário em português simples. Ele pode não programar: diga o que o mod vai fazer na tela dele, não como funciona por dentro.
+Talk to the user in plain language, in the user's language. They may not code: say what the mod will do on their screen, not how it works inside.
 
-## 1. Carregue o guia oficial antes de escrever
+## 1. Load the official guide before writing
 
-Chame a skill `plugin-authoring` do Claude Code (ferramenta Skill). Ela traz o que muda a cada versão do Claude Code e esta skill não repete: **a pasta onde escrever o mod nesta sessão**, o arquivo de tipos desta versão (a referência de cada evento, de cada método de `$` e de cada elemento de tela), os exemplos prontos e como o recarregamento ao vivo funciona. Sem ela você escreve de memória, e a API muda entre versões. Para um detalhe da API, procure no arquivo de tipos pelo nome (`'tool.call'`, `Pane: {`) e leia a declaração; não adivinhe.
+Call Claude Code's `plugin-authoring` skill (Skill tool). It brings what changes with each Claude Code version and this skill doesn't repeat: **the folder to write the mod in for this session**, this version's types file (the reference for each event, each `$` method and each screen element), ready-made examples and how live reload works. Without it you write from memory, and the API changes between versions. For an API detail, search the types file by name (`'tool.call'`, `Pane: {`) and read the declaration; don't guess.
 
-## 2. Confira se é mesmo um mod
+## 2. Check that it really is a mod
 
-Antes de criar, veja se algo mais simples resolve, e diga qual:
+Before creating, see whether something simpler solves it, and say which:
 
-- texto fixo embaixo do terminal, sem reagir a nada → a barra de status do Faundr (`/faundr:statusline`) ou um item dela no painel (Terminal);
-- instruções que o Claude deve seguir → uma regra (`/faundr:rule`) ou um workflow (`/faundr:workflow`);
-- um roteiro que o usuário chama → uma skill.
+- fixed text below the terminal, not reacting to anything → Faundr's status line (`/faundr:statusline`) or one of its items on the dashboard (Terminal);
+- instructions Claude should follow → a rule (`/faundr:rule`) or a workflow (`/faundr:workflow`);
+- a script the user calls → a skill.
 
-Se já existe um mod que faz isso (o `faundr-mod` já avisa em 80% e 95% do contexto e dos limites e desenha a faixa acima do prompt), mostre e pare.
+If a mod that does this already exists (`faundr-mod` already warns at 80% and 95% of the context and limits and draws the band above the prompt), show it and stop.
 
-## 3. Pergunte só o que falta
+## 3. Ask only what's missing
 
-Se o pedido não diz, faça numa rodada só (ferramenta de perguntas, com opções, a recomendada primeiro), no máximo 3 perguntas:
+If the request doesn't say, ask in a single round (ask-the-user tool, with options, the recommended one first), at most 3 questions:
 
-- **o que aparece e quando** (ex.: "aviso quando o contexto passa de 80%", "painel com os testes que falharam");
-- **onde**: só no terminal, ou também no app (desktop) e no VS Code;
-- **o que a pessoa pode ligar e desligar** (vira opção do mod, no menu de configuração, em vez de valor fixo no código).
+- **what appears and when** (e.g. "notice when context goes past 80%", "panel with the failed tests");
+- **where**: only in the terminal, or also in the app (desktop) and in VS Code;
+- **what the person can turn on and off** (becomes a mod option, in the settings menu, instead of a fixed value in the code).
 
-Com o pedido claro, não pergunte.
+With a clear request, don't ask.
 
-## 4. Registre no Faundr
+## 4. Record it in Faundr
 
-`node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" feature "Mod: <nome>" --desc "<o que faz>" --done-when "<critério>; validado e testado"` e um `task` por passo (forma, lógica e testes, tela, validação, entrega).
+`node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" feature "Mod: <name>" --desc "<what it does>" --done-when "<criterion>; validated and tested"` and one `task` per step (shape, logic and tests, screen, validation, delivery).
 
-## 5. Escreva com estas práticas
+## 5. Write it with these practices
 
-**Forma**
-- Nome curto em kebab-case (`aviso-contexto`). Três arquivos, na pasta que o guia oficial indicar: `.claude-plugin/plugin.json` (nome, versão `0.1.0`, descrição de uma linha), `hooks/hooks.json` (`{ "modules": ["./register.tsx"] }`) e `hooks/register.tsx` exportando `register: Register` (tipo importado de `'claude-code'`).
-- Escolha o evento pela tabela do guia oficial (painel, faixa acima do prompt, linha de status, aviso, `tool.call`, `prompt.submit`, comando). Um mod faz uma coisa; duas ideias, dois mods.
-- Opções que a pessoa escolhe vão em `userConfig` no `plugin.json` e chegam em `options`; nada de valor mágico no código.
+**Shape**
+- Short kebab-case name (`context-alert`). Three files, in the folder the official guide indicates: `.claude-plugin/plugin.json` (name, version `0.1.0`, one-line description), `hooks/hooks.json` (`{ "modules": ["./register.tsx"] }`) and `hooks/register.tsx` exporting `register: Register` (type imported from `'claude-code'`).
+- Choose the event from the official guide's table (panel, band above the prompt, status line, notice, `tool.call`, `prompt.submit`, command). A mod does one thing; two ideas, two mods.
+- Options the person chooses go in `userConfig` in `plugin.json` and arrive in `options`; no magic values in the code.
 
-**Lógica separada da tela**
-- Ponha as contas e decisões num arquivo à parte sem `$` (ex.: `hooks/alerts.ts`: "quais avisos mostrar com estes números"). O `register.tsx` só liga eventos a essa lógica. Assim dá para testar a lógica sozinha e ler o mod sem o Claude Code.
+**Logic separate from the screen**
+- Put the calculations and decisions in a separate file without `$` (e.g. `hooks/alerts.ts`: "which notices to show with these numbers"). `register.tsx` only wires events to that logic. That way the logic can be tested on its own and the mod can be read without Claude Code.
 
-**Estado**
-- Valor da sessão em `$.state`; valor que atravessa sessões em `$.store`. Cada valor declarado no contrato `types/index.d.ts` (`interface PluginState`) e o arquivo citado em `"types"` no `plugin.json`.
-- Variáveis soltas do módulo somem a cada recarga (o `register` roda de novo). Não guarde nada importante nelas.
-- O que a tela lê vem de `atom`: leia com `read` ao desenhar e escreva com `update` num evento. Desenhar não faz conta pesada, não lê arquivo nem rede: o `ui.render` roda muitas vezes.
+**State**
+- Session value in `$.state`; value that crosses sessions in `$.store`. Each value declared in the `types/index.d.ts` contract (`interface PluginState`) and the file referenced in `"types"` in `plugin.json`.
+- Loose module variables vanish on each reload (`register` runs again). Don't keep anything important in them.
+- What the screen reads comes from an `atom`: read it with `read` when drawing and write it with `update` in an event. Drawing doesn't do heavy computation, read files or hit the network: `ui.render` runs many times.
 
-**Respeitar o resto do Claude Code**
-- Chame `next(e)` sempre que não for de propósito responder sozinho: sem ele, os outros plugins e o comportamento normal param ali. Para mudar algo, `next({ ...e, campo })`.
-- Hook que barra (`tool.call`, `prompt.submit`, `command.run` e os que o `validate` chama de *gating*) leva `.catch(($, e, next) => next.called ? next(e) : { deny: '<motivo em português>' })`. Sem isso, um erro no hook deixa passar o que ele devia barrar.
-- Sem `import()` dinâmico (o módulo não carrega), sem Node (`fs`, `process`) e sem DOM: use `$.fs`, `$.process`, `$.clock`, `$.model`.
+**Respect the rest of Claude Code**
+- Call `next(e)` whenever you aren't deliberately answering on your own: without it, the other plugins and the normal behavior stop there. To change something, `next({ ...e, field })`.
+- A hook that blocks (`tool.call`, `prompt.submit`, `command.run` and those `validate` calls *gating*) gets `.catch(($, e, next) => next.called ? next(e) : { deny: '<reason in the user\'s language>' })`. Without it, an error in the hook lets through what it should block.
+- No dynamic `import()` (the module doesn't load), no Node (`fs`, `process`) and no DOM: use `$.fs`, `$.process`, `$.clock`, `$.model`.
 
-**Tela**
-- Elementos vêm de `$.ui.resolve(e)` (`const { Box, Text } = $.ui.resolve(e)`), conforme a superfície (`terminal`, `desktop`, `vscode`, `mobile`). Nunca suponha uma só.
-- Funcione em terminal estreito: corte texto longo, desça para outra linha em vez de estourar.
-- Significado nunca só pela cor (negrito, inverso ou palavra junto). Sem emoji como ícone.
-- Avisos rápidos (`$.ui.toast`) com parcimônia: cada aviso uma vez, e só volta quando a situação muda (ex.: depois de `/compact`).
-- Nada para mostrar → `next(e)` (a tela normal), não uma caixa vazia.
+**Screen**
+- Elements come from `$.ui.resolve(e)` (`const { Box, Text } = $.ui.resolve(e)`), according to the surface (`terminal`, `desktop`, `vscode`, `mobile`). Never assume just one.
+- Work in a narrow terminal: truncate long text, wrap to another line instead of overflowing.
+- Meaning never by color alone (bold, inverse or a word alongside). No emoji as icons.
+- Quick notices (`$.ui.toast`) sparingly: each notice once, and it only comes back when the situation changes (e.g. after `/compact`).
+- Nothing to show → `next(e)` (the normal screen), not an empty box.
 
-**Textos**
-- Em português simples, curtos, dizendo o que fazer ("Contexto em 82%: hora de /compact"). Motivo de bloqueio explica o porquê e o caminho.
+**Text**
+- In plain language, in the user's language, short, saying what to do ("Context at 82%: time to /compact"). A block reason explains the why and the way forward.
 
-## 6. Verifique antes de dizer que ficou pronto
+## 6. Verify before saying it's done
 
-1. `claude plugin validate <pasta do mod>` sem erro. Leia a lista do que o mod liga e chama: tem que bater com o que você quis.
-2. Tipos: `tsc -p <pasta do mod>` (os tipos ficam em `.claude-plugin/types/` depois da primeira carga; antes dela, use o `tsconfig.json` do cabeçalho do arquivo de tipos, guardado fora da pasta do mod).
-3. Pelo menos um `*.test.ts` do comportamento pedido, rodado com `claude plugin test <pasta do mod>`. Teste de tela monta nas duas superfícies: `for (const surface of ['terminal', 'desktop'] as const)`.
-4. Com o recarregamento ao vivo ligado, o mod carrega quando a resposta termina. Se aparecer uma linha apagada com `<mod>: ... refused` ou um hook pulado, leia o motivo e corrija. Para ver tudo: `claude --debug`.
+1. `claude plugin validate <mod folder>` with no errors. Read the list of what the mod wires and calls: it has to match what you intended.
+2. Types: `tsc -p <mod folder>` (the types land in `.claude-plugin/types/` after the first load; before that, use the `tsconfig.json` from the types file's header, kept outside the mod folder).
+3. At least one `*.test.ts` of the requested behavior, run with `claude plugin test <mod folder>`. A screen test mounts on both surfaces: `for (const surface of ['terminal', 'desktop'] as const)`.
+4. With live reload on, the mod loads when the response ends. If a dimmed line with `<mod>: ... refused` or a skipped hook shows up, read the reason and fix it. To see everything: `claude --debug`.
 
-Se algo falhou, diga o que falhou, com a mensagem. Não diga que está pronto.
+If something failed, say what failed, with the message. Don't say it's done.
 
-## 7. Entregue
+## 7. Deliver
 
-- Explique em 2 a 3 frases o que o mod faz e como ver funcionando ("mande uma mensagem e olhe acima do prompt").
-- Se o recarregamento ao vivo foi recusado, diga que o mod carrega na próxima sessão.
-- A pasta da sessão é temporária: ofereça copiar o mod para uma pasta que a pessoa guarde (no projeto, `mods/<nome>/`). Para outras pessoas instalarem, só se ela pedir: `.claude-plugin/marketplace.json` no repositório e a linha `/plugin install <mod> --marketplace <dono>/<repositório>` no README.
-- Feche cada passo no Faundr (`faundr done "<trecho do nome>"`) e registre uma decisão se houve escolha que importa (`decision "<escolha>" --why "<porquê>"`).
+- Explain in 2 to 3 sentences what the mod does and how to see it working ("send a message and look above the prompt").
+- If live reload was refused, say the mod loads in the next session.
+- The session folder is temporary: offer to copy the mod to a folder the person keeps (in the project, `mods/<name>/`). For other people to install it, only if they ask: `.claude-plugin/marketplace.json` in the repository and the line `/plugin install <mod> --marketplace <owner>/<repository>` in the README.
+- Close each step in Faundr (`faundr done "<part of the name>"`) and record a decision if there was a choice that matters (`decision "<choice>" --why "<why>"`).

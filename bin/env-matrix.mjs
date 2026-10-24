@@ -8,6 +8,7 @@
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
+import { t } from './i18n.mjs'
 import { faundrPath } from './paths.mjs'
 
 export const PUBLIC_PREFIX = /^(VITE_|NEXT_PUBLIC_|NUXT_PUBLIC_|EXPO_PUBLIC_|REACT_APP_|GATSBY_)/
@@ -94,9 +95,9 @@ export function hostingFromCli(root, provider, { run = spawnSync } = {}) {
     netlify: 'npx --no-install netlify env:list --json',
   }
   const cmd = cmds[provider]
-  if (!cmd) return { provider, error: 'provedor sem CLI conhecida' }
+  if (!cmd) return { provider, error: 'provider without a known CLI' }
   const r = run(cmd, { cwd: root, encoding: 'utf8', timeout: 60_000, shell: true })
-  if (r.status !== 0) return { provider, error: (r.stderr || r.stdout || r.error?.message || 'falhou').toString().trim().split('\n').slice(-1)[0].slice(0, 200) }
+  if (r.status !== 0) return { provider, error: (r.stderr || r.stdout || r.error?.message || 'failed').toString().trim().split('\n').slice(-1)[0].slice(0, 200) }
   const out = String(r.stdout ?? '')
   let names = []
   if (provider === 'cloudflare') names = (JSON.parse(out.slice(out.indexOf('['))) ?? []).map((s) => s.name)
@@ -185,13 +186,13 @@ export function envMatrix(root, files, { cache = readHostingCache(root) } = {}) 
   for (const r of rows) {
     if (r.optional) continue
     if (r.code.length && r.hosting === false)
-      problems.push({ kind: 'falta-no-ar', severity: 'high', name: r.name, text: `${r.name} é lida pelo código (${r.code[0]}) mas não está na hospedagem: essa parte do app quebra no ar.` })
+      problems.push({ kind: 'falta-no-ar', severity: 'high', name: r.name, text: t(`${r.name} is read by the code (${r.code[0]}) but is not set in your hosting: that part of the app breaks once it is live.`, `${r.name} é lida pelo código (${r.code[0]}) mas não está na hospedagem: essa parte do app quebra no ar.`) })
     if (r.code.length && !r.local)
-      problems.push({ kind: 'falta-no-computador', severity: 'medium', name: r.name, text: `${r.name} é lida pelo código (${r.code[0]}) mas não está em nenhum .env do computador: rodando local, essa parte não funciona.` })
+      problems.push({ kind: 'falta-no-computador', severity: 'medium', name: r.name, text: t(`${r.name} is read by the code (${r.code[0]}) but is not in any .env on this computer: running locally, that part does not work.`, `${r.name} é lida pelo código (${r.code[0]}) mas não está em nenhum .env do computador: rodando local, essa parte não funciona.`) })
     if (r.code.length && !r.example)
-      problems.push({ kind: 'fora-do-exemplo', severity: 'low', name: r.name, text: `${r.name} não está no arquivo de exemplo (.env.example): quem for configurar o projeto (ou o servidor) não sabe que ela existe.` })
+      problems.push({ kind: 'fora-do-exemplo', severity: 'low', name: r.name, text: t(`${r.name} is not in the example file (.env.example): whoever sets up the project (or the server) won't know it exists.`, `${r.name} não está no arquivo de exemplo (.env.example): quem for configurar o projeto (ou o servidor) não sabe que ela existe.`) })
     if (!r.code.length && (r.example || r.local))
-      problems.push({ kind: 'sobrando', severity: 'low', name: r.name, text: `${r.name} está no ${r.example ? 'exemplo' : '.env'}, mas nenhum código lê: pode ser resto de algo que saiu (ou é lida por uma ferramenta).` })
+      problems.push({ kind: 'sobrando', severity: 'low', name: r.name, text: t(`${r.name} is in the ${r.example ? 'example file' : '.env'}, but no code reads it: it may be left over from something removed (or a tool reads it).`, `${r.name} está no ${r.example ? 'exemplo' : '.env'}, mas nenhum código lê: pode ser resto de algo que saiu (ou é lida por uma ferramenta).`) })
   }
   return {
     at: new Date().toISOString(),

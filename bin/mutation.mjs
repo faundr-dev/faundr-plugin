@@ -6,6 +6,7 @@
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
+import { t } from './i18n.mjs'
 import { relPath } from './paths.mjs'
 
 const DIR = path.join(relPath('tests'), 'mutation')
@@ -40,7 +41,7 @@ export function mutationSetup(root, runner) {
   if (tested && mine && mine > tested)
     return {
       ready: false,
-      incompatible: `o plugin do Stryker para ${runner} (versão ${plugin.version}) foi feito para o ${runner} ${tested} e o projeto usa o ${mine}: os resultados sairiam falsos (todo defeito "escaparia"). Espere uma versão nova do plugin (npm install -D ${RUNNER_PLUGIN[runner]}@latest) ou rode com o ${runner} ${tested}.`,
+      incompatible: `the Stryker plugin for ${runner} (version ${plugin.version}) was built for ${runner} ${tested} and the project uses ${mine}: the results would be false (every defect would "escape"). Wait for a new plugin version (npm install -D ${RUNNER_PLUGIN[runner]}@latest) or run with ${runner} ${tested}.`,
     }
   return { ready: true, install: null }
 }
@@ -99,7 +100,7 @@ export function runMutation(root, { runner, targets, budgetMinutes = 5, testComm
     // Sem relatório: a rodada foi interrompida (orçamento) ou o Stryker falhou antes.
   }
   if (!report) {
-    const reason = r.error?.code === 'ETIMEDOUT' ? `passou do orçamento de ${budgetMinutes} min (o modo incremental guarda o que já rodou; rode de novo para continuar)` : (r.stderr || r.stdout || '').split('\n').find((l) => /error|erro|failed/i.test(l))?.trim().slice(0, 300) || `o Stryker terminou sem relatório (código ${r.status})`
+    const reason = r.error?.code === 'ETIMEDOUT' ? `went over the ${budgetMinutes} min budget (incremental mode keeps what already ran; run again to continue)` : (r.stderr || r.stdout || '').split('\n').find((l) => /error|erro|failed/i.test(l))?.trim().slice(0, 300) || `Stryker finished without a report (code ${r.status})`
     return { durationMs, error: reason }
   }
   return { durationMs, ...readReport(report, root) }
@@ -148,29 +149,29 @@ export function readReport(report, root) {
 
 // Frase de leigo por tipo de defeito: o que o teste deixou passar.
 const PHRASE = {
-  EqualityOperator: (e) => `ninguém testou o caso exatamente no limite: trocar a comparação para "${e.replacement}" não fez nenhum teste falhar`,
-  ConditionalExpression: (e) => `a condição pode ser trocada por "${e.replacement}" (sempre verdadeira ou sempre falsa) e nenhum teste percebe`,
-  LogicalOperator: (e) => `trocar "e" por "ou" (ou o contrário) na condição não fez nenhum teste falhar ("${e.replacement}")`,
-  ArithmeticOperator: (e) => `a conta pode ser feita errada ("${e.replacement}") e nenhum teste percebe`,
-  BlockStatement: () => 'o trecho pode ser apagado inteiro e nenhum teste percebe: o que ele faz não é conferido',
-  StringLiteral: (e) => `o texto pode virar ${e.replacement === '""' ? 'vazio' : `"${e.replacement}"`} e nenhum teste percebe`,
-  BooleanLiteral: (e) => `inverter verdadeiro e falso ("${e.replacement}") não fez nenhum teste falhar`,
-  ArrayDeclaration: () => 'a lista pode virar vazia e nenhum teste percebe',
-  ObjectLiteral: () => 'o objeto pode virar vazio e nenhum teste percebe',
-  ArrowFunction: () => 'a função pode não devolver nada e nenhum teste percebe',
-  MethodExpression: (e) => `trocar o método por "${e.replacement}" não fez nenhum teste falhar`,
-  UnaryOperator: (e) => `trocar o sinal ("${e.replacement}") não fez nenhum teste falhar`,
-  UpdateOperator: (e) => `trocar o incremento ("${e.replacement}") não fez nenhum teste falhar`,
-  AssignmentOperator: (e) => `trocar a atribuição ("${e.replacement}") não fez nenhum teste falhar`,
-  OptionalChaining: () => 'tirar a proteção contra valor vazio (?.) não fez nenhum teste falhar: ninguém testou o caso sem o dado',
-  Regex: (e) => `a expressão regular pode virar ${e.replacement} e nenhum teste percebe`,
-  CallExpression: () => 'a chamada de função pode ser anulada e nenhum teste percebe',
+  EqualityOperator: (e) => t(`nobody tested the case right at the limit: changing the comparison to "${e.replacement}" didn't make any test fail`, `ninguém testou o caso exatamente no limite: trocar a comparação para "${e.replacement}" não fez nenhum teste falhar`),
+  ConditionalExpression: (e) => t(`the condition can be replaced with "${e.replacement}" (always true or always false) and no test notices`, `a condição pode ser trocada por "${e.replacement}" (sempre verdadeira ou sempre falsa) e nenhum teste percebe`),
+  LogicalOperator: (e) => t(`swapping "and" for "or" (or the other way around) in the condition didn't make any test fail ("${e.replacement}")`, `trocar "e" por "ou" (ou o contrário) na condição não fez nenhum teste falhar ("${e.replacement}")`),
+  ArithmeticOperator: (e) => t(`the math can be done wrong ("${e.replacement}") and no test notices`, `a conta pode ser feita errada ("${e.replacement}") e nenhum teste percebe`),
+  BlockStatement: () => t('the whole block can be deleted and no test notices: what it does is never checked', 'o trecho pode ser apagado inteiro e nenhum teste percebe: o que ele faz não é conferido'),
+  StringLiteral: (e) => t(`the text can become ${e.replacement === '""' ? 'empty' : `"${e.replacement}"`} and no test notices`, `o texto pode virar ${e.replacement === '""' ? 'vazio' : `"${e.replacement}"`} e nenhum teste percebe`),
+  BooleanLiteral: (e) => t(`flipping true and false ("${e.replacement}") didn't make any test fail`, `inverter verdadeiro e falso ("${e.replacement}") não fez nenhum teste falhar`),
+  ArrayDeclaration: () => t('the list can become empty and no test notices', 'a lista pode virar vazia e nenhum teste percebe'),
+  ObjectLiteral: () => t('the object can become empty and no test notices', 'o objeto pode virar vazio e nenhum teste percebe'),
+  ArrowFunction: () => t('the function can return nothing and no test notices', 'a função pode não devolver nada e nenhum teste percebe'),
+  MethodExpression: (e) => t(`swapping the method for "${e.replacement}" didn't make any test fail`, `trocar o método por "${e.replacement}" não fez nenhum teste falhar`),
+  UnaryOperator: (e) => t(`flipping the sign ("${e.replacement}") didn't make any test fail`, `trocar o sinal ("${e.replacement}") não fez nenhum teste falhar`),
+  UpdateOperator: (e) => t(`changing the increment ("${e.replacement}") didn't make any test fail`, `trocar o incremento ("${e.replacement}") não fez nenhum teste falhar`),
+  AssignmentOperator: (e) => t(`changing the assignment ("${e.replacement}") didn't make any test fail`, `trocar a atribuição ("${e.replacement}") não fez nenhum teste falhar`),
+  OptionalChaining: () => t("removing the empty-value guard (?.) didn't make any test fail: nobody tested the case without the data", 'tirar a proteção contra valor vazio (?.) não fez nenhum teste falhar: ninguém testou o caso sem o dado'),
+  Regex: (e) => t(`the regular expression can become ${e.replacement} and no test notices`, `a expressão regular pode virar ${e.replacement} e nenhum teste percebe`),
+  CallExpression: () => t('the function call can be removed and no test notices', 'a chamada de função pode ser anulada e nenhum teste percebe'),
 }
 
 /** Achados T-n no formato da API (um por defeito; identidade estável sem depender do número da linha mudar pouco). */
 export function mutationFindings(escaped) {
   return escaped.map((e) => {
-    const phrase = (PHRASE[e.mutator] ?? ((x) => `a troca "${x.replacement}" (${x.mutator}) não fez nenhum teste falhar`))(e)
+    const phrase = (PHRASE[e.mutator] ?? ((x) => t(`the change "${x.replacement}" (${x.mutator}) didn't make any test fail`, `a troca "${x.replacement}" (${x.mutator}) não fez nenhum teste falhar`)))(e)
     return {
       kind: e.noCoverage ? 'no_coverage' : 'survived',
       file: e.file,
@@ -178,8 +179,8 @@ export function mutationFindings(escaped) {
       mutator: e.mutator,
       replacement: e.replacement,
       original: e.original,
-      title: e.noCoverage ? `Nenhum teste passa por aqui (linha ${e.line})` : `Defeito que escapou na linha ${e.line}`,
-      detail: e.noCoverage ? `Nenhum teste executa esta linha: ela pode quebrar de qualquer jeito sem ninguém saber. ${capital(phrase)}.` : `${capital(phrase)}.`,
+      title: e.noCoverage ? t(`No test reaches this line (line ${e.line})`, `Nenhum teste passa por aqui (linha ${e.line})`) : t(`Defect that slipped through on line ${e.line}`, `Defeito que escapou na linha ${e.line}`),
+      detail: e.noCoverage ? `${t('No test runs this line: it can break in any way without anyone knowing.', 'Nenhum teste executa esta linha: ela pode quebrar de qualquer jeito sem ninguém saber.')} ${capital(phrase)}.` : `${capital(phrase)}.`,
       fingerprint: `mut|${e.file}|${e.mutator}|${e.original}|${e.replacement}`.slice(0, 600),
     }
   })

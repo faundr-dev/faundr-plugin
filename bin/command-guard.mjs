@@ -13,39 +13,39 @@ import path from 'node:path'
 const TEXT_PROGRAMS = new Set(['grep', 'egrep', 'rg', 'ag', 'ack', 'findstr', 'select-string', 'sls', 'git', 'echo', 'printf', 'cat', 'type', 'sed', 'awk', 'head', 'tail', 'less', 'more', 'get-content', 'gc', 'write-output', 'write-host', 'tee', 'out-file', 'set-content', 'gh'])
 
 const SQL_RULES = [
-  { re: /\bdrop\s+(table|database|schema|view|materialized\s+view)\b/i, what: 'apaga uma tabela, banco ou estrutura do banco (DROP)' },
-  { re: /\btruncate\s+(table\s+)?["\w.]+/i, what: 'apaga todas as linhas de uma tabela (TRUNCATE)' },
-  { re: /\bdelete\s+from\s+["\w.]+(?![^;]*\bwhere\b)/i, what: 'apaga todas as linhas de uma tabela (DELETE sem WHERE)' },
-  { re: /\balter\s+table\b[^;]*\bdrop\s+(column|constraint)\b/i, what: 'apaga uma coluna ou regra de uma tabela (ALTER TABLE … DROP)' },
-  { re: /\bupdate\s+["\w.]+\s+set\b(?![^;]*\bwhere\b)/i, what: 'muda todas as linhas de uma tabela (UPDATE sem WHERE)' },
+  { re: /\bdrop\s+(table|database|schema|view|materialized\s+view)\b/i, what: 'deletes a table, database or database structure (DROP)' },
+  { re: /\btruncate\s+(table\s+)?["\w.]+/i, what: 'deletes every row of a table (TRUNCATE)' },
+  { re: /\bdelete\s+from\s+["\w.]+(?![^;]*\bwhere\b)/i, what: 'deletes every row of a table (DELETE without WHERE)' },
+  { re: /\balter\s+table\b[^;]*\bdrop\s+(column|constraint)\b/i, what: 'deletes a column or constraint of a table (ALTER TABLE … DROP)' },
+  { re: /\bupdate\s+["\w.]+\s+set\b(?![^;]*\bwhere\b)/i, what: 'changes every row of a table (UPDATE without WHERE)' },
 ]
 
 const DB_COMMANDS = [
-  { re: /\bsupabase\s+db\s+reset\b.*--linked\b/i, level: 'deny', what: 'apaga e recria o banco do Supabase ligado ao projeto (normalmente o de produção)' },
-  { re: /\bsupabase\s+db\s+reset\b/i, what: 'apaga e recria o banco local do Supabase (os dados locais somem)' },
-  { re: /\bsupabase\s+db\s+push\b/i, what: 'aplica as migrações no banco remoto do Supabase (normalmente o de produção)' },
-  { re: /\bsupabase\s+migration\s+(up|repair)\b.*--linked\b/i, what: 'mexe nas migrações do banco remoto do Supabase (normalmente o de produção)' },
-  { re: /\bprisma\s+migrate\s+reset\b/i, what: 'apaga e recria o banco (prisma migrate reset)' },
-  { re: /\bprisma\s+db\s+push\b.*--(force-reset|accept-data-loss)\b/i, what: 'muda o banco aceitando perder dados (prisma db push)' },
-  { re: /\bprisma\s+migrate\s+deploy\b/i, what: 'aplica as migrações no banco do DATABASE_URL (pode ser o de produção)' },
-  { re: /\bdrizzle-kit\s+(push|drop)\b/i, what: 'muda o banco direto pelo drizzle-kit (pode apagar colunas e dados)' },
-  { re: /\b(rails|rake)\s+db:(drop|reset|schema:load)\b/i, what: 'apaga ou recria o banco' },
-  { re: /\bdropdb\b/i, what: 'apaga um banco inteiro (dropdb)' },
-  { re: /\bredis-cli\b.*\bflush(all|db)\b/i, what: 'apaga todos os dados do Redis' },
-  { re: /\bfirebase\s+(firestore:delete|database:remove)\b/i, what: 'apaga dados do Firebase' },
-  { re: /\bheroku\s+pg:reset\b/i, what: 'apaga o banco do Heroku' },
+  { re: /\bsupabase\s+db\s+reset\b.*--linked\b/i, level: 'deny', what: 'deletes and recreates the Supabase database linked to the project (usually production)' },
+  { re: /\bsupabase\s+db\s+reset\b/i, what: 'deletes and recreates the local Supabase database (local data is lost)' },
+  { re: /\bsupabase\s+db\s+push\b/i, what: 'applies the migrations to the remote Supabase database (usually production)' },
+  { re: /\bsupabase\s+migration\s+(up|repair)\b.*--linked\b/i, what: 'changes the migrations of the remote Supabase database (usually production)' },
+  { re: /\bprisma\s+migrate\s+reset\b/i, what: 'deletes and recreates the database (prisma migrate reset)' },
+  { re: /\bprisma\s+db\s+push\b.*--(force-reset|accept-data-loss)\b/i, what: 'changes the database accepting data loss (prisma db push)' },
+  { re: /\bprisma\s+migrate\s+deploy\b/i, what: 'applies the migrations to the DATABASE_URL database (may be production)' },
+  { re: /\bdrizzle-kit\s+(push|drop)\b/i, what: 'changes the database directly through drizzle-kit (may delete columns and data)' },
+  { re: /\b(rails|rake)\s+db:(drop|reset|schema:load)\b/i, what: 'deletes or recreates the database' },
+  { re: /\bdropdb\b/i, what: 'deletes a whole database (dropdb)' },
+  { re: /\bredis-cli\b.*\bflush(all|db)\b/i, what: 'deletes all Redis data' },
+  { re: /\bfirebase\s+(firestore:delete|database:remove)\b/i, what: 'deletes Firebase data' },
+  { re: /\bheroku\s+pg:reset\b/i, what: 'deletes the Heroku database' },
   { re: /\bwrangler\s+d1\s+execute\b.*--remote\b/i, sqlOnly: true },
 ]
 
 const GIT_RULES = [
-  { re: /\bpush\b.*(\s--force(-with-lease)?\b|\s-f\b|\s-[a-z]*f[a-z]*\b|\s\+[\w/.-]+)/i, what: 'sobrescreve o histórico no GitHub (git push --force); commits de outras pessoas podem sumir' },
-  { re: /\breset\s+.*--hard\b|\breset\s+--hard\b/i, what: 'descarta as mudanças que ainda não foram commitadas (git reset --hard)', files: true },
-  { re: /\bclean\s+-[a-z]*f/i, what: 'apaga os arquivos novos que ainda não estão no git (git clean)', files: true },
-  { re: /\b(checkout|restore)\s+(--\s+)?\.(\s|$)/i, unless: /\brestore\b(?=.*--staged)(?!.*--worktree)/i, what: 'descarta as mudanças que ainda não foram commitadas', files: true },
-  { re: /\bcheckout\s+(-f|--force)\b/i, what: 'troca de branch descartando as mudanças não commitadas', files: true },
-  { re: /\bstash\s+(drop|clear)\b/i, what: 'apaga mudanças guardadas no stash' },
-  { re: /\bbranch\s+(-D\b|--delete\s+--force\b|-d\s+-f\b)/, what: 'apaga uma branch mesmo com commits que não estão em outra' },
-  { re: /\b(filter-branch|filter-repo)\b/i, what: 'reescreve todo o histórico do git' },
+  { re: /\bpush\b.*(\s--force(-with-lease)?\b|\s-f\b|\s-[a-z]*f[a-z]*\b|\s\+[\w/.-]+)/i, what: 'overwrites the history on GitHub (git push --force); other people\'s commits may be lost' },
+  { re: /\breset\s+.*--hard\b|\breset\s+--hard\b/i, what: 'discards the changes not committed yet (git reset --hard)', files: true },
+  { re: /\bclean\s+-[a-z]*f/i, what: 'deletes the new files not in git yet (git clean)', files: true },
+  { re: /\b(checkout|restore)\s+(--\s+)?\.(\s|$)/i, unless: /\brestore\b(?=.*--staged)(?!.*--worktree)/i, what: 'discards the changes not committed yet', files: true },
+  { re: /\bcheckout\s+(-f|--force)\b/i, what: 'switches branch discarding the uncommitted changes', files: true },
+  { re: /\bstash\s+(drop|clear)\b/i, what: 'deletes changes saved in the stash' },
+  { re: /\bbranch\s+(-D\b|--delete\s+--force\b|-d\s+-f\b)/, what: 'deletes a branch even with commits that are not in another one' },
+  { re: /\b(filter-branch|filter-repo)\b/i, what: 'rewrites the whole git history' },
 ]
 
 const HEREDOC = /(<<-?\s*(['"]?)(\w+)\2[^\n]*)\n[\s\S]*?\n\s*\3[ \t]*(?=\n|$)/g
@@ -127,8 +127,8 @@ function removal(seg, cwd) {
   const worst = risks.find(([, r]) => r === 'catastrophe') ?? risks[0]
   if (!worst) return null
   return worst[1] === 'catastrophe'
-    ? { level: 'deny', what: `apaga ${worst[0]} inteiro, com tudo dentro`, files: true }
-    : { level: 'ask', what: `apaga a pasta ${worst[0]}, que fica fora do projeto`, files: false }
+    ? { level: 'deny', what: `deletes the whole ${worst[0]}, with everything in it`, files: true }
+    : { level: 'ask', what: `deletes the folder ${worst[0]}, which is outside the project`, files: false }
 }
 
 const DISK = /\bmkfs(\.\w+)?\b|\bdd\b.*\bof=\/dev\/(sd|nvme|disk|hd)|\bformat\s+[a-z]:|\bdiskpart\b|\bclear-disk\b|\bformat-volume\b/i
@@ -143,7 +143,7 @@ export function classifyCommand(command, { cwd, sql = false } = {}) {
     const hit = SQL_RULES.find((r) => r.re.test(command))
     return hit ? { level: 'ask', what: hit.what, files: false, database: true } : null
   }
-  if (DISK.test(command)) return { level: 'deny', what: 'formata ou sobrescreve um disco inteiro', files: false }
+  if (DISK.test(command)) return { level: 'deny', what: 'formats or overwrites a whole disk', files: false }
   // O corpo de um heredoc (cat > a.sql <<EOF … EOF) é texto do comando dele, não outros comandos.
   const segs = segments(command.replace(HEREDOC, '$1'))
   let found = null
@@ -154,7 +154,7 @@ export function classifyCommand(command, { cwd, sql = false } = {}) {
   for (const seg of segs) {
     // Voltar para um ponto de volta troca arquivos: o usuário confirma no terminal, vendo o que muda.
     const restore = !TEXT_PROGRAMS.has(seg.program) && seg.text.match(/\bfaundr(?:\.mjs)?["']?\s+restore\s+["']?([\w#.-]+).*\s--yes\b/i)
-    if (restore) keep({ level: 'ask', what: 'volta os arquivos para um ponto de volta', files: false, restore: restore[1] })
+    if (restore) keep({ level: 'ask', what: 'restores the files to a restore point', files: false, restore: restore[1] })
     keep(removal(seg, cwd))
     if (seg.program === 'git') {
       const rest = seg.words.join(' ')
@@ -199,10 +199,10 @@ export function isReadOnly(command) {
 // Texto que o Claude Code mostra ao usuário (ask) ou ao agente (deny).
 export function guardMessage(verdict, { command, checkpoint, note } = {}) {
   const shown = command && command.length > 160 ? `${command.slice(0, 157)}…` : command
-  const saved = checkpoint ? ` Antes, o Faundr salvou um ponto de volta dos arquivos (para desfazer: /faundr:undo).` : ''
+  const saved = checkpoint ? ` Faundr saved a restore point of the files first (to undo: /faundr:undo).` : ''
   const where = note ? ` ${note}` : ''
-  const db = verdict.database ? ' O ponto de volta do Faundr guarda só os arquivos, não os dados do banco: confira se há backup.' : ''
+  const db = verdict.database ? ' Faundr restore points keep only the files, not the database data: check that there is a backup.' : ''
   if (verdict.level === 'deny')
-    return `[Faundr] Barrado: este comando ${verdict.what}${shown ? ` (${shown})` : ''}. Isso não tem volta. Não tente outro jeito de fazer o mesmo: explique ao usuário o que queria fazer e, se ele quiser mesmo, ele mesmo roda no terminal.${where}${db}`
-  return `[Faundr] Atenção: este comando ${verdict.what}.${where} Aprove só se for isso mesmo.${saved}${db}`
+    return `[Faundr] Blocked: this command ${verdict.what}${shown ? ` (${shown})` : ''}. This cannot be undone. Do not try another way to do the same thing: explain to the user what you wanted to do and, if they really want it, they run it themselves in the terminal.${where}${db}`
+  return `[Faundr] Warning: this command ${verdict.what}.${where} Approve only if this is really what you want.${saved}${db}`
 }

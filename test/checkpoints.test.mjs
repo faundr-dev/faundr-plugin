@@ -5,6 +5,9 @@ import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
 import { changesSince, createCheckpoint, ensureSessionCheckpoint, findCheckpoint, listCheckpoints, restoreCheckpoint, restoreSummary } from '../bin/checkpoints.mjs'
+import { setLang } from '../bin/i18n.mjs'
+
+setLang('pt')
 
 const git = (root, ...args) => spawnSync('git', args, { cwd: root, encoding: 'utf8' })
 
@@ -105,6 +108,10 @@ test('a volta explica o que se perde, o que é apagado e o que não muda', () =>
   assert.match(text, /1 apagados depois do ponto voltam: src\/velho\.ts/)
   assert.match(text, /não muda: o \.env.*banco de dados/)
   assert.match(restoreSummary(point, []), /nada muda/)
+  setLang('en')
+  assert.match(restoreSummary(point, [{ status: 'criado', path: 'src/novo.ts' }]), /1 created after the point are deleted: src\/novo\.ts/)
+  assert.match(restoreSummary(point, []), /nothing changes/)
+  setLang('pt')
 })
 
 test('a volta avisa quando pacotes ou migrações do banco mudam', () => {

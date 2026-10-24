@@ -1,25 +1,25 @@
 ---
 name: track
-description: Registra no Faundr o que está sendo construído. Use SEMPRE que, num projeto ligado ao Faundr (existe .faundr.json), você começar uma funcionalidade ou tarefa de vários passos, concluir um passo, ou o usuário tomar uma decisão técnica — assim o time acompanha o progresso no painel e ninguém se perde entre sessões.
+description: Records in Faundr what is being built. Use ALWAYS when, in a project linked to Faundr (.faundr.json exists), you start a feature or multi-step task, finish a step, or the user makes a technical decision — that way the team follows progress in the dashboard and nobody gets lost between sessions.
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *)
 ---
 
-Use a CLI do Faundr pela ferramenta Bash (`faundr ...`; se não estiver no PATH, `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" ...`). Sempre com aspas.
+Use the Faundr CLI through the Bash tool (`faundr ...`; if it is not on the PATH, `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" ...`). Always with quotes. Write titles, tasks and decisions in the user's language.
 
-**Ao começar um trabalho de vários passos** (nova tela, integração, refatoração, melhoria grande, "agora vamos para a fase 2"), **antes de construir**:
-1. Se não houver funcionalidade atual adequada (`faundr board`), crie: `faundr feature "<título curto>" --desc "<objetivo>" --done-when "<critério>; <critério>"` (como saber que ficou pronto, de um jeito que dá para conferir).
-   Se o pedido for vago (não diz para quem é, o que fica de fora ou como saber que ficou pronto), faça antes 2 a 3 perguntas curtas numa rodada só, com a ferramenta de perguntas ao usuário (opções concretas, a recomendada primeiro). Com o pedido claro, não pergunte.
-   Se já existir uma com esse objetivo, troque para ela: `faundr focus "<nome>"`.
-2. Registre o plano como checklist: um `faundr task "<passo>"` por passo (3 a 8 passos, verbos no infinitivo).
-3. **Trabalho em etapas** (fase 0/1/2, MVP e depois o resto, "agora X, depois Y", algo que você mesmo propôs dividir): a funcionalidade atual é só a etapa de agora. Registre **já no começo** todas as etapas seguintes que você conhece, em ordem, cada uma depois da anterior, com o que entra nela:
-   `faundr feature "<etapa 2>" --after atual --desc "<o que entra>"`, depois `faundr feature "<etapa 3>" --after "<etapa 2>" --desc "…"`. Se já souber os passos de uma etapa futura, adicione com `faundr task "<passo>" --feature "<etapa>"`. Elas ficam planejadas (não viram a atual) e o Faundr lembra delas no início da conversa, no fim do checklist, no bilhete e no `/faundr:resume`.
-   Ao terminar uma etapa, diga ao usuário qual é a próxima pelo nome e pergunte se segue; para começá-la: `faundr focus "<etapa>"`. Nunca dê a funcionalidade como encerrada quando ela tem etapas registradas pela frente.
+**When starting multi-step work** (new screen, integration, refactor, big improvement, "now let's go to phase 2"), **before building**:
+1. If there is no suitable current feature (`faundr board`), create one: `faundr feature "<short title>" --desc "<goal>" --done-when "<criterion>; <criterion>"` (how to know it is done, in a way that can be checked).
+   If the request is vague (it does not say who it is for, what stays out or how to know it is done), first ask 2 to 3 short questions in a single round, with the user question tool (concrete options, the recommended one first). If the request is clear, do not ask.
+   If one with that goal already exists, switch to it: `faundr focus "<name>"`.
+2. Record the plan as a checklist: one `faundr task "<step>"` per step (3 to 8 steps, starting with a verb).
+3. **Work in stages** (phase 0/1/2, MVP and then the rest, "now X, then Y", something you yourself proposed to split): the current feature is only the current stage. Record **right at the start** all the following stages you know of, in order, each one after the previous, with what goes into it:
+   `faundr feature "<stage 2>" --after current --desc "<what goes in>"`, then `faundr feature "<stage 3>" --after "<stage 2>" --desc "…"`. If you already know a future stage's steps, add them with `faundr task "<step>" --feature "<stage>"`. They stay planned (they do not become the current one) and Faundr reminds about them at the start of the conversation, at the end of the checklist, in the handoff note and in `/faundr:resume`.
+   When a stage is finished, tell the user the next one by name and ask whether to continue; to start it: `faundr focus "<stage>"`. Never treat the feature as finished when it has recorded stages ahead.
 
-**Durante o trabalho:**
-- Ao iniciar um passo: `faundr start "<trecho do nome>"`.
-- Ao concluir um passo (código feito e verificado): `faundr done "<trecho do nome>"`.
-- Surgiu um passo novo: `faundr task "<passo>"`.
+**During the work:**
+- When starting a step: `faundr start "<part of the name>"`.
+- When finishing a step (code done and verified): `faundr done "<part of the name>"`.
+- A new step came up: `faundr task "<step>"`.
 
-**Decisões:** quando o usuário escolher uma abordagem técnica (biblioteca, provedor, padrão, arquitetura), registre: `faundr decision "<decisão afirmativa>" --why "<porquê>"`.
+**Decisions:** when the user chooses a technical approach (library, provider, pattern, architecture), record it: `faundr decision "<affirmative decision>" --why "<why>"`.
 
-Não registre trivialidades (um ajuste de uma linha, uma pergunta). Não precisa pedir permissão para registrar; mencione em uma linha o que registrou.
+Do not record trivial things (a one-line tweak, a question). No need to ask permission to record; mention in one line what you recorded.

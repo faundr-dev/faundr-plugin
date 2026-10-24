@@ -4,6 +4,7 @@
 // serviços e camadas), e a versão de cada linguagem.
 import fs from 'node:fs'
 import path from 'node:path'
+import { t as tr } from './i18n.mjs'
 
 const read = (root, rel) => {
   try {
@@ -144,7 +145,7 @@ export function langRuntime(root, files) {
   const cargo = first(/(^|\/)Cargo\.toml$/)
   if (cargo) {
     const t = read(root, cargo)
-    add('Rust', t.match(/^rust-version\s*=\s*"([^"]+)"/m)?.[1] ?? (t.match(/^edition\s*=\s*"(\d+)"/m) ? `edição ${t.match(/^edition\s*=\s*"(\d+)"/m)[1]}` : ''), cargo)
+    add('Rust', t.match(/^rust-version\s*=\s*"([^"]+)"/m)?.[1] ?? (t.match(/^edition\s*=\s*"(\d+)"/m) ? tr(`edition ${t.match(/^edition\s*=\s*"(\d+)"/m)[1]}`, `edição ${t.match(/^edition\s*=\s*"(\d+)"/m)[1]}`) : ''), cargo)
   }
   const composer = first(/(^|\/)composer\.json$/)
   if (composer) add('PHP', safeJson(read(root, composer)).require?.php, composer)
@@ -169,7 +170,7 @@ export function langRuntime(root, files) {
   const cmake = first(/(^|\/)CMakeLists\.txt$/)
   if (cmake) add('C++', read(root, cmake).match(/CMAKE_CXX_STANDARD\s+(\d+)/)?.[1], cmake)
   const docker = first(/(^|\/)Dockerfile$/)
-  if (docker) add('Imagem base (Docker)', read(root, docker).match(/^FROM\s+(?:--\S+\s+)?(\S+)/im)?.[1], docker)
+  if (docker) add(tr('Base image (Docker)', 'Imagem base (Docker)'), read(root, docker).match(/^FROM\s+(?:--\S+\s+)?(\S+)/im)?.[1], docker)
   return out
 }
 
@@ -188,7 +189,7 @@ export function langBuildTech(files) {
   add(/(^|\/)build\.gradle(\.kts)?$/, 'Gradle', 'build')
   add(/(^|\/)Cargo\.toml$/, 'Cargo', 'build')
   add(/(^|\/)composer\.json$/, 'Composer', 'build')
-  add(/(^|\/)[\w.-]+\.sln$/, '.NET (solução)', 'build')
+  add(/(^|\/)[\w.-]+\.sln$/, tr('.NET (solution)', '.NET (solução)'), 'build')
   add(/(^|\/)angular\.json$/, 'Angular CLI', 'build')
   return out
 }

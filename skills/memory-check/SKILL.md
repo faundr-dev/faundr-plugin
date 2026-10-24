@@ -1,19 +1,19 @@
 ---
-description: Confere se o código ainda segue as regras e decisões registradas no Faundr (memória sem contradição) e arruma a memória (decisões repetidas, substituídas, sem arquivo ligado, ou que deviam ser regra). Use quando o usuário perguntar se o projeto está seguindo o combinado, pedir para arrumar ou revisar a memória, antes de lançar, ou depois de mudanças grandes.
-argument-hint: [regra, decisão ou área para conferir]
+description: Checks whether the code still follows the rules and decisions recorded in Faundr (memory without contradiction) and tidies the memory (repeated or superseded decisions, decisions with no linked file, or ones that should be rules). Use when the user asks whether the project is following what was agreed, asks to tidy or review the memory, before launching, or after big changes.
+argument-hint: [rule, decision or area to check]
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *)
 ---
 
-Pedido do usuário: $ARGUMENTS
+User request: $ARGUMENTS
 
-1. Leia as regras e decisões confirmadas: `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" board --memory`. Se o pedido citar uma regra ou área, confira só ela.
-2. Para cada regra ou decisão que diz algo verificável no código (uma biblioteca, um lugar, um jeito de fazer, algo proibido), procure se o código contraria: use `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" graph-query "<o que a regra diz>"` e `graph-grep "<padrão>"` antes de abrir arquivos. Regras sobre processo (ex.: "sempre pedir OK antes de publicar") não se conferem no código: pule.
-3. Para cada contradição real (com arquivo e linha), registre uma preocupação: `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" concern "Contradição: <regra ou decisão> x <o que o código faz>" --why "<onde (arquivo:linha) e o que fazer: ajustar o código ou mudar a regra>"`.
-4. Se uma regra proíbe algo que dá para achar por texto (ex.: importar axios, console.log em tela, chave do Stripe no front), ofereça ligá-la a um padrão, para o Faundr avisar sozinho dali em diante: `faundr rule "<título>" --forbid "<expressão regular>" [--file "<pasta ou padrão>"]`. Só com o OK do usuário.
-5. **Arrume a memória** (a lista do passo 1 traz o id de cada item entre colchetes). Monte uma proposta curta, em grupos:
-   - **Repetidas ou substituídas**: duas que dizem o mesmo, ou uma que uma mais nova mudou. Proponha aposentar a antiga: `faundr memory-edit <id> --obsolete`.
-   - **Ligar a arquivos**: decisão sem `[arquivos: …]` que só importa para uma parte do código (uma tela, o banco, um comando). Ache os arquivos com `graph-query` e proponha: `faundr memory-edit <id> --file "<pasta ou padrão>"` (um `--file` por caminho; prefira pastas e padrões a arquivos que todo mundo mexe).
-   - **Virar regra**: decisão que é uma ordem que vale sempre, em qualquer trabalho (ex.: "auth fica no Supabase"). Proponha: `faundr memory-edit <id> --rule`. Seja econômico: regra vai em toda sessão.
-   - **Regra de exemplo ou vazia** (ex.: "Memória inicial do projeto"): proponha reescrever ou aposentar.
-   Mostre a proposta ao usuário numa lista e pergunte numa rodada só (use a ferramenta de perguntas, com "Aplicar tudo (Recomendado)" como primeira opção). Só rode os comandos com o OK.
-6. Responda em português simples: quantas regras e decisões conferiu, as contradições (as mais graves primeiro), as que não dá para conferir no código, o que mudou na memória e o que sugere fazer. Não mude código sem o usuário pedir.
+1. Read the confirmed rules and decisions: `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" board --memory`. If the request mentions a rule or area, check only that one.
+2. For each rule or decision that says something verifiable in the code (a library, a place, a way of doing things, something forbidden), look for whether the code contradicts it: use `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" graph-query "<what the rule says>"` and `graph-grep "<pattern>"` before opening files. Rules about process (e.g. "always ask for an OK before publishing") cannot be checked in the code: skip them.
+3. For each real contradiction (with file and line), record a concern: `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" concern "Contradiction: <rule or decision> x <what the code does>" --why "<where (file:line) and what to do: adjust the code or change the rule>"` (write it in the user's language).
+4. If a rule forbids something that can be found by text (e.g. importing axios, console.log on screen, Stripe key in the front end), offer to link it to a pattern, so Faundr warns on its own from then on: `faundr rule "<title>" --forbid "<regular expression>" [--file "<folder or pattern>"]`. Only with the user's OK.
+5. **Tidy the memory** (the list from step 1 has each item's id in brackets). Put together a short proposal, in groups:
+   - **Repeated or superseded**: two that say the same thing, or one that a newer one changed. Propose retiring the old one: `faundr memory-edit <id> --obsolete`.
+   - **Link to files**: a decision without `[arquivos: …]` that only matters for one part of the code (a screen, the database, a command). Find the files with `graph-query` and propose: `faundr memory-edit <id> --file "<folder or pattern>"` (one `--file` per path; prefer folders and patterns to files everybody touches).
+   - **Turn into a rule**: a decision that is an order that always applies, in any work (e.g. "auth stays in Supabase"). Propose: `faundr memory-edit <id> --rule`. Be sparing: a rule goes into every session.
+   - **Example or empty rule** (e.g. "Memória inicial do projeto"): propose rewriting or retiring it.
+   Show the proposal to the user in a list and ask in a single round (use the question tool, with "Apply all (Recommended)" as the first option). Only run the commands with the OK.
+6. Answer in plain language: how many rules and decisions you checked, the contradictions (most serious first), the ones that cannot be checked in the code, what changed in the memory and what you suggest doing. Do not change code unless the user asks.

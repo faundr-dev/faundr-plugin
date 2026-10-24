@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
+import { setLang } from '../bin/i18n.mjs'
 import { detectStack } from '../bin/stack.mjs'
 
 // Projeto de exemplo numa pasta temporária, com os arquivos no git (a Stack lê o que está no git).
@@ -54,4 +55,22 @@ test('Laravel, Spring, ASP.NET, Rust e C++: framework e versão da linguagem', (
     assert.ok(names(stack.tech).includes(tech), tech)
     assert.ok(names(stack.runtime).includes(runtime), runtime)
   }
+})
+
+test('textos da Stack na língua da pessoa; a impressão digital não muda com a língua', () => {
+  const dir = project({
+    'package.json': JSON.stringify({ packageManager: 'pnpm@9.0.0', dependencies: { stripe: '^14.0.0' }, scripts: { dev: 'vite' } }),
+    Dockerfile: 'FROM node:20-alpine\n',
+  })
+  setLang('en')
+  const en = detectStack(dir)
+  assert.ok(names(en.stack.runtime).includes('Package manager'))
+  assert.ok(names(en.stack.runtime).includes('Base image (Docker)'))
+  assert.equal(en.stack.services.find((x) => x.name === 'Stripe').purpose, 'billing and payments')
+  assert.equal(en.stack.scripts.find((x) => x.name === 'pnpm dev').what, 'runs the project on your computer')
+  setLang('pt')
+  const pt = detectStack(dir)
+  assert.ok(names(pt.stack.runtime).includes('Gerenciador de pacotes'))
+  assert.equal(pt.stack.services.find((x) => x.name === 'Stripe').purpose, 'cobrança e pagamentos')
+  assert.equal(en.hash, pt.hash)
 })

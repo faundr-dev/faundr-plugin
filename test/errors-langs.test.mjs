@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { classify, parseErrors } from '../bin/errors.mjs'
+import { setLang } from '../bin/i18n.mjs'
+
+// Os títulos dos E-n vão para o painel na língua da pessoa: fixa o português (e confere o inglês no Go).
+setLang('pt')
 
 // Saídas reais (encurtadas) de cada ferramenta: o erro precisa sair com arquivo e linha.
 const parse = (output, kind) => parseErrors(output, { kind, root: '/p', failed: true })
@@ -32,6 +36,9 @@ test('Go: compilação e teste', () => {
 FAIL
 FAIL\tapp/soma\t0.002s`, 'test')
   assert.deepEqual(t, { file: 'soma_test.go', line: 10, title: 'Teste falhou: TestSoma (esperava 3, veio 4)' })
+  setLang('en')
+  assert.equal(first('--- FAIL: TestSoma (0.00s)\n    soma_test.go:10: esperava 3, veio 4\nFAIL', 'test').title, 'Test failed: TestSoma (esperava 3, veio 4)')
+  setLang('pt')
 })
 
 test('Rust: compilação e teste', () => {

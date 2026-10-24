@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { createServer } from 'node:http'
 import { findChrome } from './browse-cdp.mjs'
+import { t } from './i18n.mjs'
 
 const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 
@@ -64,14 +65,17 @@ export function decodeFrames(buffer) {
   return { frames, rest: buffer.subarray(at) }
 }
 
-const PAGE = `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>Faundr · navegador rápido</title>
+// A aba que a pessoa vê enquanto a extensão conecta: na língua dela.
+const page = () => `<!doctype html><html lang="${t('en', 'pt-BR')}"><meta charset="utf-8"><title>${t('Faundr · quick browser', 'Faundr · navegador rápido')}</title>
 <body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#151515;color:#fff;font:15px/1.5 system-ui,sans-serif">
-<p style="max-width:28rem;padding:0 24px">O Faundr vai usar esta aba para o navegador rápido. Se nada acontecer em alguns segundos,
-confira se a extensão do Faundr está instalada e ligada.</p></body></html>`
+<p style="max-width:28rem;padding:0 24px">${t(
+  'Faundr will use this tab for the quick browser. If nothing happens in a few seconds,\ncheck that the Faundr extension is installed and turned on.',
+  'O Faundr vai usar esta aba para o navegador rápido. Se nada acontecer em alguns segundos,\nconfira se a extensão do Faundr está instalada e ligada.',
+)}</p></body></html>`
 
 function openInChrome(url) {
   const exe = findChrome()
-  if (!exe) throw new Error('Chrome não encontrado; defina CHROME_PATH.')
+  if (!exe) throw new Error('Chrome not found; set CHROME_PATH.')
   spawn(exe, [url], { detached: true, stdio: 'ignore' })
     .on('error', () => {})
     .unref()
@@ -94,7 +98,7 @@ export async function openBridge({ log = () => {}, timeoutMs = 20000, open = ope
   const server = createServer((req, res) => {
     if (req.url?.startsWith('/faundr-browse')) {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
-      return res.end(PAGE)
+      return res.end(page())
     }
     res.writeHead(404).end()
   })
@@ -126,7 +130,7 @@ export async function openBridge({ log = () => {}, timeoutMs = 20000, open = ope
           const msg = JSON.parse(Buffer.concat(parts).toString())
           parts = []
           if (msg.hello === true) connected.ok(msg)
-          else if (msg.hello === false) connected.fail(new Error(`A extensão não conseguiu controlar a aba: ${msg.error}`))
+          else if (msg.hello === false) connected.fail(new Error(`The extension could not control the tab: ${msg.error}`))
           else if (pending.has(msg.id)) {
             const { ok, fail } = pending.get(msg.id)
             pending.delete(msg.id)
@@ -137,27 +141,27 @@ export async function openBridge({ log = () => {}, timeoutMs = 20000, open = ope
       }
     })
     sock.on('close', () => {
-      for (const { fail } of pending.values()) fail(new Error('A extensão fechou a ponte (aba fechada ou controle cancelado).'))
+      for (const { fail } of pending.values()) fail(new Error('The extension closed the bridge (tab closed or control canceled).'))
       pending.clear()
-      connected.fail(new Error('A extensão fechou a ponte.'))
+      connected.fail(new Error('The extension closed the bridge.'))
     })
     sock.on('error', () => {})
   })
 
   await new Promise((ok) => server.listen(0, '127.0.0.1', ok))
   const address = `http://127.0.0.1:${server.address().port}/faundr-browse#t=${token}`
-  if (process.env.FAUNDR_BROWSE_OPEN === 'print') log(`ponte: ${address}`)
+  if (process.env.FAUNDR_BROWSE_OPEN === 'print') log(`bridge: ${address}`)
   else open(address)
   const timer = setTimeout(
     () =>
       connected.fail(
-        new Error('A extensão do Faundr não respondeu. Instale ou recarregue a extensão (chrome://extensions) e rode de novo.'),
+        new Error('The Faundr extension did not respond. Install or reload the extension (chrome://extensions) and run again.'),
       ),
     timeoutMs,
   )
   try {
     const hello = await ready
-    log(`ponte ligada na aba ${hello.tabId} do seu Chrome`)
+    log(`bridge connected to tab ${hello.tabId} of your Chrome`)
   } catch (err) {
     server.close()
     socket?.destroy()
@@ -169,7 +173,7 @@ export async function openBridge({ log = () => {}, timeoutMs = 20000, open = ope
   return {
     send(method, params = {}) {
       return new Promise((ok, fail) => {
-        if (!socket || socket.destroyed) return fail(new Error('Ponte fechada'))
+        if (!socket || socket.destroyed) return fail(new Error('Bridge closed'))
         const id = next++
         pending.set(id, { ok, fail })
         socket.write(encodeFrame(JSON.stringify({ id, method, params })))

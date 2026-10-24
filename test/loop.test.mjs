@@ -13,7 +13,7 @@ test('o mesmo erro 3 vezes seguidas vira um aviso, entregue uma vez', () => {
   assert.equal(recordCheck(d, 's', fail("Property 'x' does not exist on type 'User'. (linha 10)")), null)
   assert.equal(recordCheck(d, 's', fail("Property 'x' does not exist on type 'User'. (linha 12)")), null)
   const alert = recordCheck(d, 's', fail("Property 'x' does not exist on type 'User'. (linha 14)"))
-  assert.match(alert, /Loop: o mesmo erro apareceu 3 vezes seguidas em `npx tsc --noEmit`/)
+  assert.match(alert, /Loop: the same error showed up 3 times in a row in `npx tsc --noEmit`/)
   assert.match(alert, /\/faundr:undo/)
   assert.deepEqual(takeLoopAlerts(d, 's'), [alert])
   assert.deepEqual(takeLoopAlerts(d, 's'), [], 'já entregue')
@@ -38,7 +38,7 @@ test('muitas mudanças no mesmo arquivo só viram aviso com algo falhando', () =
   recordCheck(d, 's', fail('erro A'))
   assert.equal(editLoopNote(d, 's', { rel: 'src/a.ts', priorEdits: 5 }), null)
   const note = editLoopNote(d, 's', { rel: 'src/a.ts', priorEdits: 6 })
-  assert.match(note, /7ª mudança em src\/a\.ts/)
+  assert.match(note, /change #7 to src\/a\.ts/)
   assert.equal(editLoopNote(d, 's', { rel: 'src/a.ts', priorEdits: 7 }), null, 'uma vez por arquivo')
 })
 

@@ -53,9 +53,12 @@ test('regra dita no chat: avisa nas frases de regra, não nas outras', () => {
     'nunca publique sem me perguntar antes',
     'não pode usar axios no front',
     'cuidado pra não colocar um branco 100%',
+    'from now on always use pnpm',
+    'never publish without asking me first',
+    'be careful with the tokens from the other account',
   ])
     assert.equal(ruleIntent(p), 'rule', p)
-  for (const p of ['pode', 'nunca tinha visto isso, que legal', 'qual o comando para instalar o plugin?', '/faundr:rule nunca use axios', 'o painel sempre mostra 3 erros?'])
+  for (const p of ['pode', 'nunca tinha visto isso, que legal', 'qual o comando para instalar o plugin?', '/faundr:rule nunca use axios', 'o painel sempre mostra 3 erros?', 'I never saw this before, nice', 'what is the command to install the plugin?'])
     assert.equal(ruleIntent(p), null, p)
   assert.match(ruleNudge(), /faundr rule/)
 })
@@ -98,7 +101,7 @@ test('subagente: recebe as regras do time sem arquivo', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-home-'))
   const { out } = await run('faundr.mjs', ['subagent-start'], { input: JSON.stringify({ cwd: root }), env: { HOME: home, USERPROFILE: home } })
   const ctx = JSON.parse(out).hookSpecificOutput.additionalContext
-  assert.match(ctx, /Regras do time[^]*Auth fica no Supabase/)
+  assert.match(ctx, /Team rules[^]*Auth fica no Supabase/)
   assert.doesNotMatch(ctx, /Toda rota do servidor/)
 })
 
@@ -125,13 +128,13 @@ test('decision: liga sozinha aos arquivos editados, avisa a parecida e --replace
   try {
     const a = await run('faundr.mjs', ['decision', 'Fonte Geist no lugar da Inter', '--why', 'mais legível'], { cwd: root, env })
     assert.deepEqual(calls[0].paths, ['src/theme.css', 'src/fonts.ts'], a.err)
-    assert.match(a.out, /ligada aos arquivos que esta sessão editou/)
-    assert.match(a.out, /Parece com: d2xxxx "Inter como fonte de texto"/)
+    assert.match(a.out, /linked to the files this session edited/)
+    assert.match(a.out, /Looks like: d2xxxx "Inter como fonte de texto"/)
     const g = await run('faundr.mjs', ['decision', 'Fonte vale para tudo', '--global'], { cwd: root, env })
     assert.deepEqual(calls[1].paths, [], g.err)
     const r = await run('faundr.mjs', ['decision', 'Fonte Geist', '--replaces', 'Inter como fonte'], { cwd: root, env })
     assert.equal(calls[2].replaces, 'Inter como fonte', r.err)
-    assert.match(r.out, /Substitui "Inter como fonte de texto"/)
+    assert.match(r.out, /Replaces "Inter como fonte de texto"/)
     const index = JSON.parse(fs.readFileSync(path.join(root, '.faundr', 'painel', 'memory.json'), 'utf8'))
     assert.ok(!index.some((m) => m.id === 'd2') && index.some((m) => m.id === 'new2'))
   } finally {

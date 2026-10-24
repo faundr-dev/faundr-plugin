@@ -155,10 +155,10 @@ test('antes de editar: quem depende do arquivo, sem contar o próprio arquivo', 
   assert.ok(deps.some((d) => d.label === 'applyCoupon()' && d.file === 'src/cart.mjs'))
   assert.ok(deps.every((d) => d.file !== 'src/coupons.mjs'))
   const note = dependentsNote(graph, 'src/coupons.mjs')
-  assert.match(note, /^\[Faundr\] src\/coupons\.mjs é usado por \d+ parte\(s\) em \d+ arquivo\(s\): /)
+  assert.match(note, /^\[Faundr\] src\/coupons\.mjs is used by \d+ part\(s\) in \d+ file\(s\): /)
   assert.match(note, /faundr graph-callers src\/coupons\.mjs/)
   assert.equal(dependentsNote(graph, 'docs/cupons.md'), null)
-  assert.match(dependentsNote(graph, 'src/coupons.mjs', 1), /… e mais \d+/)
+  assert.match(dependentsNote(graph, 'src/coupons.mjs', 1), /… and \d+ more/)
   fs.rmSync(dir, { recursive: true, force: true })
 })
 

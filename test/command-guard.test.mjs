@@ -96,13 +96,13 @@ test('só leitura não precisa de ponto de volta', () => {
     assert.equal(isReadOnly(cmd), false, cmd)
 })
 
-test('mensagens em português simples', () => {
+test('mensagens para o Claude, em inglês', () => {
   const ask = classifyCommand('git reset --hard', { cwd })
-  assert.match(guardMessage(ask, { checkpoint: { n: 1 } }), /ponto de volta.*\/faundr:undo/)
+  assert.match(guardMessage(ask, { checkpoint: { n: 1 } }), /restore point.*\/faundr:undo/)
   const db = classifyCommand('supabase db push', { cwd })
-  assert.match(guardMessage(db, {}), /não os dados do banco/)
+  assert.match(guardMessage(db, {}), /not the database data/)
   const deny = classifyCommand('rm -rf ~', { cwd })
-  assert.match(guardMessage(deny, { command: 'rm -rf ~' }), /Barrado.*ele mesmo roda/)
+  assert.match(guardMessage(deny, { command: 'rm -rf ~' }), /Blocked.*run it themselves/)
 })
 
 test('voltar para um ponto de volta sempre pergunta no terminal', () => {

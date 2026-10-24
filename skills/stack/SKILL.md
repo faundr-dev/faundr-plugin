@@ -1,50 +1,50 @@
 ---
 name: stack
-description: Escreve ou atualiza a "Stack do projeto" no Faundr — onde cada parte roda (front, back, banco, arquivos, login, domínio, deploy), linguagens, frameworks, serviços externos, variáveis de ambiente (só os nomes) e como rodar. Parte do que a CLI detecta sozinha e completa com o que os arquivos não dizem. Use quando o usuário pedir, quando o Faundr avisar que a Stack mudou, ou depois de trocar hospedagem, banco ou um serviço importante.
+description: Writes or updates the "Project stack" in Faundr — where each part runs (front end, back end, database, files, login, domain, deploy), languages, frameworks, external services, environment variables (names only) and how to run it. Starts from what the CLI detects on its own and fills in what the files do not say. Use when the user asks, when Faundr warns that the Stack changed, or after changing hosting, database or an important service.
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *)
 ---
 
-## 1. Leia o contexto
+## 1. Read the context
 
 !`node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" stack-context`
 
-A parte "Detectado agora" vem de uma leitura automática dos arquivos: é o ponto de partida, mas pode ter ruído (uma variável citada num comentário, uma biblioteca que só aparece em teste). Confira nos arquivos indicados antes de manter algo. Se o usuário já te contou algo nesta conversa (onde o domínio está registrado, que o deploy é automático pelo GitHub), isso vale como fonte.
+The "Detectado agora" part comes from an automatic reading of the files: it is the starting point, but it may have noise (a variable mentioned in a comment, a library that only appears in tests). Check the indicated files before keeping something. If the user already told you something in this conversation (where the domain is registered, that deploy is automatic from GitHub), that counts as a source.
 
-## 2. Regras
+## 2. Rules
 
-- **Nunca escreva valores** de variáveis, chaves, senhas ou tokens. Só o nome da variável (`SUPABASE_URL`), para que serve e de que serviço é. Não leia `.env` para pegar valores.
-- Escreva para quem **não programa**: em `detail`, `role` e `purpose`, diga o que a peça faz pelo projeto ("guarda os dados e faz o login dos usuários"), não como funciona por dentro.
-- Não invente. Se não dá para saber pelos arquivos nem pela conversa (região do servidor, plano pago ou grátis), deixe de fora ou registre em `notes` como pergunta.
-- Se existe revisão anterior, **atualize**: mantenha o que continua verdadeiro, inclusive o que veio de fora dos arquivos.
-- Corte o ruído da detecção: tire variáveis que não são configuração do projeto (exemplos em texto, variáveis de outras ferramentas) e tecnologias que não importam para entender o projeto. Ferramentas de desenvolvimento pequenas (lint, formatação) podem ficar, com categoria certa.
-- `hosting` cobre cada camada que existir, mesmo que seja o mesmo provedor: `front` (onde as telas ficam), `back` (servidor/API), `banco`, `arquivos`, `auth` (login), `dominio`, `deploy` (como o código chega ao ar: automático pelo GitHub, manual com um comando…), `agendado` (tarefas automáticas). Ponha a `url` pública quando ela aparecer nos arquivos ou na conversa.
-- `environments`: produção, homologação, local — com URL e branch quando souber.
-- `scripts`: os comandos que a pessoa realmente usa, com `what` em português simples.
-- `notes`: até 12 observações úteis — riscos ("o deploy é manual; ninguém publica sem rodar npm run deploy"), variáveis usadas no código que faltam no arquivo de exemplo, dúvidas reais.
+- **Never write values** of variables, keys, passwords or tokens. Only the variable name (`SUPABASE_URL`), what it is for and which service it belongs to. Do not read `.env` to get values.
+- Write for **people who don't code**, in the user's language: in `detail`, `role` and `purpose`, say what the piece does for the project ("stores the data and logs users in"), not how it works inside.
+- Do not make things up. If it cannot be known from the files or from the conversation (server region, paid or free plan), leave it out or record it in `notes` as a question.
+- If there is a previous revision, **update** it: keep what is still true, including what came from outside the files.
+- Cut the detection noise: remove variables that are not project configuration (examples in text, variables from other tools) and technologies that do not matter for understanding the project. Small development tools (lint, formatting) can stay, with the right category.
+- `hosting` covers each layer that exists, even if it is the same provider: `front` (where the screens live), `back` (server/API), `banco` (database), `arquivos` (files), `auth` (login), `dominio` (domain), `deploy` (how the code goes live: automatic from GitHub, manual with a command…), `agendado` (scheduled jobs). Add the public `url` when it appears in the files or in the conversation.
+- `environments`: production, staging, local — with URL and branch when known.
+- `scripts`: the commands the person actually uses, with `what` in plain language.
+- `notes`: up to 12 useful observations — risks ("deploy is manual; nobody publishes without running npm run deploy"), variables used in the code that are missing from the example file, real doubts.
 
-## 3. Formato (JSON) — salve em `.faundr/painel/stack.json`
+## 3. Format (JSON) — save to `.faundr/painel/stack.json`
 
 ```json
 {
   "version": 1,
-  "summary": "1 a 3 frases: a stack em português simples",
-  "hosting": [{ "layer": "front | back | banco | arquivos | auth | dominio | deploy | agendado | outro", "provider": "Cloudflare Workers", "detail": "o que roda ali, para a pessoa", "url": "https://...", "evidence": ["wrangler.jsonc"] }],
+  "summary": "1 to 3 sentences: the stack in plain language",
+  "hosting": [{ "layer": "front | back | banco | arquivos | auth | dominio | deploy | agendado | outro", "provider": "Cloudflare Workers", "detail": "what runs there, for the person", "url": "https://...", "evidence": ["wrangler.jsonc"] }],
   "runtime": [{ "name": "Node.js", "version": "22", "evidence": [".nvmrc"] }],
-  "tech": [{ "name": "React", "category": "framework | ui | estilo | dados | testes | build | qualidade | outro", "version": "19", "role": "para que serve aqui", "evidence": ["package.json"] }],
-  "services": [{ "name": "Stripe", "category": "pagamentos | email | ia | monitoramento | analytics | auth | armazenamento | mensagens | mapas | outro", "purpose": "para que o projeto usa", "env": ["STRIPE_SECRET_KEY"], "evidence": ["src/..."] }],
+  "tech": [{ "name": "React", "category": "framework | ui | estilo | dados | testes | build | qualidade | outro", "version": "19", "role": "what it is for here", "evidence": ["package.json"] }],
+  "services": [{ "name": "Stripe", "category": "pagamentos | email | ia | monitoramento | analytics | auth | armazenamento | mensagens | mapas | outro", "purpose": "what the project uses it for", "env": ["STRIPE_SECRET_KEY"], "evidence": ["src/..."] }],
   "env": [{ "name": "SUPABASE_URL", "scope": "publica | servidor", "service": "Supabase", "documented": true, "files": [".env.example"] }],
-  "environments": [{ "name": "Produção", "url": "https://...", "branch": "main", "detail": "publica sozinho a cada push" }],
-  "scripts": [{ "name": "npm run dev", "command": "vite dev --port 3000", "what": "roda o projeto no seu computador" }],
+  "environments": [{ "name": "Production", "url": "https://...", "branch": "main", "detail": "publishes on its own on every push" }],
+  "scripts": [{ "name": "npm run dev", "command": "vite dev --port 3000", "what": "runs the project on your computer" }],
   "notes": ["..."]
 }
 ```
 
-`scope: "publica"` = vai para o navegador (qualquer pessoa vê; prefixos como `VITE_`, `NEXT_PUBLIC_`); `"servidor"` = só no servidor. `documented` = aparece num arquivo de exemplo (`.env.example`) ou na configuração versionada. Não escreva `languages`: a CLI conta e preenche.
+`scope: "publica"` = goes to the browser (anyone can see it; prefixes like `VITE_`, `NEXT_PUBLIC_`); `"servidor"` = server only. `documented` = appears in an example file (`.env.example`) or in versioned configuration. Do not write `languages`: the CLI counts and fills it in.
 
-## 4. Envie
+## 4. Send
 
-Salve com a ferramenta Write em `.faundr/painel/stack.json` (na raiz do projeto ligado) e rode:
+Save with the Write tool to `.faundr/painel/stack.json` (at the root of the linked project) and run:
 
 `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" stack-save`
 
-Se a resposta apontar campos faltando, corrija e rode de novo. No fim, diga em uma frase que a Stack foi atualizada e o que mudou.
+If the response points out missing fields, fix them and run it again. At the end, say in one sentence that the Stack was updated and what changed.

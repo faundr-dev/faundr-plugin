@@ -59,10 +59,10 @@ export function rulesNote(root, rel, rules) {
   const lines = rules.map((r) => {
     const body = r.body?.trim() ? ` — ${r.body.trim().replace(/\s+/g, ' ')}` : ''
     const gone = missingPaths(root, r)
-    const stale = gone.length ? ` (pode estar desatualizada: ${gone.join(', ')} não existe mais; confira com o usuário)` : ''
-    return `- ${r.kind === 'decision' ? 'Decisão' : 'Regra'}: ${r.title}${body}${stale}`
+    const stale = gone.length ? ` (may be outdated: ${gone.join(', ')} no longer exists; check with the user)` : ''
+    return `- ${r.kind === 'decision' ? 'Decision' : 'Rule'}: ${r.title}${body}${stale}`
   })
-  return `[Faundr] Regras do time para ${rel} (valem para este arquivo; siga):\n${lines.join('\n')}`
+  return `[Faundr] Team rules for ${rel} (they apply to this file; follow them):\n${lines.join('\n')}`
 }
 
 /** Regras com padrão proibido (forbid) que o texto contraria neste arquivo: [{ rule, line }] (linha de exemplo). */
@@ -86,9 +86,9 @@ export function forbiddenIn(rules, rel, text) {
 export function forbiddenNote(rel, hits) {
   if (!hits.length) return null
   return [
-    `[Faundr] Esta mudança em ${rel} contraria ${hits.length === 1 ? 'uma regra' : `${hits.length} regras`} do time:`,
-    ...hits.map((h) => `- "${h.rule.title}" (o código não pode ter: ${h.rule.forbid}). Trecho: ${h.line}`),
-    'Ajuste antes de gravar. Se a regra não vale mais, pergunte ao usuário antes de seguir (ela pode ser mudada no painel, em Memória).',
+    `[Faundr] This change to ${rel} breaks ${hits.length === 1 ? 'a team rule' : `${hits.length} team rules`}:`,
+    ...hits.map((h) => `- "${h.rule.title}" (the code must not have: ${h.rule.forbid}). Excerpt: ${h.line}`),
+    'Fix it before saving. If the rule no longer applies, ask the user before going on (it can be changed on the dashboard, in Memory).',
   ].join('\n')
 }
 
@@ -114,8 +114,10 @@ export function writeMemoryIndex(root, items) {
 }
 
 const STOP = new Set(
-  'para pela pelo pelos pelas como mais menos quando onde porque porquê sobre entre depois antes ainda isso isto esse essa este esta esses essas estes estas aquele aquela tudo todo toda todos todas cada mesmo mesma muito muita outro outra outros outras qual quais quem fazer feito faça faz pode podem deve devem precisa preciso quero queria seria sera será ser estar está estao estão fica ficam ficar tambem também agora aqui dele dela deles delas nosso nossa seus suas meu minha voce você vocês voces então entao assim coisa coisas algo alguma algum nada nunca sempre sem com uma umas uns dos das nas nos num numa vez vezes certo veja olha acho tipo sim não nao bem bom boa claude faundr'
-    .split(' '),
+  ('para pela pelo pelos pelas como mais menos quando onde porque porquê sobre entre depois antes ainda isso isto esse essa este esta esses essas estes estas aquele aquela tudo todo toda todos todas cada mesmo mesma muito muita outro outra outros outras qual quais quem fazer feito faça faz pode podem deve devem precisa preciso quero queria seria sera será ser estar está estao estão fica ficam ficar tambem também agora aqui dele dela deles delas nosso nossa seus suas meu minha voce você vocês voces então entao assim coisa coisas algo alguma algum nada nunca sempre sem com uma umas uns dos das nas nos num numa vez vezes certo veja olha acho tipo sim não nao bem bom boa claude faundr ' +
+    // As mesmas palavras vazias em inglês.
+    'this that these those there their them they then than with from into onto about after before also just only some what when where which while will would should could have been being make made does done doing want need like your yours ours here very much many more most other another every each always never nothing something anything please thanks okay right good well yeah'
+  ).split(' '),
 )
 
 /** Radicais das palavras com 4+ letras, sem acento e sem o plural: "Decisões técnicas" → ["decisoe", "tecnica"]. */
@@ -162,8 +164,8 @@ export function relevantMemory(index, prompt, shownIds = [], { max = 3, minScore
 export function memoryNote(items) {
   if (!items.length) return null
   return [
-    '[Faundr] Regras e decisões do time sobre o assunto deste pedido (siga; não proponha alternativas sem o usuário pedir):',
-    ...items.map((m) => `- ${m.kind === 'rule' ? 'Regra' : 'Decisão'}: ${m.title}${m.body ? ` — ${m.body}` : ''}`),
+    '[Faundr] Team rules and decisions on the subject of this request (follow them; do not propose alternatives unless the user asks):',
+    ...items.map((m) => `- ${m.kind === 'rule' ? 'Rule' : 'Decision'}: ${m.title}${m.body ? ` — ${m.body}` : ''}`),
   ].join('\n')
 }
 

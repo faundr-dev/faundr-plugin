@@ -58,11 +58,11 @@ export const workflowsForFile = (list, rel, shownIds = []) =>
 export function workflowNote(items, where) {
   if (!items.length) return null
   return [
-    `[Faundr] ${where} bate com ${items.length > 1 ? 'workflows' : 'um workflow'} do projeto (é como o time quer que você trabalhe nisso). Antes de seguir, leia os passos e siga na ordem, marcando o progresso (o show explica como; o time acompanha no canvas):`,
+    `[Faundr] ${where} matches ${items.length > 1 ? 'project workflows' : 'a project workflow'} (it is how the team wants you to work on this). Before going on, read the steps and follow them in order, marking progress (show explains how; the team follows along on the canvas):`,
     ...items.map(
       (w) =>
-        `- ${w.ref} ${w.name}${w.trigger ? ` — quando: ${w.trigger}` : ''} → ${
-          w.call === 'user' ? `só quando a pessoa pedir: não siga sozinho; pergunte em uma linha se ela quer seguir o ${w.ref}` : `faundr workflow show ${w.ref}`
+        `- ${w.ref} ${w.name}${w.trigger ? ` — when: ${w.trigger}` : ''} → ${
+          w.call === 'user' ? `only when the person asks: do not follow it on your own; ask in one line whether they want to follow ${w.ref}` : `faundr workflow show ${w.ref}`
         }`,
     ),
   ].join('\n')
@@ -93,16 +93,16 @@ export function workflowsOnce(root, sid, pick, where) {
 
 const STEP_KINDS = [
   [/^skill$/i, 'skill'],
-  [/^agentes?$/i, 'agents'],
+  [/^(agentes?|agents?)$/i, 'agents'],
   [/^(comando|command)$/i, 'command'],
   [/^(perguntar|pergunta|ask)$/i, 'ask'],
   [/^(esperar|espera|aguardar|wait)$/i, 'wait'],
-  [/^(tarefa|instrucao|instrução)$/i, 'step'],
+  [/^(tarefa|instrucao|instrução|task|instruction|step)$/i, 'step'],
 ]
 
-/** Item do draft: "paralelo: skill: faundr:design | comando: npm test" vira um grupo que roda ao mesmo tempo. */
+/** Item do draft: "parallel: skill: faundr:design | command: npm test" (ou "paralelo: …") vira um grupo que roda ao mesmo tempo. */
 export function parseItem(raw) {
-  const m = String(raw ?? '').trim().match(/^paralelo\s*:\s*(.+)$/is)
+  const m = String(raw ?? '').trim().match(/^(?:paralelo|parallel)\s*:\s*(.+)$/is)
   if (!m) return parseStep(raw)
   const parallel = m[1].split(/\s+\|\s+/).map(parseStep).filter(Boolean)
   return parallel.length > 1 ? { parallel } : parallel[0] ?? null

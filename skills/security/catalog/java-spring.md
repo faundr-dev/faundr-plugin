@@ -1,47 +1,47 @@
-# Java e Kotlin: Spring Boot, Ktor e Android
-Quando ler: existe `pom.xml`, `build.gradle` ou `build.gradle.kts`; arquivos `.java`/`.kt` com `@RestController`, `@Controller`, `routing {` (Ktor) ou `AndroidManifest.xml`.
+# Java and Kotlin: Spring Boot, Ktor and Android
+When to read: there is a `pom.xml`, `build.gradle` or `build.gradle.kts`; `.java`/`.kt` files with `@RestController`, `@Controller`, `routing {` (Ktor) or `AndroidManifest.xml`.
 
-Primeiro passo: anote o framework e a versão (Spring Boot, Ktor, Android). Ache a configuração de segurança (`SecurityFilterChain`, `@EnableWebSecurity`, `install(Authentication)`) e liste os controladores.
+First step: note the framework and the version (Spring Boot, Ktor, Android). Find the security configuration (`SecurityFilterChain`, `@EnableWebSecurity`, `install(Authentication)`) and list the controllers.
 
-## jvm-rota-sem-auth — Rota que muda dados sem exigir login
-- Gravidade típica: alta; crítica se apaga, paga ou muda papéis.
-- Onde procurar: `@PostMapping`, `@PutMapping`, `@DeleteMapping`, `@PatchMapping`; no Ktor, `post {`/`delete {` fora de `authenticate {`. No Spring, `requestMatchers(...).permitAll()` amplos demais.
-- Como confirmar lendo o código: confira o caminho da rota contra as regras do `SecurityFilterChain` (a primeira que casa vale) e as anotações `@PreAuthorize`/`@Secured`.
-- Descarta se: a rota é pública por desenho (login, cadastro, webhook com assinatura conferida).
-- Não descarta: o frontend só mostra o botão para quem está logado.
-- Como corrigir: `anyRequest().authenticated()` por padrão e liberar só o que é público; no Ktor, a rota dentro de `authenticate("auth") { }`.
+## jvm-rota-sem-auth — Route that changes data without requiring login
+- Typical severity: high; critical if it deletes, pays or changes roles.
+- Where to look: `@PostMapping`, `@PutMapping`, `@DeleteMapping`, `@PatchMapping`; in Ktor, `post {`/`delete {` outside `authenticate {`. In Spring, overly broad `requestMatchers(...).permitAll()`.
+- How to confirm by reading the code: check the route's path against the `SecurityFilterChain` rules (the first one that matches wins) and the `@PreAuthorize`/`@Secured` annotations.
+- Ruled out if: the route is public by design (login, sign-up, webhook with a checked signature).
+- Not ruled out by: the frontend only shows the button to logged-in users.
+- How to fix: `anyRequest().authenticated()` by default and open up only what is public; in Ktor, the route inside `authenticate("auth") { }`.
 - CWE: CWE-306
 
-## jvm-idor — Busca pelo ID recebido sem conferir o dono
-- Gravidade típica: alta.
-- Onde procurar: `@PathVariable Long id` usado em `repository.findById(id)`, `findById(id).orElseThrow()`, `em.find(Pedido.class, id)`.
-- Como confirmar lendo o código: a consulta também filtra pelo usuário logado (`findByIdAndOwner(id, user)`) ou há `@PreAuthorize("@guard.isOwner(#id)")`?
-- Descarta se: a consulta parte do usuário logado ou há checagem de permissão logo depois.
-- Como corrigir: `pedidoRepository.findByIdAndOwnerId(id, auth.getName())`.
+## jvm-idor — Lookup by the received ID without checking the owner
+- Typical severity: high.
+- Where to look: `@PathVariable Long id` used in `repository.findById(id)`, `findById(id).orElseThrow()`, `em.find(Order.class, id)`.
+- How to confirm by reading the code: does the query also filter by the logged-in user (`findByIdAndOwner(id, user)`) or is there a `@PreAuthorize("@guard.isOwner(#id)")`?
+- Ruled out if: the query starts from the logged-in user or there is a permission check right after.
+- How to fix: `orderRepository.findByIdAndOwnerId(id, auth.getName())`.
 - CWE: CWE-639
 
-## jvm-mass-assignment — Entidade preenchida direto do corpo da requisição
-- Gravidade típica: alta.
-- Onde procurar: `@RequestBody Usuario usuario` (a entidade JPA) salvo com `repository.save(usuario)`; campos `role`, `admin`, `saldo`, `ownerId` na entidade.
-- Como confirmar lendo o código: o controlador recebe a própria entidade em vez de um DTO? Há `@JsonIgnore`/`@JsonProperty(access = READ_ONLY)` nos campos sensíveis?
-- Como corrigir: receba um DTO (record) só com os campos editáveis e copie para a entidade; o dono vem do usuário logado.
+## jvm-mass-assignment — Entity filled directly from the request body
+- Typical severity: high.
+- Where to look: `@RequestBody User user` (the JPA entity) saved with `repository.save(user)`; `role`, `admin`, `balance`, `ownerId` fields on the entity.
+- How to confirm by reading the code: does the controller receive the entity itself instead of a DTO? Is there `@JsonIgnore`/`@JsonProperty(access = READ_ONLY)` on the sensitive fields?
+- How to fix: receive a DTO (record) with only the editable fields and copy it into the entity; the owner comes from the logged-in user.
 - CWE: CWE-915
 
-## jvm-sql-cru — SQL ou JPQL montado com texto de fora
-- Gravidade típica: alta.
-- Onde procurar: `createQuery`, `createNativeQuery`, `@Query(... nativeQuery = true)` com SpEL, `JdbcTemplate.query`, `Statement.execute`. A checagem automática pega concatenação, `String.format` e template do Kotlin na mesma linha.
-- Descarta se: os valores vão como parâmetros (`:nome` com `setParameter`, `?` com `PreparedStatement`).
-- Como corrigir: parâmetros sempre; ordenação dinâmica com `Sort.by` de uma lista fixa de campos.
+## jvm-sql-cru — SQL or JPQL built with outside text
+- Typical severity: high.
+- Where to look: `createQuery`, `createNativeQuery`, `@Query(... nativeQuery = true)` with SpEL, `JdbcTemplate.query`, `Statement.execute`. The automatic check catches concatenation, `String.format` and Kotlin templates on the same line.
+- Ruled out if: the values go in as parameters (`:name` with `setParameter`, `?` with `PreparedStatement`).
+- How to fix: always parameters; dynamic ordering with `Sort.by` from a fixed list of fields.
 - CWE: CWE-89
 
-## jvm-actuator-e-config — Endpoints de administração expostos
-- Gravidade típica: alta.
-- Onde procurar: `management.endpoints.web.exposure.include=*` no `application.properties`/`.yml`, `/actuator/env`, `/actuator/heapdump` sem proteção; `spring.h2.console.enabled=true`; `server.error.include-stacktrace=always`.
-- Como corrigir: exponha só `health` e `info`, proteja o resto com login de admin, desligue o console do H2 fora do ambiente local.
+## jvm-actuator-e-config — Admin endpoints exposed
+- Typical severity: high.
+- Where to look: `management.endpoints.web.exposure.include=*` in `application.properties`/`.yml`, `/actuator/env`, `/actuator/heapdump` without protection; `spring.h2.console.enabled=true`; `server.error.include-stacktrace=always`.
+- How to fix: expose only `health` and `info`, protect the rest with admin login, turn off the H2 console outside the local environment.
 - CWE: CWE-200
 
-## android-armazenamento-e-webview — Dados e WebView no app Android
-- Gravidade típica: média a alta.
-- Onde procurar: token em `SharedPreferences` comum, `android:allowBackup="true"`, `usesCleartextTraffic="true"`, `WebView` com `setJavaScriptEnabled(true)` + `addJavascriptInterface`, `android:exported="true"` em telas internas.
-- Como corrigir: `EncryptedSharedPreferences`/Keystore para tokens, `network_security_config` sem cleartext, WebView só com conteúdo próprio, `exported="false"` no que não precisa ser aberto de fora.
+## android-armazenamento-e-webview — Data and WebView in the Android app
+- Typical severity: medium to high.
+- Where to look: token in plain `SharedPreferences`, `android:allowBackup="true"`, `usesCleartextTraffic="true"`, `WebView` with `setJavaScriptEnabled(true)` + `addJavascriptInterface`, `android:exported="true"` on internal screens.
+- How to fix: `EncryptedSharedPreferences`/Keystore for tokens, `network_security_config` without cleartext, WebView only with the app's own content, `exported="false"` on what doesn't need to be opened from outside.
 - CWE: CWE-312, CWE-319, CWE-749

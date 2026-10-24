@@ -30,14 +30,14 @@ export function stepOff(root, key) {
 
 /** Chave do passo → [skill, o que pular]. As chaves batem com os desenhos (src/lib/faundr-skill-flows.ts). */
 export const SKILL_STEPS = {
-  'skill.planning.review': ['planning', 'a revisão escondida por subagente em pedido grande'],
-  'skill.planning.diagram': ['planning', 'oferecer e desenhar o diagrama de como a funcionalidade vai funcionar'],
-  'skill.design.browser': ['design', 'medir as telas no navegador (375, 768, 1024 e 1440 px), abrir menus e testar o teclado'],
-  'skill.design.coverage': ['design', 'registrar as notas por tema (faundr design-coverage)'],
-  'skill.design-fix.browser': ['design-fix', 'conferir a correção no navegador'],
-  'skill.security.supabase': ['security', 'buscar os avisos do Supabase (get_advisors e security-import)'],
-  'skill.tests.coverage': ['tests', 'medir a cobertura (faundr tests-run --coverage)'],
-  'skill.launch.db': ['launch', 'oferecer o teste completo do banco'],
+  'skill.planning.review': ['planning', 'the hidden subagent review on a large request'],
+  'skill.planning.diagram': ['planning', 'offering and drawing the diagram of how the feature will work'],
+  'skill.design.browser': ['design', 'measuring the screens in the browser (375, 768, 1024 and 1440 px), opening menus and testing the keyboard'],
+  'skill.design.coverage': ['design', 'recording the scores per theme (faundr design-coverage)'],
+  'skill.design-fix.browser': ['design-fix', 'checking the fix in the browser'],
+  'skill.security.supabase': ['security', 'fetching the Supabase advisors (get_advisors and security-import)'],
+  'skill.tests.coverage': ['tests', 'measuring coverage (faundr tests-run --coverage)'],
+  'skill.launch.db': ['launch', 'offering the full database test'],
 }
 
 /** Aviso dos passos que o projeto desligou nesta skill do Faundr; null quando não há nenhum. */
@@ -47,5 +47,5 @@ export function skillStepsNote(root, name) {
     .replace(/^faundr:/, '')
   const off = Object.entries(SKILL_STEPS).filter(([key, [skill]]) => skill === short && stepOff(root, key))
   if (!off.length) return null
-  return `[Faundr] Neste projeto, o time desligou estes passos de /faundr:${short}: ${off.map(([, [, what]]) => what).join('; ')}. Pule-os; o resto da skill segue igual.`
+  return `[Faundr] In this project, the team turned off these steps of /faundr:${short}: ${off.map(([, [, what]]) => what).join('; ')}. Skip them; the rest of the skill stays the same.`
 }

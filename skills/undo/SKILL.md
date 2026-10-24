@@ -1,20 +1,20 @@
 ---
-description: Volta os arquivos do projeto para um ponto de volta do Faundr — "voltar para quando funcionava". O Faundr salva um sozinho antes da primeira mudança de cada sessão, a cada 30 min de edições e antes de comandos perigosos. Use quando o usuário pedir para desfazer, voltar atrás, "deixar como estava" ou quando o agente quebrou algo que funcionava.
-argument-hint: [quando ou o que desfazer]
+description: Takes the project files back to a Faundr restore point — "go back to when it worked". Faundr saves one on its own before the first change of each session, every 30 min of edits and before dangerous commands. Use when the user asks to undo, go back, "leave it as it was" or when the agent broke something that worked.
+argument-hint: [when or what to undo]
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *)
 ---
 
-Pedido do usuário: $ARGUMENTS
+User request: $ARGUMENTS
 
-Se o pedido trouxer o código de um ponto (letras e números copiados do painel, em Proteção → Pontos de volta), pule para o passo 3 com esse código no lugar de <n>.
+If the request brings a point's code (letters and numbers copied from the dashboard, under Protection → Restore points), skip to step 3 with that code in place of <n>.
 
-1. Liste os pontos de volta com a ferramenta Bash:
+1. List the restore points with the Bash tool:
    `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" checkpoints`
-2. Mostre ao usuário, em português simples, os 3 a 5 mais recentes: quando foi salvo, por quê e o que mudou desde então. Se o pedido já disser qual (ex.: "antes de mexer no login"), sugira o ponto que combina e diga por quê.
-3. Veja o que a volta desfaz, sem mudar nada ainda:
+2. Show the user, in plain language, the 3 to 5 most recent: when it was saved, why and what changed since then. If the request already says which (e.g. "before touching the login"), suggest the matching point and say why.
+3. See what going back undoes, without changing anything yet:
    `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" restore <n>`
-   Explique ao usuário, em português simples e sem esconder nada: quais arquivos voltam como eram (e que as mudanças feitas neles depois do ponto se perdem), quais são apagados por terem sido criados depois e quais voltam por terem sido apagados. Diga também o que não muda (.env, node_modules, banco de dados, commits) e que o estado de agora fica salvo. Então **pergunte se pode voltar** e espere a resposta. Não volte sem o OK dele, mesmo que o pedido pareça claro.
-4. Com o OK: `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" restore <n> --yes`. O Claude Code mostra de novo o que muda e pede a confirmação no terminal; isso é esperado.
-5. Diga em uma ou duas frases o que voltou, e que o estado de antes ficou salvo (para desfazer a volta: `restore 1 --yes`). Lembre que .env, node_modules e o banco de dados não mudam com a volta.
+   Explain to the user, in plain language and without hiding anything: which files go back to how they were (and that the changes made to them after the point are lost), which are deleted because they were created afterwards and which come back because they had been deleted. Also say what does not change (.env, node_modules, database, commits) and that the current state is saved. Then **ask whether you can go back** and wait for the answer. Do not go back without their OK, even if the request seems clear.
+4. With the OK: `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" restore <n> --yes`. Claude Code shows again what changes and asks for confirmation in the terminal; that is expected.
+5. Say in one or two sentences what went back, and that the previous state was saved (to undo the going back: `restore 1 --yes`). Remind them that .env, node_modules and the database do not change when going back.
 
-Se não houver git na pasta, explique que o ponto de volta precisa de git e ofereça rodar `git init` (com o OK do usuário).
+If there is no git in the folder, explain that the restore point needs git and offer to run `git init` (with the user's OK).

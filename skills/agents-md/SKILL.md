@@ -1,14 +1,14 @@
 ---
-description: Escreve as regras e decisões do time num bloco do AGENTS.md (ou CLAUDE.md), para Codex, Cursor e outros agentes que não rodam o Faundr. Desligado por padrão.
+description: Writes the team's rules and decisions in a block of AGENTS.md (or CLAUDE.md), for Codex, Cursor and other agents that do not run Faundr. Off by default.
 argument-hint: '[--file AGENTS.md | --file CLAUDE.md] [--off]'
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *)
 ---
 
-Pedido do usuário: $ARGUMENTS
+User request: $ARGUMENTS
 
-Rode com a ferramenta Bash: `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" agents-md $ARGUMENTS`
+Run with the Bash tool: `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" agents-md $ARGUMENTS`
 
-O padrão é o AGENTS.md (lido por Codex, Cursor e outros). O Claude Code já recebe a memória pelos hooks do Faundr: escrever no CLAUDE.md repete as regras no contexto, então só use `--file CLAUDE.md` se o usuário pedir.
+The default is AGENTS.md (read by Codex, Cursor and others). Claude Code already gets the memory through Faundr's hooks: writing to CLAUDE.md repeats the rules in the context, so only use `--file CLAUDE.md` if the user asks.
 
-Conte em uma ou duas frases o que aconteceu: qual arquivo, quantas regras e decisões, que o bloco se atualiza sozinho no começo de cada sessão e que as regras se editam no painel (o bloco é regravado). Lembre que o arquivo vai para o git se não estiver no .gitignore. Para desligar: `/faundr:agents-md --off`.
+Say in one or two sentences what happened: which file, how many rules and decisions, that the block updates itself at the start of each session and that the rules are edited in the dashboard (the block is rewritten). Remind them that the file goes into git if it is not in .gitignore. To turn it off: `/faundr:agents-md --off`.

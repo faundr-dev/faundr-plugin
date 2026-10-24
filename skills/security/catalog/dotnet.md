@@ -1,48 +1,48 @@
-# C# e .NET: ASP.NET Core, Minimal APIs e Blazor
-Quando ler: existe `*.csproj` ou `*.sln`; arquivos `.cs` com `[ApiController]`, `app.MapGet/MapPost`, `Controller`, ou páginas `.cshtml`/`.razor`.
+# C# and .NET: ASP.NET Core, Minimal APIs and Blazor
+When to read: there is a `*.csproj` or `*.sln`; `.cs` files with `[ApiController]`, `app.MapGet/MapPost`, `Controller`, or `.cshtml`/`.razor` pages.
 
-Primeiro passo: anote a versão do .NET (`TargetFramework` no `.csproj`) e leia o `Program.cs`: autenticação (`AddAuthentication`, `AddJwtBearer`), autorização (`AddAuthorization`, `FallbackPolicy`), CORS e a ordem dos `app.Use...`.
+First step: note the .NET version (`TargetFramework` in the `.csproj`) and read `Program.cs`: authentication (`AddAuthentication`, `AddJwtBearer`), authorization (`AddAuthorization`, `FallbackPolicy`), CORS and the order of the `app.Use...` calls.
 
-## cs-rota-sem-auth — Rota que muda dados sem exigir login
-- Gravidade típica: alta; crítica se apaga, paga ou muda papéis.
-- Onde procurar: `[HttpPost]`, `[HttpPut]`, `[HttpDelete]` em controladores sem `[Authorize]`; `app.MapPost(...)` sem `.RequireAuthorization()`; `[AllowAnonymous]` em ação que muda dados.
-- Como confirmar lendo o código: há `FallbackPolicy` exigindo usuário autenticado no `Program.cs`? Se não, cada controlador ou rota precisa do `[Authorize]`.
-- Descarta se: a rota é pública por desenho (login, cadastro, webhook com assinatura conferida).
-- Não descarta: o frontend só mostra o botão para quem está logado.
-- Como corrigir: `builder.Services.AddAuthorization(o => o.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build())` e `[AllowAnonymous]` só no que é público.
+## cs-rota-sem-auth — Route that changes data without requiring login
+- Typical severity: high; critical if it deletes, pays or changes roles.
+- Where to look: `[HttpPost]`, `[HttpPut]`, `[HttpDelete]` in controllers without `[Authorize]`; `app.MapPost(...)` without `.RequireAuthorization()`; `[AllowAnonymous]` on an action that changes data.
+- How to confirm by reading the code: is there a `FallbackPolicy` requiring an authenticated user in `Program.cs`? If not, each controller or route needs `[Authorize]`.
+- Ruled out if: the route is public by design (login, sign-up, webhook with a checked signature).
+- Not ruled out by: the frontend only shows the button to logged-in users.
+- How to fix: `builder.Services.AddAuthorization(o => o.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build())` and `[AllowAnonymous]` only on what is public.
 - CWE: CWE-306
 
-## cs-idor — Busca pelo ID recebido sem conferir o dono
-- Gravidade típica: alta.
-- Onde procurar: `db.Pedidos.FindAsync(id)`, `FirstOrDefaultAsync(p => p.Id == id)` com `id` vindo da rota.
-- Como confirmar lendo o código: a consulta também filtra pelo usuário (`p.UserId == User.FindFirstValue(ClaimTypes.NameIdentifier)`) ou há `IAuthorizationService.AuthorizeAsync(User, recurso, política)`?
-- Descarta se: a consulta parte do usuário logado ou há checagem de recurso logo depois.
-- Como corrigir: `FirstOrDefaultAsync(p => p.Id == id && p.UserId == userId)`.
+## cs-idor — Lookup by the received ID without checking the owner
+- Typical severity: high.
+- Where to look: `db.Orders.FindAsync(id)`, `FirstOrDefaultAsync(p => p.Id == id)` with `id` coming from the route.
+- How to confirm by reading the code: does the query also filter by the user (`p.UserId == User.FindFirstValue(ClaimTypes.NameIdentifier)`) or is there an `IAuthorizationService.AuthorizeAsync(User, resource, policy)`?
+- Ruled out if: the query starts from the logged-in user or there is a resource check right after.
+- How to fix: `FirstOrDefaultAsync(p => p.Id == id && p.UserId == userId)`.
 - CWE: CWE-639
 
-## cs-overposting — Entidade preenchida direto do corpo (overposting)
-- Gravidade típica: alta.
-- Onde procurar: ação que recebe a entidade do EF (`[FromBody] Usuario u`) e faz `db.Update(u)`/`SaveChanges`; `TryUpdateModelAsync` sem lista de campos.
-- Como confirmar lendo o código: a entidade tem `Role`, `IsAdmin`, `Saldo`, `OwnerId`? O modelo de entrada é a entidade ou um DTO?
-- Como corrigir: DTO (record) só com os campos editáveis e cópia campo a campo; o dono vem do `User`, nunca do corpo.
+## cs-overposting — Entity filled directly from the body (overposting)
+- Typical severity: high.
+- Where to look: an action that receives the EF entity (`[FromBody] User u`) and does `db.Update(u)`/`SaveChanges`; `TryUpdateModelAsync` without a field list.
+- How to confirm by reading the code: does the entity have `Role`, `IsAdmin`, `Balance`, `OwnerId`? Is the input model the entity or a DTO?
+- How to fix: a DTO (record) with only the editable fields and a field-by-field copy; the owner comes from `User`, never from the body.
 - CWE: CWE-915
 
-## cs-sql-cru — SQL montado com texto de fora
-- Gravidade típica: alta.
-- Onde procurar: `FromSqlRaw`, `ExecuteSqlRaw`, `SqlCommand`, `CommandText`, Dapper `Query`/`Execute`. A checagem automática pega `$"...{x}"` e `+` na mesma linha.
-- Descarta se: `FromSqlInterpolated`/`FromSql` (o `{x}` vira parâmetro), `@parametro` com `Parameters.Add`, Dapper com objeto anônimo.
-- Como corrigir: LINQ ou parâmetros sempre; ordenação dinâmica só de uma lista fixa.
+## cs-sql-cru — SQL built with outside text
+- Typical severity: high.
+- Where to look: `FromSqlRaw`, `ExecuteSqlRaw`, `SqlCommand`, `CommandText`, Dapper `Query`/`Execute`. The automatic check catches `$"...{x}"` and `+` on the same line.
+- Ruled out if: `FromSqlInterpolated`/`FromSql` (the `{x}` becomes a parameter), `@parameter` with `Parameters.Add`, Dapper with an anonymous object.
+- How to fix: LINQ or always parameters; dynamic ordering only from a fixed list.
 - CWE: CWE-89
 
-## cs-antiforgery — Formulário com cookie sem token antifalsificação
-- Gravidade típica: média.
-- Onde procurar: MVC/Razor Pages com login por cookie: ações POST com `[IgnoreAntiforgeryToken]`, `options.Filters.Add(new IgnoreAntiforgeryTokenAttribute())`, ou Minimal API com `.DisableAntiforgery()` recebendo formulário.
-- Descarta se: a API usa só token no cabeçalho (JWT), sem cookie de sessão.
-- Como corrigir: `[ValidateAntiForgeryToken]` (ou `AutoValidateAntiforgeryTokenAttribute` global) e o `@Html.AntiForgeryToken()` no formulário.
+## cs-antiforgery — Cookie-based form without an anti-forgery token
+- Typical severity: medium.
+- Where to look: MVC/Razor Pages with cookie login: POST actions with `[IgnoreAntiforgeryToken]`, `options.Filters.Add(new IgnoreAntiforgeryTokenAttribute())`, or a Minimal API with `.DisableAntiforgery()` receiving a form.
+- Ruled out if: the API uses only a header token (JWT), with no session cookie.
+- How to fix: `[ValidateAntiForgeryToken]` (or a global `AutoValidateAntiforgeryTokenAttribute`) and `@Html.AntiForgeryToken()` in the form.
 - CWE: CWE-352
 
-## cs-config-e-erros — Configuração que expõe dados
-- Gravidade típica: média a alta.
-- Onde procurar: `app.UseDeveloperExceptionPage()` fora do `if (app.Environment.IsDevelopment())`, segredos no `appsettings.json` versionado, `UseHttpsRedirection`/`UseHsts` ausentes, logs com `{@request}` inteiro.
-- Como corrigir: página de erro de desenvolvimento só em Development; segredos em User Secrets ou variáveis de ambiente; HSTS em produção.
+## cs-config-e-erros — Configuration that exposes data
+- Typical severity: medium to high.
+- Where to look: `app.UseDeveloperExceptionPage()` outside `if (app.Environment.IsDevelopment())`, secrets in a committed `appsettings.json`, missing `UseHttpsRedirection`/`UseHsts`, logs with the whole `{@request}`.
+- How to fix: developer error page only in Development; secrets in User Secrets or environment variables; HSTS in production.
 - CWE: CWE-209, CWE-798

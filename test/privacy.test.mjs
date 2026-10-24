@@ -3,7 +3,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
+import { setLang } from '../bin/i18n.mjs'
 import { privacyScan } from '../bin/privacy.mjs'
+
+setLang('pt')
 
 function project(files) {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-lgpd-'))
@@ -32,6 +35,11 @@ test('dados pessoais: telas, banco e login; "name" só em tabela de pessoas', ()
   assert.equal(check(r, 'lgpd-sensiveis').status, 'aviso')
   assert.equal(check(r, 'lgpd-exclusao').status, 'falta')
   assert.equal(check(r, 'lgpd-privacidade').status, 'falta')
+  setLang('en')
+  const en = Object.fromEntries(privacyScan(d, files).data.map((x) => [x.category, x]))
+  assert.deepEqual(en.Name.where, ['database pacientes.name'])
+  assert.equal(en.Health.sensitive, true)
+  setLang('pt')
 })
 
 test('rastreador com cookies sem consentimento = falta; com banner = ok; sem rastreador = não se aplica', () => {
@@ -40,6 +48,13 @@ test('rastreador com cookies sem consentimento = falta; com banner = ok; sem ras
   assert.equal(check(r, 'lgpd-cookies').status, 'falta')
   assert.deepEqual(r.thirdParties.map((t) => t.name).sort(), ['Google Analytics / Tag Manager', 'OpenAI (IA)'])
   assert.equal(check(r, 'lgpd-terceiros').status, 'aviso', 'empresa fora do Brasil sem política')
+  assert.ok(r.thirdParties.every((t) => !('abroad' in t)), 'o "fora do Brasil" é só interno')
+  setLang('en')
+  const en = privacyScan(d, files)
+  assert.deepEqual(en.thirdParties.map((t) => t.name).sort(), ['Google Analytics / Tag Manager', 'OpenAI (AI)'])
+  assert.equal(check(en, 'lgpd-terceiros').status, 'aviso', 'o aviso não depende da língua')
+  assert.match(check(en, 'lgpd-privacidade').detail, /^There is no privacy policy\. Privacy laws require/)
+  setLang('pt')
   ;[d, files] = project({ 'index.html': '<script src="https://www.googletagmanager.com/gtag/js"></script>', 'package.json': '{"dependencies":{"vanilla-cookieconsent":"3"}}' })
   assert.equal(check(privacyScan(d, files), 'lgpd-cookies').status, 'ok')
   ;[d, files] = project({ 'package.json': '{"dependencies":{"@vercel/analytics":"1"}}' })

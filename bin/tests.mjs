@@ -8,6 +8,7 @@ import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { COVERAGE_DIR, coverageArgs } from './coverage.mjs'
+import { t as tr } from './i18n.mjs'
 import { subDirs } from './parts.mjs'
 import { relPath } from './paths.mjs'
 import { findSecrets, mask, projectFiles } from './security.mjs'
@@ -225,16 +226,16 @@ export function productionDbSignals(root, files = projectFiles(root).files, { ex
     const text = read(root, rel) ?? ''
     if (rel.endsWith('.py')) {
       const remote = remoteVars([...new Set([...text.matchAll(PY_DB_ENV)].map((m) => m[1]))])
-      if (remote.length) reasons.push(`${rel} usa ${remote.join(', ')}, que no .env aponta para um servidor de verdade`)
-      else if (PY_DB_CLIENT.test(text) && !/\bmock\b|MagicMock|monkeypatch|\bmocker\b/.test(text)) reasons.push(`${rel} importa o cliente do banco (${text.match(PY_DB_CLIENT)[1]}) sem simulação`)
+      if (remote.length) reasons.push(tr(`${rel} uses ${remote.join(', ')}, which points to a real server in .env`, `${rel} usa ${remote.join(', ')}, que no .env aponta para um servidor de verdade`))
+      else if (PY_DB_CLIENT.test(text) && !/\bmock\b|MagicMock|monkeypatch|\bmocker\b/.test(text)) reasons.push(tr(`${rel} imports the database client (${text.match(PY_DB_CLIENT)[1]}) without a mock`, `${rel} importa o cliente do banco (${text.match(PY_DB_CLIENT)[1]}) sem simulação`))
       if (reasons.length >= 5) break
       continue
     }
     const remote = remoteVars([...new Set([...text.matchAll(DB_ENV)].filter((m) => !insideString(text, m.index)).map((m) => m[1]))])
-    if (remote.length) reasons.push(`${rel} usa ${remote.join(', ')}, que no .env aponta para um servidor de verdade`)
-    else if (DB_CLIENT.test(text) && !/vi\.mock|jest\.mock|createMock|msw/.test(text)) reasons.push(`${rel} importa o cliente do banco (${text.match(DB_CLIENT)[1]}) sem simulação`)
+    if (remote.length) reasons.push(tr(`${rel} uses ${remote.join(', ')}, which points to a real server in .env`, `${rel} usa ${remote.join(', ')}, que no .env aponta para um servidor de verdade`))
+    else if (DB_CLIENT.test(text) && !/vi\.mock|jest\.mock|createMock|msw/.test(text)) reasons.push(tr(`${rel} imports the database client (${text.match(DB_CLIENT)[1]}) without a mock`, `${rel} importa o cliente do banco (${text.match(DB_CLIENT)[1]}) sem simulação`))
     // Endereço escrito no teste só conta se o teste também cria um cliente (senão é texto de exemplo).
-    else if (/https:\/\/[a-z0-9]{10,}\.supabase\.co/.test(text) && /\bcreateClient\s*\(/.test(text)) reasons.push(`${rel} tem o endereço de um projeto Supabase escrito no teste`)
+    else if (/https:\/\/[a-z0-9]{10,}\.supabase\.co/.test(text) && /\bcreateClient\s*\(/.test(text)) reasons.push(tr(`${rel} has a Supabase project address written in the test`, `${rel} tem o endereço de um projeto Supabase escrito no teste`))
     if (reasons.length >= 5) break
   }
   return reasons
@@ -285,8 +286,8 @@ export function insideDir(dir, list) {
  */
 export function runTests(root, runner, { dir = '', python = null, changed = false, files = null, exclude = [], timeout = RUN_TIMEOUT, nodeArgs = null, coverage = false } = {}) {
   const bin = RUNNERS[runner] ? binFor(root, dir, runner) : null
-  if (!bin && RUNNERS[runner]) return { runner, error: `${runner} não está instalado (rode npm install ${dir ? `em ${dir}/` : 'no projeto'})` }
-  if (runner === 'pytest' && !python) return { runner, error: 'não achei o Python do projeto (passe o caminho com --python, ex.: --python .venv/Scripts/python.exe)' }
+  if (!bin && RUNNERS[runner]) return { runner, error: tr(`${runner} is not installed (run npm install ${dir ? `in ${dir}/` : 'in the project'})`, `${runner} não está instalado (rode npm install ${dir ? `em ${dir}/` : 'no projeto'})`) }
+  if (runner === 'pytest' && !python) return { runner, error: tr("couldn't find the project's Python (pass the path with --python, e.g. --python .venv/Scripts/python.exe)", 'não achei o Python do projeto (passe o caminho com --python, ex.: --python .venv/Scripts/python.exe)') }
   fs.mkdirSync(path.join(root, OUT_DIR), { recursive: true })
   const tag = dir ? `-${dir.replace(/\//g, '_')}` : ''
   const out = path.join(root, OUT_DIR, `${runner}${tag}.${runner === 'node' || runner === 'pytest' ? 'xml' : 'json'}`).split(path.sep).join('/')
@@ -336,8 +337,8 @@ function withCoverageArgs(runner, args, covArgs, local) {
 
 /** O executor nem rodou até o fim: passou do tempo ou o programa não abriu. */
 function spawnError(runner, r, timeout) {
-  if (r.error?.code === 'ETIMEDOUT') return `passou do tempo limite (${Math.round(timeout / 60000)} min)`
-  if (r.error?.code === 'ENOENT') return `não consegui abrir o ${runner === 'pytest' ? 'Python' : 'node'} (${path.basename(String(r.error.path ?? ''))})`
+  if (r.error?.code === 'ETIMEDOUT') return tr(`went over the time limit (${Math.round(timeout / 60000)} min)`, `passou do tempo limite (${Math.round(timeout / 60000)} min)`)
+  if (r.error?.code === 'ENOENT') return tr(`couldn't start ${runner === 'pytest' ? 'Python' : 'node'} (${path.basename(String(r.error.path ?? ''))})`, `não consegui abrir o ${runner === 'pytest' ? 'Python' : 'node'} (${path.basename(String(r.error.path ?? ''))})`)
   return null
 }
 
@@ -345,14 +346,14 @@ function spawnError(runner, r, timeout) {
 function xmlReport(root, runner, dir, out, r, durationMs) {
   const xml = read(out, '')
   // pytest sem o pacote instalado ("No module named pytest") ou que nem coletou: a última linha diz o porquê.
-  if (!xml) return { runner, durationMs, error: clean(lastLine(r.stderr) || lastLine(r.stdout)) || `o ${runner === 'node' ? 'node --test' : 'pytest'} terminou sem relatório (código ${r.status})` }
+  if (!xml) return { runner, durationMs, error: clean(lastLine(r.stderr) || lastLine(r.stdout)) || tr(`${runner === 'node' ? 'node --test' : 'pytest'} finished without a report (code ${r.status})`, `o ${runner === 'node' ? 'node --test' : 'pytest'} terminou sem relatório (código ${r.status})`) }
   return { runner, durationMs, cases: runner === 'pytest' ? fromPytest(xml, root, path.join(root, dir)) : fromJUnit(xml, root), error: null }
 }
 
 /** Relatório JSON (Vitest, Jest e Playwright). */
 function jsonReport(root, runner, out, r, durationMs) {
   const json = readJson(out, '')
-  if (!json) return { runner, durationMs, error: firstLine(r.stderr || r.stdout) || `o ${runner} terminou sem relatório (código ${r.status})` }
+  if (!json) return { runner, durationMs, error: firstLine(r.stderr || r.stdout) || tr(`${runner} finished without a report (code ${r.status})`, `o ${runner} terminou sem relatório (código ${r.status})`) }
   const cases = runner === 'playwright' ? fromPlaywright(json, root) : fromJestLike(json, root)
   const fileErrors = runner === 'playwright' ? (json.errors ?? []).map((e) => clean(e.message)) : (json.testResults ?? []).filter((t) => t.message).map((t) => `${rel(root, t.name)}: ${clean(t.message)}`)
   return { runner, durationMs, cases, error: fileErrors.length && !cases.length ? fileErrors[0].slice(0, 1000) : null }
@@ -403,7 +404,7 @@ const PW_STATUS = { expected: 'passed', unexpected: 'failed', flaky: 'flaky', sk
 
 // Pulado com motivo: o motivo; falhou: o primeiro erro da tentativa que falhou.
 function playwrightMessage(t, skip, failed) {
-  if (t.status === 'skipped' && skip?.description) return `Pulado: ${skip.description}`
+  if (t.status === 'skipped' && skip?.description) return `${tr('Skipped', 'Pulado')}: ${skip.description}`
   return failed ? clean((failed.errors?.[0] ?? failed.error)?.message) : null
 }
 
@@ -474,7 +475,7 @@ export function fromJUnit(xml, root) {
 // O resumo (ex.: "assert 21 == 22") primeiro; depois o trecho do código em que quebrou. Pulado: o motivo.
 function pytestMessage(failure, skipNote) {
   if (failure) return clean([attr(failure[2] ?? failure[4], 'message'), unescapeXml(failure[3] ?? '').replace(/\r/g, '')].filter(Boolean).join('\n'))
-  return skipNote ? `Pulado: ${skipNote}` : null
+  return skipNote ? `${tr('Skipped', 'Pulado')}: ${skipNote}` : null
 }
 
 /**

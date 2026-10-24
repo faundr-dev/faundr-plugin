@@ -1,5 +1,5 @@
 ---
-description: Roda agora a checagem de segurança do Faundr (sem IA, no computador do usuário) — chaves e senhas no código, pacotes com falha conhecida e regras de acesso do banco (Supabase) — e resume o resultado.
+description: Runs Faundr's security check now (no AI, on the user's computer) — keys and passwords in the code, packages with known flaws and database access rules (Supabase) — and summarizes the result.
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *)
 ---
@@ -8,9 +8,9 @@ allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *)
 
 !`node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" security-show`
 
-Resuma para o usuário em português simples, em poucas linhas:
-1. O que foi checado e se está tudo limpo.
-2. Os problemas graves (críticos e altos), cada um com o número S-n e uma frase do que pode acontecer.
-3. Quantos foram deixados de lado como ruído (arquivo de teste, pacote só de desenvolvimento…), sem listar um por um.
+Summarize for the user in plain language, in the user's language, in a few lines:
+1. What was checked and whether everything is clean.
+2. The serious problems (critical and high), each with its S-n number and one sentence on what can happen.
+3. How many were set aside as noise (test file, dev-only package…), without listing them one by one.
 
-Termine sugerindo o próximo passo: `/faundr:security-fix S-<n>` para o mais grave (ou `/faundr:security-fix` para corrigir todos os graves). Não comece a corrigir sem o usuário pedir.
+End by suggesting the next step: `/faundr:security-fix S-<n>` for the most serious one (or `/faundr:security-fix` to fix all the serious ones). Don't start fixing without the user asking.

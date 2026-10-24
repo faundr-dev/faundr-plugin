@@ -1,6 +1,7 @@
 // Desempenho: o que deixa o app lento quando os dados crescem. Com 10 linhas no banco tudo é rápido; com 100 mil,
 // a lista sem limite trava a tela, a consulta dentro de um laço vira 100 idas ao banco e a chave estrangeira
 // sem índice faz o banco ler a tabela inteira a cada busca.
+import { t } from './i18n.mjs'
 
 // Consulta do Supabase que traz uma lista inteira (sem .limit/.range/.single e sem filtro por id).
 const SUPA_FROM = /\.from\(\s*['"`]([\w.]+)['"`]\s*\)/g
@@ -26,7 +27,7 @@ export function unboundedQueries(rel, text) {
   }
   for (const m of text.matchAll(PRISMA_MANY)) {
     if (/\btake\s*:/.test(m[1] ?? '')) continue
-    out.push({ line: lineAt(text, m.index), table: text.slice(Math.max(0, m.index - 40), m.index).match(/(\w+)\s*$/)?.[1] ?? 'tabela' })
+    out.push({ line: lineAt(text, m.index), table: text.slice(Math.max(0, m.index - 40), m.index).match(/(\w+)\s*$/)?.[1] ?? t('table', 'tabela') })
   }
   return out
 }

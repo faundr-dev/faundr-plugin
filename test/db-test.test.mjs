@@ -3,7 +3,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
-import { anonReads, dbFindings, migrationTables, parseProbe, PROBE_SQL, supabaseTarget } from '../bin/db-test.mjs'
+import { anonReads, dbFindings, dbSummary, migrationTables, parseProbe, PROBE_SQL, supabaseTarget } from '../bin/db-test.mjs'
+import { setLang } from '../bin/i18n.mjs'
+
+setLang('pt')
 
 const dir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-dbtest-'))
 const KEY = 'eyJhbGciOiJIUzI1NiJ9.eyJyb2xlIjoiYW5vbiJ9.assinatura-de-mentira'
@@ -79,6 +82,11 @@ test('achados: porta aberta vira problema; tabela protegida não', () => {
   assert.match(le.title, /42 linhas/)
   assert.match(findings.find((f) => f.fingerprint === 'resumo|anon-le').fix, /security_invoker/)
   assert.ok(findings.every((f) => f.source === 'database'))
+  setLang('en')
+  const en = dbFindings({ reads: [{ table: 'clientes', status: 200, visible: 42, columns: ['id'], sensitive: [] }] })
+  assert.match(en[0].title, /^Any visitor can read the table clientes \(42 rows\)/)
+  assert.match(dbSummary({ target: null, reads: [], tables: null, findings: [] }), /No open door found/)
+  setLang('pt')
 })
 
 test('lê o resultado do SQL pela API de gestão ou pelo texto do MCP', () => {

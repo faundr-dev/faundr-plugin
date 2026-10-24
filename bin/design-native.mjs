@@ -4,6 +4,8 @@
 // largura fixa maior que o celular, botão só com ícone sem accessibilityLabel, imagem sem descrição, onPress
 // vazio e animação longa.
 
+import { t } from './i18n.mjs'
+
 export const NATIVE_RULES = {
   'design/cor-fixa-native': { kind: 'off_spec', severity: 'medium' },
   'design/fonte-fixa-native': { kind: 'off_spec', severity: 'low' },
@@ -15,28 +17,46 @@ export const NATIVE_RULES = {
 
 export const NATIVE_TEXT = {
   'design/cor-fixa-native': (c, n) => [
-    `${n} cor${n > 1 ? 'es' : ''} escrita${n > 1 ? 's' : ''} direto na tela (${c.token})`,
-    'A cor está fixa no estilo da tela em vez de vir do tema. Quando o design mudar (ou no tema escuro), essa tela fica diferente das outras. Defina as cores uma vez num arquivo de tema (theme.ts, colors.ts) e use daqui (colors.primaria).',
+    t(`${n} color${n > 1 ? 's' : ''} written straight into the screen (${c.token})`, `${n} cor${n > 1 ? 'es' : ''} escrita${n > 1 ? 's' : ''} direto na tela (${c.token})`),
+    t(
+      'The color is fixed in the screen style instead of coming from the theme. When the design changes (or in the dark theme), this screen ends up different from the others. Define the colors once in a theme file (theme.ts, colors.ts) and use them from there (colors.primary).',
+      'A cor está fixa no estilo da tela em vez de vir do tema. Quando o design mudar (ou no tema escuro), essa tela fica diferente das outras. Defina as cores uma vez num arquivo de tema (theme.ts, colors.ts) e use daqui (colors.primaria).',
+    ),
   ],
   'design/fonte-fixa-native': (c, n) => [
-    `${n} tamanho${n > 1 ? 's' : ''} de fonte fixo${n > 1 ? 's' : ''} na tela (fontSize: ${c.size})`,
-    'O tamanho do texto está escrito na tela em vez de vir do tema. Defina a escala de tamanhos num arquivo de tema (ex.: fontSize.corpo = 16) e use a mesma em todas as telas.',
+    t(`${n} fixed font size${n > 1 ? 's' : ''} on the screen (fontSize: ${c.size})`, `${n} tamanho${n > 1 ? 's' : ''} de fonte fixo${n > 1 ? 's' : ''} na tela (fontSize: ${c.size})`),
+    t(
+      'The text size is written in the screen instead of coming from the theme. Define the size scale in a theme file (e.g. fontSize.body = 16) and use the same one on every screen.',
+      'O tamanho do texto está escrito na tela em vez de vir do tema. Defina a escala de tamanhos num arquivo de tema (ex.: fontSize.corpo = 16) e use a mesma em todas as telas.',
+    ),
   ],
   'acessibilidade/botao-sem-nome-native': (c, n) => [
-    `Botão só com ícone, sem nome para leitor de tela${n > 1 ? ` (${n} botões)` : ''}`,
-    'O Pressable/Touchable tem só um ícone: o TalkBack e o VoiceOver anunciam só "botão". Adicione accessibilityLabel="…" (e accessibilityRole="button") dizendo o que ele faz.',
+    t(`Icon-only button with no name for screen readers${n > 1 ? ` (${n} buttons)` : ''}`, `Botão só com ícone, sem nome para leitor de tela${n > 1 ? ` (${n} botões)` : ''}`),
+    t(
+      'The Pressable/Touchable has only an icon: TalkBack and VoiceOver just say "button". Add accessibilityLabel="…" (and accessibilityRole="button") saying what it does.',
+      'O Pressable/Touchable tem só um ícone: o TalkBack e o VoiceOver anunciam só "botão". Adicione accessibilityLabel="…" (e accessibilityRole="button") dizendo o que ele faz.',
+    ),
   ],
   'acessibilidade/imagem-sem-descricao-native': (c, n) => [
-    `Imagem sem descrição para leitor de tela${n > 1 ? ` (${n} imagens)` : ''}`,
-    'Image sem accessibilityLabel (ou alt): quem usa leitor de tela não sabe o que a imagem mostra. Adicione accessibilityLabel="…", ou accessible={false} se for só decoração.',
+    t(`Image with no description for screen readers${n > 1 ? ` (${n} images)` : ''}`, `Imagem sem descrição para leitor de tela${n > 1 ? ` (${n} imagens)` : ''}`),
+    t(
+      'Image without accessibilityLabel (or alt): screen reader users do not know what the image shows. Add accessibilityLabel="…", or accessible={false} if it is just decoration.',
+      'Image sem accessibilityLabel (ou alt): quem usa leitor de tela não sabe o que a imagem mostra. Adicione accessibilityLabel="…", ou accessible={false} se for só decoração.',
+    ),
   ],
   'responsivo/largura-fixa-native': (c, n) => [
-    `Largura fixa maior que a tela do celular (width: ${c.width})${n > 1 ? ` em ${n} lugares` : ''}`,
-    'Uma largura fixa acima de ~360 estoura a tela em celulares pequenos. Use flex: 1, width: "100%", maxWidth ou a largura do useWindowDimensions().',
+    t(`Fixed width bigger than a phone screen (width: ${c.width})${n > 1 ? ` in ${n} places` : ''}`, `Largura fixa maior que a tela do celular (width: ${c.width})${n > 1 ? ` em ${n} lugares` : ''}`),
+    t(
+      'A fixed width above ~360 overflows the screen on small phones. Use flex: 1, width: "100%", maxWidth or the width from useWindowDimensions().',
+      'Uma largura fixa acima de ~360 estoura a tela em celulares pequenos. Use flex: 1, width: "100%", maxWidth ou a largura do useWindowDimensions().',
+    ),
   ],
   'movimento/duracao-longa-native': (c, n) => [
-    `Animação longa (${c.ms} ms)${n > 1 ? ` em ${n} lugares` : ''}`,
-    'Animação de interface acima de 300 ms (500 para telas inteiras) deixa o app com cara de lento. Use 150–300 ms para botões, menus e trocas de estado.',
+    t(`Long animation (${c.ms} ms)${n > 1 ? ` in ${n} places` : ''}`, `Animação longa (${c.ms} ms)${n > 1 ? ` em ${n} lugares` : ''}`),
+    t(
+      'Interface animations above 300 ms (500 for full screens) make the app feel slow. Use 150–300 ms for buttons, menus and state changes.',
+      'Animação de interface acima de 300 ms (500 para telas inteiras) deixa o app com cara de lento. Use 150–300 ms para botões, menus e trocas de estado.',
+    ),
   ],
 }
 

@@ -1,53 +1,53 @@
-# Python na web: Django, Flask e FastAPI
-Quando ler: `django`, `flask` ou `fastapi` em `requirements*.txt`, `pyproject.toml` ou `Pipfile`; arquivos `settings.py`, `urls.py`, `views.py`, `app.py`, `main.py`, `routers/`.
+# Python on the web: Django, Flask and FastAPI
+When to read: `django`, `flask` or `fastapi` in `requirements*.txt`, `pyproject.toml` or `Pipfile`; `settings.py`, `urls.py`, `views.py`, `app.py`, `main.py` files, `routers/`.
 
-Primeiro passo: anote o framework e a versão (lockfile). Ache onde as rotas são declaradas: `urls.py` (Django), `@app.route`/`@bp.route` (Flask), `@app.get/post`/`APIRouter` (FastAPI).
+First step: note the framework and the version (lockfile). Find where routes are declared: `urls.py` (Django), `@app.route`/`@bp.route` (Flask), `@app.get/post`/`APIRouter` (FastAPI).
 
-## py-rota-sem-auth — Rota que muda dados sem exigir login
-- Gravidade típica: alta; crítica se apaga, paga ou muda papéis.
-- Onde procurar: Django: views sem `@login_required`, `LoginRequiredMixin` ou `permission_classes` (DRF); Flask: rotas sem `@login_required` (Flask-Login) ou checagem de token; FastAPI: endpoints sem `Depends(get_current_user)` (ou equivalente).
-- Como confirmar lendo o código: liste as rotas que aceitam POST/PUT/PATCH/DELETE e veja, uma a uma, se a autenticação está na própria rota ou num router com `dependencies=[Depends(...)]`.
-- Descarta se: a rota é pública por desenho (login, cadastro, webhook com assinatura conferida).
-- Não descarta: o frontend só mostra o botão para quem está logado.
-- Como corrigir: Django `@login_required` / DRF `permission_classes = [IsAuthenticated]`; FastAPI `user = Depends(get_current_user)` no endpoint ou no router.
+## py-rota-sem-auth — Route that changes data without requiring login
+- Typical severity: high; critical if it deletes, pays or changes roles.
+- Where to look: Django: views without `@login_required`, `LoginRequiredMixin` or `permission_classes` (DRF); Flask: routes without `@login_required` (Flask-Login) or a token check; FastAPI: endpoints without `Depends(get_current_user)` (or equivalent).
+- How to confirm by reading the code: list the routes that accept POST/PUT/PATCH/DELETE and check, one by one, whether authentication is on the route itself or on a router with `dependencies=[Depends(...)]`.
+- Ruled out if: the route is public by design (login, sign-up, webhook with a checked signature).
+- Not ruled out by: the frontend only shows the button to logged-in users.
+- How to fix: Django `@login_required` / DRF `permission_classes = [IsAuthenticated]`; FastAPI `user = Depends(get_current_user)` on the endpoint or the router.
 - CWE: CWE-306
 
-## py-idor — Busca pelo ID recebido sem conferir o dono
-- Gravidade típica: alta.
-- Onde procurar: `Model.objects.get(id=...)`, `get_object_or_404(Model, pk=pk)`, `session.get(Model, id)`, `db.query(Model).filter(Model.id == id)`.
-- Como confirmar lendo o código: a consulta também filtra pelo usuário (`owner=request.user`, `Model.user_id == user.id`) ou há checagem depois?
-- Descarta se: a consulta parte do usuário (`request.user.pedidos.get(pk=pk)`) ou há permissão de objeto (DRF `has_object_permission`).
-- Como corrigir: `get_object_or_404(Pedido, pk=pk, dono=request.user)`.
+## py-idor — Lookup by the received ID without checking the owner
+- Typical severity: high.
+- Where to look: `Model.objects.get(id=...)`, `get_object_or_404(Model, pk=pk)`, `session.get(Model, id)`, `db.query(Model).filter(Model.id == id)`.
+- How to confirm by reading the code: does the query also filter by the user (`owner=request.user`, `Model.user_id == user.id`) or is there a check afterwards?
+- Ruled out if: the query starts from the user (`request.user.orders.get(pk=pk)`) or there is an object permission (DRF `has_object_permission`).
+- How to fix: `get_object_or_404(Order, pk=pk, owner=request.user)`.
 - CWE: CWE-639
 
-## py-sql-cru — SQL montado com texto do usuário
-- Gravidade típica: alta.
-- Onde procurar: `cursor.execute`, `.raw(`, `.extra(`, `text(` do SQLAlchemy, `engine.execute`. A checagem automática pega f-string, `%` e `.format` na mesma linha; leia também SQL montado em várias linhas.
-- Descarta se: os valores vão como parâmetros (`execute(sql, (a, b))`, `text("... :id").bindparams(id=x)`).
-- Como corrigir: parâmetros sempre; nomes de coluna dinâmicos só de uma lista fixa.
+## py-sql-cru — SQL built with user text
+- Typical severity: high.
+- Where to look: `cursor.execute`, `.raw(`, `.extra(`, SQLAlchemy's `text(`, `engine.execute`. The automatic check catches f-strings, `%` and `.format` on the same line; also read SQL built across several lines.
+- Ruled out if: the values go in as parameters (`execute(sql, (a, b))`, `text("... :id").bindparams(id=x)`).
+- How to fix: always parameters; dynamic column names only from a fixed list.
 - CWE: CWE-89
 
-## py-validacao-de-entrada — Corpo da requisição usado sem validar
-- Gravidade típica: média; alta se o valor vai para consulta, arquivo ou comando.
-- Onde procurar: `request.json`, `request.form`, `request.POST`, `await request.json()` usados direto; FastAPI com parâmetro `dict` em vez de modelo Pydantic.
-- Como corrigir: Pydantic (FastAPI), Forms/Serializers (Django/DRF), marshmallow ou pydantic no Flask; limite de tamanho do corpo.
+## py-validacao-de-entrada — Request body used without validation
+- Typical severity: medium; high if the value goes into a query, file or command.
+- Where to look: `request.json`, `request.form`, `request.POST`, `await request.json()` used directly; FastAPI with a `dict` parameter instead of a Pydantic model.
+- How to fix: Pydantic (FastAPI), Forms/Serializers (Django/DRF), marshmallow or pydantic in Flask; body size limit.
 - CWE: CWE-20
 
-## py-segredo-e-debug — SECRET_KEY no código e DEBUG ligado
-- Gravidade típica: alta.
-- Onde procurar: `SECRET_KEY = "..."` em `settings.py`, `app.secret_key = "..."`, `DEBUG = True`, `app.run(debug=True)` (a checagem automática pega o debug fixo), `ALLOWED_HOSTS = ['*']`.
-- Descarta se: vem de variável de ambiente e produção define os valores certos.
-- Como corrigir: `SECRET_KEY = os.environ["SECRET_KEY"]`, `DEBUG = os.environ.get("DEBUG") == "1"`, `ALLOWED_HOSTS` com o domínio.
+## py-segredo-e-debug — SECRET_KEY in the code and DEBUG on
+- Typical severity: high.
+- Where to look: `SECRET_KEY = "..."` in `settings.py`, `app.secret_key = "..."`, `DEBUG = True`, `app.run(debug=True)` (the automatic check catches hard-coded debug), `ALLOWED_HOSTS = ['*']`.
+- Ruled out if: it comes from an environment variable and production sets the right values.
+- How to fix: `SECRET_KEY = os.environ["SECRET_KEY"]`, `DEBUG = os.environ.get("DEBUG") == "1"`, `ALLOWED_HOSTS` with the domain.
 - CWE: CWE-798, CWE-489
 
-## py-ssrf — Servidor busca uma URL que o usuário manda
-- Gravidade típica: alta (pode ler metadados da nuvem e serviços internos).
-- Onde procurar: `requests.get(url)`, `httpx.get(url)`, `urllib.request.urlopen(url)` com `url` vinda da requisição (pré-visualização de link, importar por URL, webhook configurável).
-- Como corrigir: lista de domínios permitidos, só `https`, e bloqueio de IPs internos (127.0.0.0/8, 10/8, 169.254.169.254…).
+## py-ssrf — Server fetches a URL the user sends
+- Typical severity: high (can read cloud metadata and internal services).
+- Where to look: `requests.get(url)`, `httpx.get(url)`, `urllib.request.urlopen(url)` with `url` coming from the request (link preview, import by URL, configurable webhook).
+- How to fix: allowlist of domains, `https` only, and blocking internal IPs (127.0.0.0/8, 10/8, 169.254.169.254…).
 - CWE: CWE-918
 
-## py-upload-e-caminho — Arquivo salvo ou lido com o nome que o usuário mandou
-- Gravidade típica: alta.
-- Onde procurar: `open(os.path.join(PASTA, nome))`, `send_file(nome)`, `file.save(os.path.join(..., file.filename))`, `FileResponse(caminho)`.
-- Como corrigir: `werkzeug.utils.secure_filename`, nome gerado pelo servidor (uuid), e conferir que o caminho final continua dentro da pasta (`Path(...).resolve().is_relative_to(PASTA)`).
+## py-upload-e-caminho — File saved or read with the name the user sent
+- Typical severity: high.
+- Where to look: `open(os.path.join(FOLDER, name))`, `send_file(name)`, `file.save(os.path.join(..., file.filename))`, `FileResponse(path)`.
+- How to fix: `werkzeug.utils.secure_filename`, a server-generated name (uuid), and check that the final path stays inside the folder (`Path(...).resolve().is_relative_to(FOLDER)`).
 - CWE: CWE-22

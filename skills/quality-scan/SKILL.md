@@ -1,14 +1,14 @@
 ---
-description: Roda agora a checagem de qualidade do código do Faundr (sem IA, no computador do usuário) — erro engolido em silêncio, tipos fracos (any, @ts-ignore), funções complicadas demais, código comentado, pacotes dispensáveis, testes pulados e instruções da IA quebradas — e resume o resultado.
+description: Runs Faundr's code quality check now (no AI, on the user's computer) — silently swallowed errors, weak types (any, @ts-ignore), overly complicated functions, commented-out code, unnecessary packages, skipped tests and broken AI instructions — and summarizes the result.
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *)
 ---
 
 !`node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" quality-scan`
 
-Resuma para o usuário em português simples, em poucas linhas:
-1. O que foi checado (arquivos, linhas) e se está enxuto.
-2. Os achados altos, cada um com o número Q-n (veja com `faundr quality-show`) e uma frase do porquê importa.
-3. Quantos achados há por tipo (falha escondida, tipo fraco, complicado demais, código demais, limpeza, testes, instruções da IA), sem listar um por um.
+Summarize for the user in plain language, in a few lines:
+1. What was checked (files, lines) and whether it is lean.
+2. The high findings, each with its Q-n number (see with `faundr quality-show`) and one sentence on why it matters.
+3. How many findings there are per type (hidden failure, weak type, too complicated, too much code, cleanup, tests, AI instructions), without listing them one by one.
 
-Termine sugerindo o próximo passo: `/faundr:quality-fix Q-<n>` para o mais importante, e `/faundr:quality` para a revisão com IA do que a checagem automática não enxerga. Não comece a corrigir sem o usuário pedir.
+End by suggesting the next step: `/faundr:quality-fix Q-<n>` for the most important one, and `/faundr:quality` for the AI review of what the automatic check cannot see. Do not start fixing unless the user asks.

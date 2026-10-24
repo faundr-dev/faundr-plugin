@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { bgArgs, runPrompt, WARNING } from '../bin/listen.mjs'
+import { bgArgs, runPrompt, warning } from '../bin/listen.mjs'
+import { setLang } from '../bin/i18n.mjs'
 
 test('sessão de fundo numa cópia separada da pasta, sem pular confirmações', () => {
   const args = bgArgs('abcdef1234567', 'Corrigir   o carrinho')
@@ -11,12 +12,16 @@ test('sessão de fundo numa cópia separada da pasta, sem pular confirmações',
 test('o pedido diz como fechar e manda não juntar à main', () => {
   const text = runPrompt('abcdef1234567', 'Corrigir o carrinho')
   assert.match(text, /«Corrigir o carrinho»/)
-  assert.match(text, /faundr fila --feito abcdef12/)
-  assert.match(text, /Não junte o trabalho ao projeto principal/)
+  assert.match(text, /faundr inbox --done abcdef12/)
+  assert.match(text, /Do not merge the work into the main project/)
 })
 
 test('o aviso fala da assinatura e dos limites', () => {
-  assert.match(WARNING, /SUA assinatura/)
-  assert.match(WARNING, /No máximo 2 sessões/)
-  assert.match(WARNING, /Anthropic ainda não confirmou/)
+  setLang('pt')
+  assert.match(warning(), /SUA assinatura/)
+  assert.match(warning(), /No máximo 2 sessões/)
+  assert.match(warning(), /Anthropic ainda não confirmou/)
+  setLang('en')
+  assert.match(warning(), /YOUR Claude subscription/)
+  assert.match(warning(), /At most 2 sessions/)
 })
