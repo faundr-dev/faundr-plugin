@@ -1,0 +1,17 @@
+{
+  "name": "faundr",
+  "version": "0.101.0",
+  "description": "Connects your Codex sessions to the Faundr platform: memory, features, design, security, quality, tests and errors of your project in one dashboard.",
+  "author": {
+    "name": "Faundr"
+  },
+  "homepage": "https://faundr.palasbusinessstrategy.workers.dev",
+  "skills": "./skills/",
+  "hooks": "./hooks/codex.json",
+  "interface": {
+    "displayName": "Faundr",
+    "shortDescription": "Your project's memory, features and checks in one dashboard",
+    "developerName": "Faundr",
+    "category": "Developer Tools"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "faundr",
+  "interface": {
+    "displayName": "Faundr"
+  },
+  "plugins": [
+    {
+      "name": "faundr",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

@@ -21,6 +21,7 @@ import { takeLoopAlerts } from './loop.mjs'
 import { guardInstall } from './package-guard.mjs'
 import { pushWarning, readTeam } from './team.mjs'
 import { t } from './i18n.mjs'
+import { codexDecision } from './agent.mjs'
 
 const CONFIG_DIR = path.join(os.homedir(), '.faundr')
 
@@ -88,7 +89,31 @@ function currentBranch(cwd) {
   }
 }
 
-const reply = (output) => process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', ...output } }))
+// Comando e sessão atuais, para a confirmação do Codex (ver codexDecision).
+let current = { command: null, sessionId: null }
+const CODEX = process.argv[2] === 'codex'
+
+function reply(output) {
+  if (CODEX && output.permissionDecision) {
+    const file = path.join(CONFIG_DIR, `codex-confirm-${current.sessionId}.json`)
+    let pending = null
+    try {
+      pending = JSON.parse(fs.readFileSync(file, 'utf8'))
+    } catch {
+      // Nada barrado antes nesta sessão.
+    }
+    const next = codexDecision(output, current.command, pending)
+    try {
+      if (next.pending) fs.writeFileSync(file, JSON.stringify(next.pending))
+      else fs.rmSync(file, { force: true })
+    } catch (err) {
+      log(`confirmação do Codex: ${err.message}`)
+    }
+    if (!next.output) return log(`codex: confirmado pelo usuário :: ${String(current.command).slice(0, 200)}`)
+    output = next.output
+  }
+  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', ...output } }))
+}
 
 // Comando perigoso: barra ou pergunta, com o motivo.
 function replyVerdict(verdict, { payload, cwd, root, command, sql }) {
@@ -115,6 +140,7 @@ async function main() {
   const sql = payload.tool_name?.startsWith('mcp__')
   const command = sql ? input.query ?? input.sql : input.command
   if (typeof command !== 'string') return
+  current = { command, sessionId: payload.session_id }
 
   const verdict = classifyCommand(command, { cwd, sql })
   if (verdict) return replyVerdict(verdict, { payload, cwd, root, command, sql })

@@ -4,6 +4,8 @@ argument-hint: [what the mod does]
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *) Bash(claude plugin validate *) Bash(claude plugin test *)
 ---
 
+**Claude Code only.** If you are running in Codex, tell the person in one line that this exists only in Claude Code (Codex has no way to change its own screen) and stop.
+
 User request: $ARGUMENTS
 
 A **mod** is a small plugin that changes Claude Code itself: what appears on screen (panel, band above the prompt, status line, quick notice) or what happens (before a tool runs, when a request arrives, a new slash command). It runs inside Claude Code, with no Node and no browser: everything outside it comes through `$`.

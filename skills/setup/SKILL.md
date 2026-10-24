@@ -18,6 +18,7 @@ The setup above already did on its own what is safe (marked "✓ … feito agora
    - **Git** and **.gitignore**: recommend applying.
    - **Replacing the status line**: recommend only if the current one is not something the person set up on purpose; ask.
    - **AGENTS.md**: recommend only if the team uses another agent (Codex, Cursor); otherwise, leave it out.
+   - **Codex rule** (only shows up in Codex): recommend applying; without it, recording tasks and features on the dashboard fails, because Codex runs the agent's commands without network.
    Run `faundr setup --no-ask --apply <approved, comma-separated>` and, for the ones the person declined, `faundr setup --no-ask --skip <declined>` (so it does not ask again). Never apply what was not approved.
 4. **Items with `!`** that need something from the owner:
    - **Skills without a type**: run the `faundr:skills` skill now (it classifies them and links to the dashboard the ones that find problems).
@@ -32,5 +33,7 @@ The setup above already did on its own what is safe (marked "✓ … feito agora
    Say in one line that the estimate improves on its own: Faundr measures what each skill actually spent. Then run the chosen skills, **one at a time and in this order**: `faundr:skills`, `faundr:overview`, `faundr:stack`, `faundr:inventory`, `faundr:design`, `faundr:design-showcase`, `faundr:security`, `faundr:quality --full`. Between one and the next, say in one line what finished. If the person says the plan is running out, stop and say what was left for later.
 6. **Everyday spending.** Show the end-of-response line (how much it cost in the last 30 days) and ask whether they want **economy mode**: quick design audit, updating the Overview and updating the Stack only when asked. Proof, handoff note and security always stay on. With the OK: `faundr setup --no-ask --economy all` (or just some: `--economy stop.design,stop.overview`). To undo: `faundr setup --no-ask --no-economy`. The same switches are in the dashboard, under Workflows → Do Faundr → Fim da resposta.
 7. **Items with `✗`** (failed): show the error line and, if it is obvious (no internet, wrong folder), say what to do; otherwise suggest running the command on its own to see the detail (e.g. `faundr graph`).
+
+**In Codex**, also tell the person, in two lines: Faundr's hooks only run after they approve them once in Codex (type `/hooks`, review Faundr's and trust them; Codex asks again when Faundr is updated). The status line and mods exist only in Claude Code.
 
 At the end, run `faundr setup --no-ask` one last time and answer in a few lines, in plain language: what is ready, what the person chose to leave out and what still depends on them. Say that `/faundr:setup` can be run again at any time (it does not change anything that is already right) and `/faundr:setup --refresh` to redo the map and the checks.

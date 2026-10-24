@@ -8,6 +8,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { toolEdits } from './agent.mjs'
 
 const CONFIG_DIR = path.join(os.homedir(), '.faundr')
 const DEFAULT_API_URL = 'https://faundr.palasbusinessstrategy.workers.dev'
@@ -53,14 +54,16 @@ function gitBranch(cwd) {
 /** O que vai para o servidor: o mínimo para saber o estado. */
 export function livePayload(p) {
   const input = p.tool_input ?? {}
-  const program = typeof input.command === 'string' ? input.command.trim().split(/\s+/)[0] : undefined
+  // O apply_patch do Codex traz o patch inteiro em command: daqui só sai o primeiro arquivo.
+  const patch = p.tool_name === 'apply_patch'
+  const program = !patch && typeof input.command === 'string' ? input.command.trim().split(/\s+/)[0] : undefined
   return {
     session_id: p.session_id,
     hook_event_name: p.hook_event_name,
     cwd: p.cwd,
     tool_name: p.tool_name,
     tool_input: {
-      file_path: input.file_path,
+      file_path: patch ? toolEdits(p.tool_name, input)[0]?.file : input.file_path,
       notebook_path: input.notebook_path,
       description: typeof input.description === 'string' ? input.description.slice(0, 200) : undefined,
       command: program,
@@ -92,7 +95,7 @@ async function main() {
   await fetch(`${apiUrl}/api/hooks/event`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-    body: JSON.stringify({ agent: 'claude', projectId, git: { branch: gitBranch(cwd) }, machine: machineName(config), at, payload: livePayload(payload) }),
+    body: JSON.stringify({ agent: process.argv[2] === 'codex' ? 'codex' : 'claude', projectId, git: { branch: gitBranch(cwd) }, machine: machineName(config), at, payload: livePayload(payload) }),
     signal: AbortSignal.timeout(5000),
   })
 }

@@ -154,12 +154,17 @@ import { envMatrix, hostingFromCli, hostingProvider } from './env-matrix.mjs'
 import { anonReads, dbFindings, dbSummary, exposedTables, migrationTables, parseProbe, PROBE_SQL, probeWithToken, supabaseTarget } from './db-test.mjs'
 import { lang, LANGS, locale, setLang, t } from './i18n.mjs'
 import { contentLangLine, ensureContentLang, languageGuidance, validContentLang } from './content-lang.mjs'
+import { agentSessionId, currentAgent, toolEdits } from './agent.mjs'
+import { codexRulesFile, syncCodexRules } from './codex-rules.mjs'
 import { changesSince, createCheckpoint, currentTree, describeChanges, ensureSessionCheckpoint, findCheckpoint, gitRoot, listCheckpoints, restoreCheckpoint, restoreSummary } from './checkpoints.mjs'
 
 const CONFIG_DIR = path.join(os.homedir(), '.faundr')
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json')
 const LOG_FILE = path.join(CONFIG_DIR, 'hook.log')
 const LINK_FILE = '.faundr.json'
+// Agente que rodou este comando (Claude Code ou Codex) e a sessão dele, para o painel marcar quem fez.
+const AGENT = ['hook', 'gate', 'guard'].includes(process.argv[2]) && process.argv[3] === 'codex' ? 'codex' : currentAgent()
+const AGENT_SESSION_ID = agentSessionId()
 // Site do Faundr no ar; para desenvolver o próprio Faundr: /faundr:login --url http://localhost:3000.
 const DEFAULT_API_URL = 'https://faundr.palasbusinessstrategy.workers.dev'
 
@@ -446,7 +451,7 @@ async function sendSkillCosts(root, sid) {
     await fetch(`${apiUrl}/api/cli/setup`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-      body: JSON.stringify({ projectId, action: 'runs', runs, codeTokens, agent: 'claude', agentSessionId: sid }),
+      body: JSON.stringify({ projectId, action: 'runs', runs, codeTokens, agent: AGENT, agentSessionId: sid }),
       signal: AbortSignal.timeout(5000),
     })
   } catch (err) {
@@ -633,27 +638,47 @@ function eventTriggers(root, sid) {
 }
 
 // Fim da resposta barrado: o agente faz os passos antes de encerrar. A resposta anterior fica acima deste aviso no
-// chat, e quem lê costuma ler só a última: por isso a última sai completa.
+// chat, e quem lê costuma ler só a última: por isso a última sai completa. No Codex o aviso vira um novo pedido logo
+// abaixo da resposta, que continua à vista: basta contar o que os passos mudaram.
 function blockStop(steps) {
+  const then =
+    AGENT === 'codex'
+      ? 'Then reply in a few lines with what these steps changed, without mentioning this note.'
+      : 'Then write the complete final response: the previous one is hidden above this note, so repeat from it what the user needs to know (result, pending items, questions) together with what these steps changed, without mentioning this note.'
   process.stdout.write(
     JSON.stringify({
       decision: 'block',
       reason:
         `[Faundr] Before finishing: ${steps.map((t, i) => (steps.length > 1 ? `(${i + 1}) ${t}` : t)).join('; ')}. ` +
         '(Automatic, set up by the project owner in Faundr.) ' +
-        'Then write the complete final response: the previous one is hidden above this note, so repeat from it what the user needs to know (result, pending items, questions) together with what these steps changed, without mentioning this note.',
+        then,
     }),
   )
 }
 
 async function hook(agent) {
   const startedAt = Date.now()
+  // Os processos de segundo plano herdam o agente (no Codex eles não recebem CODEX_SESSION_ID).
+  process.env.FAUNDR_AGENT = agent
   const payload = JSON.parse(await readStdin())
   const event = payload.hook_event_name
   const cwd = payload.cwd ?? process.cwd()
 
+  // Regra do Codex que o setup criou: o caminho do plugin muda a cada versão.
+  if (agent === 'codex' && event === 'SessionStart') {
+    try {
+      syncCodexRules(PLUGIN_ROOT)
+    } catch (err) {
+      log(`codex rules: ${err?.message ?? err}`)
+    }
+  }
   const linkFile = findUp(cwd, LINK_FILE)
-  if (!linkFile) return // pasta não ligada a nenhum projeto
+  // Pasta não ligada a nenhum projeto. No Codex, o setup e o link ainda precisam saber como rodar o Faundr.
+  if (!linkFile) {
+    if (agent === 'codex' && event === 'SessionStart')
+      process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: CODEX_GUIDANCE() } }))
+    return
+  }
   const root = path.dirname(linkFile)
   // Projetos do plugin antigo tinham tudo solto em .faundr/: passa para as subpastas antes de qualquer leitura.
   if (event === 'SessionStart') organizeFaundrDir(root)
@@ -712,13 +737,15 @@ async function hook(agent) {
 
 // O agente editou um arquivo: grafo pendente, arquivo da sessão e a prova (o que precisa ser conferido).
 function trackEdit(payload, projectId) {
-  const file = payload.tool_input?.file_path ?? payload.tool_input?.notebook_path
   markGraphDirty(projectId)
-  markSessionEdited(payload.session_id, file)
-  try {
-    recordEdit(CONFIG_DIR, payload.session_id, file)
-  } catch (err) {
-    log(`proof: ${err?.message ?? err}`)
+  for (const edit of toolEdits(payload.tool_name, payload.tool_input)) {
+    const file = path.resolve(payload.cwd ?? process.cwd(), edit.file)
+    markSessionEdited(payload.session_id, file)
+    try {
+      recordEdit(CONFIG_DIR, payload.session_id, file)
+    } catch (err) {
+      log(`proof: ${err?.message ?? err}`)
+    }
   }
 }
 
@@ -795,7 +822,8 @@ async function bashEvents(event, payload, root, projectId, cfg) {
 
 // SessionEnd: o hooks.json dá 5 s de orçamento ao hook (o padrão do Claude Code é 1,5 s).
 function hookTimeout(event) {
-  if (event === 'SessionEnd') return 4000
+  // O Codex corta o SessionEnd em 3 s.
+  if (event === 'SessionEnd') return AGENT === 'codex' ? 2500 : 4000
   return CONTEXT_EVENTS.has(event) ? 8000 : 5000
 }
 
@@ -875,7 +903,19 @@ function sessionStartContext(answer, root, sid, additionalContext, contentLang) 
     writeMemoryIndex(root, answer.memoryIndex)
     writeState(root, { rulesShown: { session: sid, ids: answer.memoryShown ?? [] } })
   }
-  return [additionalContext, languageGuidance(contentLang), WORK_GUIDANCE, hasGraph && GRAPH_GUIDANCE, designNote(root), inventoryNote(root)].filter(Boolean).join('\n\n')
+  return [AGENT === 'codex' && CODEX_GUIDANCE(), additionalContext, languageGuidance(contentLang), WORK_GUIDANCE, hasGraph && GRAPH_GUIDANCE, designNote(root), inventoryNote(root)].filter(Boolean).join('\n\n')
+}
+
+// As skills e os avisos do Faundr foram escritos para o Claude Code: no Codex, o comando faundr não está no PATH e
+// a skill não roda as linhas !`...` nem troca ${CLAUDE_PLUGIN_ROOT} e $ARGUMENTS sozinha.
+const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const CODEX_GUIDANCE = () => {
+  const cli = `node "${path.join(PLUGIN_ROOT, 'bin', 'faundr.mjs')}"`
+  return `[Faundr] You are running in Codex. How to read Faundr's notes and skills here:
+- "faundr <args>" means: ${cli} <args> (the faundr command is not on the PATH).
+- In Faundr's skills, \${CLAUDE_PLUGIN_ROOT} is ${PLUGIN_ROOT}; a line like !\`command\` is a command to run first with the shell, using its output as the text that would be there; $ARGUMENTS is what the user wrote after the skill name (empty if nothing).
+- "/faundr:<name>" is the Faundr skill <name> (faundr:<name>): open its SKILL.md and follow it. "AskUserQuestion" means asking the user in chat, with numbered options and the recommended one first.
+- Faundr's commands talk to the dashboard over the network: if one fails for lack of network in the sandbox, ask to run it again with network access.`
 }
 
 // Com design.md: a orientação de seguir o guia; sem ele, mas com telas: a sugestão de criar um.
@@ -1118,7 +1158,7 @@ function writeState(root, patch) {
 // Funcionalidade atual por sessão: duas sessões na mesma pasta podem tocar funcionalidades diferentes. A da pasta
 // (currentFeatureId) é a última escolhida e vale para quem ainda não escolheu (sessão nova, Codex, terminal comum).
 const KEPT_SESSIONS = 20
-const sessionIdOf = (sid) => sid ?? process.env.CLAUDE_CODE_SESSION_ID ?? null
+const sessionIdOf = (sid) => sid ?? AGENT_SESSION_ID ?? null
 
 function currentFeature(root, sid) {
   const state = readState(root)
@@ -1207,7 +1247,7 @@ function printFeature(f, byId, people) {
 const AUTO_ANCHOR_MAX = 5
 function autoAnchor(root) {
   // A sessão que rodou o comando; o sessionStart é da última sessão aberta na pasta (pode ser outra).
-  const sid = process.env.CLAUDE_CODE_SESSION_ID ?? readState(root).sessionStart?.session
+  const sid = AGENT_SESSION_ID ?? readState(root).sessionStart?.session
   if (!sid) return []
   const crowded = new Map()
   for (const m of readMemoryIndex(root)) for (const p of m.paths ?? []) crowded.set(p, (crowded.get(p) ?? 0) + 1)
@@ -1338,7 +1378,7 @@ async function workflowMark(sub, rest) {
     ...(sub === 'run' && { reason: flag(rest, '--why') ?? '' }),
     ...(sub === 'step' && { step: Number(n), mark }),
     note: flag(rest, '--note') ?? '',
-    agentSessionId: process.env.CLAUDE_CODE_SESSION_ID ?? null,
+    agentSessionId: AGENT_SESSION_ID ?? null,
   })
   const STATUS = { running: 'in progress', waiting: 'waiting for the owner', done: 'done', stopped: 'stopped' }
   console.log(`${r.ref} ${STATUS[r.status] ?? r.status}: ${r.progress}.${r.status === 'waiting' ? " The canvas shows it is the owner's turn." : ''}`)
@@ -1943,8 +1983,8 @@ async function overviewSave(args) {
     action: 'save',
     content,
     commit: gitHead(root),
-    agent: 'claude',
-    agentSessionId: process.env.CLAUDE_CODE_SESSION_ID ?? null,
+    agent: AGENT,
+    agentSessionId: AGENT_SESSION_ID ?? null,
   })
   console.log(`Project overview saved: ${r.steps} steps in "how it works", ${r.parts} parts. It already shows under Project overview on the dashboard.`)
 }
@@ -2271,8 +2311,8 @@ async function stackSave(args) {
     hash,
     content,
     commit: gitHead(root),
-    agent: 'claude',
-    agentSessionId: process.env.CLAUDE_CODE_SESSION_ID ?? null,
+    agent: AGENT,
+    agentSessionId: AGENT_SESSION_ID ?? null,
   })
   console.log(`Project stack saved: ${r.hosting} hosting pieces, ${r.tech} technologies, ${r.services} services, ${r.env} variables. It already shows under Project stack on the dashboard.`)
 }
@@ -2281,11 +2321,11 @@ async function handoffCommand(args) {
   const text = textArg(args)
   if (!text) throw new Error('usage: faundr handoff "<what was left half done and what is missing>"')
   const { root, projectId, config } = linkedProject()
-  const agentSessionId = process.env.CLAUDE_CODE_SESSION_ID ?? null
+  const agentSessionId = AGENT_SESSION_ID ?? null
   const res = await fetch(`${config.apiUrl}/api/cli/session`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${config.token}` },
-    body: JSON.stringify({ projectId, action: 'handoff', text, agent: 'claude', agentSessionId }),
+    body: JSON.stringify({ projectId, action: 'handoff', text, agent: AGENT, agentSessionId }),
     signal: AbortSignal.timeout(15_000),
   })
   const data = await res.json().catch(() => ({}))
@@ -2299,7 +2339,7 @@ async function resumeCommand() {
   const res = await fetch(`${config.apiUrl}/api/cli/session`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${config.token}` },
-    body: JSON.stringify({ projectId, action: 'resume', agent: 'claude', agentSessionId: process.env.CLAUDE_CODE_SESSION_ID ?? null }),
+    body: JSON.stringify({ projectId, action: 'resume', agent: AGENT, agentSessionId: AGENT_SESSION_ID ?? null }),
     signal: AbortSignal.timeout(15_000),
   })
   const data = await res.json().catch(() => ({}))
@@ -2364,7 +2404,7 @@ async function captureErrors(payload, root, projectId, config) {
       passed,
       partial: partialRun(command, output, c.checkKey, { filtered, piped, failed }),
       issues,
-      agent: 'claude',
+      agent: AGENT,
       agentSessionId: payload.session_id,
     },
     { projectId, config },
@@ -2623,7 +2663,7 @@ async function errorResolve(args) {
   const note = flag(args, '--verified')
   if (!note)
     throw new Error('Say how you verified it: faundr error-resolve E-<n> --verified "ran npm test and it passed". Normally the error closes by itself when the command passes.')
-  const r = await errorsApi({ action: 'resolve', query, note, nextDeploy: args.includes('--next-deploy'), agent: 'claude', agentSessionId: process.env.CLAUDE_CODE_SESSION_ID ?? null })
+  const r = await errorsApi({ action: 'resolve', query, note, nextDeploy: args.includes('--next-deploy'), agent: AGENT, agentSessionId: AGENT_SESSION_ID ?? null })
   console.log(
     r.resolution === 'next_deploy'
       ? `Resolved on the next deploy: E-${r.ref} ${r.title}${r.resolved_before_release ? ` (events from version ${r.resolved_before_release} do not reopen it)` : ''}. Remind the user to publish the fix.`
@@ -2687,7 +2727,7 @@ async function skillReport(args) {
   const res = await fetch(`${config.apiUrl}/api/cli/skill-report`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${config.token}` },
-    body: JSON.stringify({ projectId, action: 'report', skill, findings, areas, scope, agent: 'claude', agentSessionId: process.env.CLAUDE_CODE_SESSION_ID ?? null }),
+    body: JSON.stringify({ projectId, action: 'report', skill, findings, areas, scope, agent: AGENT, agentSessionId: AGENT_SESSION_ID ?? null }),
     signal: AbortSignal.timeout(30_000),
   })
   const data = await res.json().catch(() => ({}))
@@ -2745,7 +2785,7 @@ function takeSecurityAlert(sid) {
 async function securityScan(args) {
   const { root } = linkedProject()
   const quiet = args.includes('--quiet')
-  const sid = flag(args, '--session') ?? process.env.CLAUDE_CODE_SESSION_ID ?? null
+  const sid = flag(args, '--session') ?? AGENT_SESSION_ID ?? null
   let only = flag(args, '--files')
     ?.split(',')
     .map((f) => f.trim().replace(/\\/g, '/'))
@@ -2771,7 +2811,7 @@ async function securityScan(args) {
       stats: result.stats,
       errors: result.errors,
       packages: result.snapshot,
-      agent: 'claude',
+      agent: AGENT,
       agentSessionId: sid,
     })
   if (sent?.newSerious?.length && sid && args.includes('--edited')) {
@@ -2943,8 +2983,8 @@ async function securityFinding(args) {
   const blocker = flag(args, '--needs-check')
   const r = await securityApi({
     action: 'add',
-    agent: 'claude',
-    agentSessionId: process.env.CLAUDE_CODE_SESSION_ID ?? null,
+    agent: AGENT,
+    agentSessionId: AGENT_SESSION_ID ?? null,
     finding: {
       source: flag(args, '--source') ?? 'review',
       severity,
@@ -2986,7 +3026,7 @@ async function securityImport(args) {
 }
 
 async function sendImport(tool, findings) {
-  const r = await securityApi({ action: 'report', tool, scopes: [], findings, agent: 'claude', agentSessionId: process.env.CLAUDE_CODE_SESSION_ID ?? null })
+  const r = await securityApi({ action: 'report', tool, scopes: [], findings, agent: AGENT, agentSessionId: AGENT_SESSION_ID ?? null })
   console.log(`Imported from ${tool}: ${findings.length} problem(s); ${r.added} new, ${r.fixed} that no longer show up were closed. See them under Security on the dashboard.`)
 }
 
@@ -3163,7 +3203,7 @@ async function securityResolve(args) {
   }
   const only = recheckFiles(f)
   const result = await scanProject(root, { only })
-  await securityApi({ action: 'report', scopes: result.scopes, findings: result.findings, stats: result.stats, errors: result.errors, agent: 'claude', agentSessionId: process.env.CLAUDE_CODE_SESSION_ID ?? null })
+  await securityApi({ action: 'report', scopes: result.scopes, findings: result.findings, stats: result.stats, errors: result.errors, agent: AGENT, agentSessionId: AGENT_SESSION_ID ?? null })
   if (result.errors.length) console.log(`Warning: ${result.errors.join('; ')}`)
   const after = await securityApi({ action: 'get', query: text })
   if (after.status === 'fixed') console.log(`S-${after.ref} fixed: the check no longer finds the problem.`)
@@ -3224,7 +3264,7 @@ const qualityLine = (f) =>
 
 async function qualityScan(args) {
   const { root } = linkedProject()
-  const sid = flag(args, '--session') ?? process.env.CLAUDE_CODE_SESSION_ID ?? null
+  const sid = flag(args, '--session') ?? AGENT_SESSION_ID ?? null
   let only = flag(args, '--files')
     ?.split(',')
     .map((f) => f.trim().replace(/\\/g, '/'))
@@ -3242,7 +3282,7 @@ async function qualityScan(args) {
 
   const sent = args.includes('--no-send')
     ? null
-    : await qualityApi({ action: 'report', scopes: result.scopes, findings: result.findings, stats: result.stats, errors: result.errors, agent: 'claude', agentSessionId: sid })
+    : await qualityApi({ action: 'report', scopes: result.scopes, findings: result.findings, stats: result.stats, errors: result.errors, agent: AGENT, agentSessionId: sid })
   if (sent && args.includes('--edited')) await sendSessionSize(root, sid).catch((err) => log(`quality: session size: ${err.message}`))
   if (args.includes('--quiet'))
     return log(`quality: ${result.findings.length} finding(s) in ${result.stats.files} files, ${result.stats.ms} ms${result.errors.length ? `; ${result.errors.length} error(s)` : ''}`)
@@ -3296,7 +3336,7 @@ async function qualityResolve(args) {
   // Regra por arquivo: refaz só o arquivo; regra do projeto (pacotes, CLAUDE.md, TODOs): refaz tudo.
   const projectWide = /^(demais\/dependencia-|instrucoes\/|limpeza\/todo-antigo)/.test(f.rule_id)
   const result = await runQuality(root, { only: projectWide || !f.file ? null : [f.file] })
-  await qualityApi({ action: 'report', scopes: result.scopes, findings: result.findings, stats: result.stats, errors: result.errors, agent: 'claude', agentSessionId: process.env.CLAUDE_CODE_SESSION_ID ?? null })
+  await qualityApi({ action: 'report', scopes: result.scopes, findings: result.findings, stats: result.stats, errors: result.errors, agent: AGENT, agentSessionId: AGENT_SESSION_ID ?? null })
   const after = await qualityApi({ action: 'get', query: text })
   if (after.status === 'fixed') return console.log(`Q-${after.ref} fixed: the check no longer finds the problem.`)
   console.log(`Q-${after.ref} still shows up in the check. Review the fix:\n`)
@@ -3323,7 +3363,7 @@ function changedCodeFiles(root, sid) {
 // Pacote de contexto da revisão com IA (skill "quality"): o que revisar, o catálogo, as regras do projeto e o que já está aberto.
 async function qualityContext(args) {
   const { root } = linkedProject()
-  const sid = process.env.CLAUDE_CODE_SESSION_ID ?? null
+  const sid = AGENT_SESSION_ID ?? null
   const onlyFiles = flag(args, '--files')?.split(',').map((f) => f.trim()).filter(Boolean)
   const full = args.includes('--full')
   const files = onlyFiles ?? (full ? null : changedCodeFiles(root, sid))
@@ -3373,8 +3413,8 @@ async function qualityFinding(args) {
   const saves = Number(flag(args, '--saves'))
   const r = await qualityApi({
     action: 'add',
-    agent: 'claude',
-    agentSessionId: process.env.CLAUDE_CODE_SESSION_ID ?? null,
+    agent: AGENT,
+    agentSessionId: AGENT_SESSION_ID ?? null,
     finding: {
       title,
       theme: flag(args, '--theme'),
@@ -3463,7 +3503,7 @@ function codeChange(root, base) {
 async function sendSessionSize(root, sid) {
   const base = readState(root).qualityBase
   if (!sid || base?.session !== sid || !base.head) return
-  await qualityApi({ action: 'session-size', agent: 'claude', agentSessionId: sid, change: codeChange(root, base.head) })
+  await qualityApi({ action: 'session-size', agent: AGENT, agentSessionId: sid, change: codeChange(root, base.head) })
 }
 
 async function qualityReopen(args) {
@@ -3536,7 +3576,7 @@ async function coverageReport(root, runner, dir = '') {
   const { changedLines, lostCoverage, readCoverage, sessionCoverage, summarize } = await import('./coverage.mjs')
   const files = readCoverage(root)
   if (!files) return null
-  const sid = process.env.CLAUDE_CODE_SESSION_ID ?? null
+  const sid = AGENT_SESSION_ID ?? null
   const baseState = readState(root).qualityBase
   // Base: o commit em que esta sessão começou; fora de uma sessão, o último commit (só o que não foi commitado).
   const base = baseState?.session === sid && baseState?.head ? baseState.head : 'HEAD'
@@ -3662,8 +3702,8 @@ async function runOneRunner(root, info, run, runTests) {
     error: r.error ?? null,
     cases: r.cases ?? [],
     coverage: cov,
-    agent: 'claude',
-    agentSessionId: process.env.CLAUDE_CODE_SESSION_ID ?? null,
+    agent: AGENT,
+    agentSessionId: AGENT_SESSION_ID ?? null,
   })
   if (r.error && !r.cases?.length) return console.log(`  Did not finish: ${r.error}`)
   console.log(`  ${sent.passed} passed, ${sent.failed} failed, ${sent.skipped} skipped${sent.todo ? `, ${sent.todo} todo` : ''}${sent.flaky ? `, ${sent.flaky} flaky` : ''} in ${((r.durationMs ?? 0) / 1000).toFixed(1)} s.`)
@@ -3774,7 +3814,7 @@ async function testsMutation(args) {
     return
   }
   const baseState = readState(root).qualityBase
-  const sid = process.env.CLAUDE_CODE_SESSION_ID ?? null
+  const sid = AGENT_SESSION_ID ?? null
   const base = baseState?.session === sid && baseState?.head ? baseState.head : 'HEAD'
   const files = flag(args, '--files')?.split(',').map((f) => f.trim()).filter(Boolean) ?? null
   const targets = mutateTargets(changedLines(root, base), files)
@@ -3789,7 +3829,7 @@ async function testsMutation(args) {
     summary: { runner: runner.runner, counts: r.counts, score: r.score, coveredScore: r.coveredScore, durationMs: r.durationMs },
     files: targets,
     findings,
-    agent: 'claude',
+    agent: AGENT,
     agentSessionId: sid,
   })
   const c = r.counts
@@ -3929,32 +3969,34 @@ async function guard() {
   const payload = JSON.parse(await readStdin())
   const linkFile = findUp(payload.cwd ?? process.cwd(), LINK_FILE)
   if (!linkFile) return
-  const input = payload.tool_input ?? {}
-  const file = input.file_path ?? input.notebook_path
-  if (!file) return
-  const content = [input.content, input.new_string, input.new_source, ...(input.edits ?? []).map((e) => e.new_string)]
-    .filter((c) => typeof c === 'string')
-    .join('\n')
-  const rel = path.relative(path.dirname(linkFile), path.resolve(payload.cwd ?? process.cwd(), file)).split(path.sep).join('/')
-  const { block, warn } = guardContent(content, rel)
+  const root = path.dirname(linkFile)
+  // Claude Code edita um arquivo por vez; o apply_patch do Codex pode mexer em vários.
+  const edits = toolEdits(payload.tool_name, payload.tool_input).map((e) => ({
+    ...e,
+    rel: path.relative(root, path.resolve(payload.cwd ?? process.cwd(), e.file)).split(path.sep).join('/'),
+  }))
+  if (!edits.length) return
+  const checked = edits.map((e) => ({ ...e, ...guardContent(e.content, e.rel) }))
+  const blocked = checked.filter((e) => e.block.length)
   // Ponto de volta antes da primeira edição da sessão (e de novo a cada 30 min de edições).
   let checkpoint = null
-  if (!block.length) {
+  if (!blocked.length) {
     try {
-      checkpoint = ensureSessionCheckpoint(path.dirname(linkFile), payload.session_id, { configDir: CONFIG_DIR })
+      checkpoint = ensureSessionCheckpoint(root, payload.session_id, { configDir: CONFIG_DIR })
     } catch (err) {
       log(`guard restore point: ${err?.message ?? err}`)
     }
   }
   const how = 'Put the value in the .env file (which does not go to git) and read it with process.env.VARIABLE_NAME; if it is only an example, use a clearly fake value (e.g. sk_live_xxx).'
-  if (block.length) {
-    log(`guard: blocked ${block.map((b) => b.name).join(', ')} in ${rel}`)
+  if (blocked.length) {
+    const where = blocked.map((e) => `${e.rel} (${e.block.map((b) => `${b.name}: ${b.masked}`).join('; ')})`).join(', ')
+    log(`guard: blocked ${blocked.flatMap((e) => e.block.map((b) => b.name)).join(', ')} in ${blocked.map((e) => e.rel).join(', ')}`)
     return process.stdout.write(
       JSON.stringify({
         hookSpecificOutput: {
           hookEventName: 'PreToolUse',
           permissionDecision: 'deny',
-          permissionDecisionReason: `[Faundr] Blocked: the content of ${rel} has a secret key (${block.map((b) => `${b.name}: ${b.masked}`).join('; ')}). A secret key cannot stay in the code. ${how} If the key was already pasted in the conversation or saved somewhere else, suggest the user rotate it at the provider.`,
+          permissionDecisionReason: `[Faundr] Blocked: the content of ${where} has a secret key. A secret key cannot stay in the code. ${how} If the key was already pasted in the conversation or saved somewhere else, suggest the user rotate it at the provider.`,
         },
       }),
     )
@@ -3963,16 +4005,18 @@ async function guard() {
   // roda em segundo plano e o Claude Code descarta o que ele devolve.
   const context = [
     checkpoint && '[Faundr] Restore point of the files saved before this change (to undo: /faundr:undo).',
-    warn.length && `[Faundr] Warning: ${rel} is about to receive what looks like a secret key (${warn.map((w) => `${w.name}: ${w.masked}`).join('; ')}). ${how}`,
-    destructiveNote(content, rel),
     takeSecurityAlert(payload.session_id),
-    ...loopNotes(payload.session_id, file, rel),
-    forbiddenCheck(path.dirname(linkFile), rel, content),
-    rulesOnce(path.dirname(linkFile), payload.session_id, rel),
-    workflowsFileOnce(path.dirname(linkFile), payload.session_id, rel),
-    skillsFileGuard(path.dirname(linkFile), payload.session_id, rel),
-    teamOnce(path.dirname(linkFile), payload.session_id, rel),
-    payload.tool_name !== 'Write' && dependentsOnce(path.dirname(linkFile), payload.session_id, rel),
+    ...checked.flatMap(({ file, rel, content, warn, isNew }) => [
+      warn.length && `[Faundr] Warning: ${rel} is about to receive what looks like a secret key (${warn.map((w) => `${w.name}: ${w.masked}`).join('; ')}). ${how}`,
+      destructiveNote(content, rel),
+      ...loopNotes(payload.session_id, file, rel),
+      forbiddenCheck(root, rel, content),
+      rulesOnce(root, payload.session_id, rel),
+      workflowsFileOnce(root, payload.session_id, rel),
+      skillsFileGuard(root, payload.session_id, rel),
+      teamOnce(root, payload.session_id, rel),
+      !isNew && dependentsOnce(root, payload.session_id, rel),
+    ]),
   ].filter(Boolean)
   if (context.length) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: context.join('\n\n') } }))
 }
@@ -4009,7 +4053,7 @@ async function requestsApi(body) {
   const res = await fetch(`${config.apiUrl}/api/cli/requests`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${config.token}` },
-    body: JSON.stringify({ projectId, sessionId: process.env.CLAUDE_CODE_SESSION_ID ?? null, ...body }),
+    body: JSON.stringify({ projectId, sessionId: AGENT_SESSION_ID ?? null, ...body }),
     signal: AbortSignal.timeout(15_000),
   })
   const data = await res.json().catch(() => ({}))
@@ -4030,7 +4074,7 @@ async function inboxCommand(args) {
   const { inbox } = await requestsApi({ action: 'list' })
   // Marca como entregue aqui, para os avisos do pedido e do fim da resposta não repetirem.
   writeInbox(root, inbox)
-  takeInbox(root, process.env.CLAUDE_CODE_SESSION_ID ?? 'cli')
+  takeInbox(root, AGENT_SESSION_ID ?? 'cli')
   if (!inbox.length) return console.log('Nothing waiting for you: no new request, message or note.')
   console.log(inbox.map((i) => i.text).join('\n\n'))
 }
@@ -4105,7 +4149,7 @@ async function teamCommand() {
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data.error ?? `API error (${res.status})`)
   writeTeam(root, data.team)
-  console.log(teamLines(data.team, process.env.CLAUDE_CODE_SESSION_ID ?? null).join('\n'))
+  console.log(teamLines(data.team, AGENT_SESSION_ID ?? null).join('\n'))
 }
 
 // O que mudou nos arquivos desde o ponto de volta (vazio quando não deu para saber).
@@ -4161,7 +4205,7 @@ async function checkpointsSync(args) {
   const res = await fetch(`${config.apiUrl}/api/cli/checkpoints`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${config.token}` },
-    body: JSON.stringify({ projectId, action: 'sync', agent: 'claude', checkpoints }),
+    body: JSON.stringify({ projectId, action: 'sync', agent: AGENT, checkpoints }),
     signal: AbortSignal.timeout(20_000),
   })
   const data = await res.json().catch(() => ({}))
@@ -4233,7 +4277,7 @@ async function designLint(args) {
   if (sid && readState(root).designBaseline?.session !== sid)
     writeState(root, { designBaseline: { session: sid, fingerprints: result.findings.map((f) => f.fingerprint) } })
   if (!args.includes('--no-send')) {
-    const sent = await designApi({ action: 'report', ...result, agent: 'claude', agentSessionId: sid ?? process.env.CLAUDE_CODE_SESSION_ID ?? null })
+    const sent = await designApi({ action: 'report', ...result, agent: AGENT, agentSessionId: sid ?? AGENT_SESSION_ID ?? null })
     writeState(root, { designSkip: { archived: sent.archived ?? [], disabled: sent.disabled ?? [] } })
     // Vitrine: a impressão digital atual dos arquivos das réplicas (o painel marca as desatualizadas).
     let showcase = null
@@ -4965,8 +5009,8 @@ async function agentsMd(args) {
 // Configura o Faundr de uma vez: faz o seguro e devolve o que pede o OK do dono (com o comando de cada um). No terminal
 // de verdade pergunta na hora; dentro do Claude, a skill /faundr:setup pergunta com opções e roda --apply.
 
-const SETUP_APPLY = ['git', 'gitignore', 'statusline', 'agents-md']
-const SETUP_SKIP = ['agents-md', 'supabase-token', 'errors', 'statusline']
+const SETUP_APPLY = ['git', 'gitignore', 'statusline', 'agents-md', 'codex-rules']
+const SETUP_SKIP = ['agents-md', 'supabase-token', 'errors', 'statusline', 'codex-rules']
 // Primeiras checagens, todas pelo próprio CLI (um processo cada: uma que falha não derruba as outras).
 const SETUP_JOBS = [
   ['graph', () => t('Code map', 'Mapa do código')],
@@ -5207,7 +5251,8 @@ async function setupItems({ apply, skip, refresh }) {
 
   // Linha de status: liga sozinha; se já existe outra, só troca com o OK.
   const statusTitle = t('Status line', 'Linha de status')
-  if (!declined('statusline', statusTitle)) {
+  if (AGENT === 'codex') add({ title: statusTitle, status: 'ok', detail: t('only in Claude Code (Codex has no custom status line)', 'só no Claude Code (o Codex não tem barra de status própria)') })
+  else if (!declined('statusline', statusTitle)) {
     const r = installStatusline({ pluginFile: self, force: apply.has('statusline') })
     if (r.ok) add({ title: statusTitle, status: r.already ? 'ok' : 'feito', detail: r.already ? t("Faundr's is on", 'a do Faundr está ligada') : t(`turned on in ${r.settingsFile}`, `ligada em ${r.settingsFile}`) })
     else if (r.exists || /já existe|already exists/.test(r.reason))
@@ -5264,6 +5309,27 @@ async function setupItems({ apply, skip, refresh }) {
           }
         : { title: 'Skills', status: 'ok', detail: t('connected', 'conectadas') },
     )
+
+  // Codex: os comandos do agente rodam sem rede na área protegida; a regra deixa só os do Faundr falarem com o painel.
+  const rulesTitle = t('Codex rule', 'Regra do Codex')
+  if (AGENT === 'codex' && !declined('codex-rules', rulesTitle)) {
+    if (fs.existsSync(codexRulesFile())) add({ title: rulesTitle, status: 'ok', detail: t('Faundr commands can reach the dashboard', 'os comandos do Faundr falam com o painel') })
+    else if (apply.has('codex-rules')) {
+      syncCodexRules(PLUGIN_ROOT, { create: true })
+      add({ title: rulesTitle, status: 'feito', detail: t(`created ${codexRulesFile()} (takes effect in the next Codex session)`, `criada em ${codexRulesFile()} (vale a partir da próxima sessão do Codex)`) })
+    } else
+      add({
+        title: rulesTitle,
+        status: 'pedir',
+        applyId: 'codex-rules',
+        detail: t('Faundr commands are blocked from the network', 'os comandos do Faundr ficam sem rede'),
+        why: t(
+          "Codex runs the agent's commands without network, so recording tasks and features on the dashboard fails. The rule lets only Faundr's command (node …/faundr.mjs) run outside the sandbox; the rest stays as it is.",
+          'o Codex roda os comandos do agente sem rede, e gravar tarefas e funcionalidades no painel falha. A regra libera só o comando do Faundr (node …/faundr.mjs) fora da área protegida; o resto continua igual.',
+        ),
+        apply: t('faundr setup --apply codex-rules (or --skip codex-rules)', 'faundr setup --apply codex-rules (ou --skip codex-rules)'),
+      })
+  }
 
   // Bloco de regras no AGENTS.md: só para quem usa outro agente além do Claude Code.
   if (!declined('agents-md', 'AGENTS.md')) {
@@ -5395,6 +5461,23 @@ if (command === 'statusline') {
 } else await cli()
 
 async function cli() {
+  // Codex: na área protegida os comandos do agente rodam sem rede. O erro diz o que fazer em vez de só "fetch failed".
+  if (process.env.CODEX_SANDBOX_NETWORK_DISABLED === '1') {
+    const original = globalThis.fetch
+    globalThis.fetch = async (...a) => {
+      try {
+        return await original(...a)
+      } catch (err) {
+        throw new Error(
+          `${err.message} — ${t(
+            "Codex ran this command without network (sandbox): run the same command again with network access (outside the sandbox, with the user's OK). So it stops asking: faundr setup --no-ask --apply codex-rules",
+            'o Codex rodou este comando sem rede (área protegida): rode o mesmo comando de novo com acesso à rede (fora da área protegida, com o OK da pessoa). Para não pedir mais: faundr setup --no-ask --apply codex-rules',
+          )}`,
+          { cause: err },
+        )
+      }
+    }
+  }
   try {
     const commands = cliCommands()
     if (Object.hasOwn(commands, command)) await commands[command](args)
