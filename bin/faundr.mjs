@@ -153,6 +153,7 @@ import { privacyScan } from './privacy.mjs'
 import { envMatrix, hostingFromCli, hostingProvider } from './env-matrix.mjs'
 import { anonReads, dbFindings, dbSummary, exposedTables, migrationTables, parseProbe, PROBE_SQL, probeWithToken, supabaseTarget } from './db-test.mjs'
 import { lang, LANGS, locale, setLang, t } from './i18n.mjs'
+import { contentLangLine, ensureContentLang, languageGuidance, validContentLang } from './content-lang.mjs'
 import { changesSince, createCheckpoint, currentTree, describeChanges, ensureSessionCheckpoint, findCheckpoint, gitRoot, listCheckpoints, restoreCheckpoint, restoreSummary } from './checkpoints.mjs'
 
 const CONFIG_DIR = path.join(os.homedir(), '.faundr')
@@ -166,8 +167,8 @@ const DEFAULT_API_URL = 'https://faundr.palasbusinessstrategy.workers.dev'
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'apply_patch'])
 const GRAPH_LOCK_MS = 5 * 60_000
 
-// Os avisos e as skills do Faundr são em inglês; a conversa e o que vai para o painel seguem a língua da pessoa.
-const LANGUAGE_GUIDANCE = `[Faundr] Faundr's instructions and skills are written in English. Always talk to the user in the language they write to you in, and write what you save to Faundr (features, tasks, decisions, concerns, findings, notes, overview) in that same language. Command names, flags and IDs stay as they are.`
+// Os avisos e as skills do Faundr são em inglês; a conversa segue a língua da pessoa e o que vai para o painel, a
+// língua do conteúdo do projeto (languageGuidance, em content-lang.mjs).
 
 // Orientação de acompanhamento: o agente registra o que constrói (skill "track").
 const WORK_GUIDANCE = `[Faundr] Record the work so the team can follow it on the dashboard: when you start something with several steps (a new feature, a big improvement, a new phase), before building, run faundr feature "<title>" --done-when "<how to tell it is done>" and one faundr task "<step>" per step; if the request is vague (does not say who it is for, what is left out or when it is done), first ask 2 or 3 short questions in a single round; faundr done "<step>" when you finish one; faundr decision "<decision>" --why "<reason>" for technical choices (if it changes an earlier decision, add --replaces "<snippet of the old title>"). Work in stages (phases, MVP and then the rest): record the next stages right at the start with faundr feature "<stage>" --after current --desc "<what goes in>"; when you finish a stage, tell the user which one is next.`
@@ -700,7 +701,10 @@ async function hook(agent) {
   const answer = await res.json()
   saveAnswer(answer, root, payload.session_id)
   let { additionalContext } = answer
-  if (event === 'SessionStart') additionalContext = sessionStartContext(answer, root, payload.session_id, additionalContext)
+  if (event === 'SessionStart') {
+    const contentLang = await resolveContentLang(answer.contentLang, root, { apiUrl, token, projectId }, 3_000)
+    additionalContext = sessionStartContext(answer, root, payload.session_id, additionalContext, contentLang)
+  }
   if (additionalContext && CONTEXT_EVENTS.has(event)) {
     process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext } }))
   }
@@ -827,10 +831,42 @@ function saveAnswer(answer, root, sid) {
   if (Array.isArray(answer.skills)) writeSkillIndex(root, answer.skills)
   // Plano aprovado virou funcionalidade: passa a ser a atual desta pasta.
   if (answer.currentFeatureId) setCurrentFeature(root, answer.currentFeatureId, sid)
+  // Língua do conteúdo do projeto: chega no início e a cada pedido (o painel pode trocar no meio da sessão); os
+  // comandos *-context leem a cópia local sem rede.
+  if (answer.contentLang !== undefined) writeState(root, { contentLang: validContentLang(answer.contentLang) })
+}
+
+// Grava a língua do conteúdo só se o projeto ainda não tiver uma; devolve a que vale no servidor.
+async function setContentLangApi({ apiUrl, token, projectId }, value, timeout) {
+  const res = await fetch(`${apiUrl}/api/cli/memory`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: JSON.stringify({ projectId, action: 'content-lang', set: value }),
+    signal: AbortSignal.timeout(timeout),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error ?? `API error (${res.status})`)
+  return data.contentLang ?? null
+}
+
+// A língua do conteúdo que vale. Projeto sem ela (criado antes dela existir): grava a língua da pessoa, uma vez.
+async function resolveContentLang(projectLang, root, conn, timeout = 10_000) {
+  const { lang: contentLang } = await ensureContentLang(projectLang, lang(), (value) => setContentLangApi(conn, value, timeout))
+  writeState(root, { contentLang })
+  return contentLang
+}
+
+// Linha do começo dos comandos *-context: a língua em que o agente grava o que gerar. `projectLang` é a que o
+// servidor acabou de mandar (overview-context, stack-context); sem ela, vale a cópia local do último hook.
+async function contentLangNote(root, projectLang) {
+  const known = validContentLang(projectLang) ?? validContentLang(readState(root).contentLang)
+  if (known) return contentLangLine(known)
+  const { projectId, config } = linkedProject()
+  return contentLangLine(await resolveContentLang(null, root, { apiUrl: config.apiUrl, token: config.token, projectId }))
 }
 
 // Início da sessão: regras locais e as orientações que entram no contexto (trabalho, mapa, design, inventário).
-function sessionStartContext(answer, root, sid, additionalContext) {
+function sessionStartContext(answer, root, sid, additionalContext, contentLang) {
   const hasGraph = fs.existsSync(faundrPath(root, 'graph'))
   // Regras ligadas a arquivos: cópia local para o guard entregar antes de cada edição (ele não usa a rede).
   if (Array.isArray(answer.anchoredRules)) writeRules(root, answer.anchoredRules)
@@ -839,7 +875,7 @@ function sessionStartContext(answer, root, sid, additionalContext) {
     writeMemoryIndex(root, answer.memoryIndex)
     writeState(root, { rulesShown: { session: sid, ids: answer.memoryShown ?? [] } })
   }
-  return [additionalContext, LANGUAGE_GUIDANCE, WORK_GUIDANCE, hasGraph && GRAPH_GUIDANCE, designNote(root), inventoryNote(root)].filter(Boolean).join('\n\n')
+  return [additionalContext, languageGuidance(contentLang), WORK_GUIDANCE, hasGraph && GRAPH_GUIDANCE, designNote(root), inventoryNote(root)].filter(Boolean).join('\n\n')
 }
 
 // Com design.md: a orientação de seguir o guia; sem ele, mas com telas: a sugestão de criar um.
@@ -1782,6 +1818,7 @@ async function overviewContext() {
 
   const prev = await overviewApi({ action: 'get' })
   say(`# Context for the Project overview of "${prev.project}"`)
+  say(await contentLangNote(root, prev.contentLang))
   say(`Current commit: ${gitHead(root) ?? '(no git)'}`)
   say()
   overviewPrevious(say, prev)
@@ -2165,6 +2202,7 @@ async function stackContext() {
   const out = []
   const say = (s = '') => out.push(s)
   say(`# Context for the Project stack of "${prev.project}"`)
+  say(await contentLangNote(root, prev.contentLang))
   say(`Current commit: ${gitHead(root) ?? '(no git)'} · detection fingerprint: ${hash}`)
   say()
   say('## Previous review')
@@ -2843,7 +2881,7 @@ async function securityContext(args) {
     .filter(Boolean)
   const map = projectMap(root)
   const catalog = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'skills', 'security', 'catalog')
-  const out = ['# Security review context', `Mode: ${onlyFiles?.length ? `quick (only ${onlyFiles.join(', ')})` : 'full'}`, '']
+  const out = ['# Security review context', await contentLangNote(root), `Mode: ${onlyFiles?.length ? `quick (only ${onlyFiles.join(', ')})` : 'full'}`, '']
   out.push(`## Detected stack`, map.stack.length ? map.stack.join(', ') : "(not identified: read the project's manifests)", '')
   const gaps = gapLines(detectStack(root).stack, 'seguranca')
   if (gaps.length) out.push('## Languages without complete automatic rules (the review is all yours there)', ...gaps, '- In them, look yourself for: SQL built from user text, system commands with outside input, routes that do not check login or data owner, secrets in the code, uploads without limits and unsafe deserialization.', '')
@@ -3292,7 +3330,7 @@ async function qualityContext(args) {
   const catalog = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'skills', 'quality', 'catalog.md')
   const mode = firstOf([[full, 'projeto'], [onlyFiles, 'arquivos']], 'sessao')
   const modeText = { projeto: () => 'whole project (inventory per theme)', arquivos: () => `only ${files.join(', ')}`, sessao: () => 'what changed (session and uncommitted changes)' }[mode]()
-  const out = ['# Quality review context', `Mode: ${modeText}`, '']
+  const out = ['# Quality review context', await contentLangNote(root), `Mode: ${modeText}`, '']
   out.push(`Catalog (read it first, with the Read tool): ${catalog}`, '')
   const designMd = findDesignMd(root)
   const rules = [...['CLAUDE.md', 'AGENTS.md', '.claude/CLAUDE.md'].filter((f) => fs.existsSync(path.join(root, f))), ...(designMd ? [path.relative(root, designMd).split(path.sep).join('/')] : [])]
@@ -3648,7 +3686,7 @@ async function testsContext(args) {
   const { detectRunners, productionDbSignals } = await import('./tests.mjs')
   const guide = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'skills', 'tests', 'guide.md')
   const { runners, others } = detectRunners(root, { python: readState(root).python })
-  const out = ['# Tests context', `Guide (read it first, with the Read tool): ${guide}`, '']
+  const out = ['# Tests context', await contentLangNote(root), `Guide (read it first, with the Read tool): ${guide}`, '']
   out.push('## Runners', ...(runners.length ? runners.map((r) => `- ${runnerLabel(r)}${r.script ? ` (npm run ${r.script})` : ''}${r.installed ? '' : ` — ${notInstalled(r)}`}${r.runner === 'vitest' && !r.coverage ? ' — without the coverage tool (@vitest/coverage-v8)' : ''}`) : ['- none (Vitest, Jest, Playwright, node --test, pytest, flutter test, dart test, PHPUnit or Pest)']))
   if (others.length) out.push(`- also in the project, not read by Faundr: ${others.join(', ')}`)
   for (const s of productionDbSignals(root)) out.push(`- WARNING, production database: ${s}`)
@@ -4285,7 +4323,7 @@ async function designContext(args) {
     .filter(Boolean)
   const result = lintProject(root)
   const files = uiFiles(root)
-  const out = ['# Project design context']
+  const out = ['# Project design context', await contentLangNote(root)]
   out.push(`Mode: ${onlyFiles?.length ? `quick (only ${onlyFiles.join(', ')})` : 'full'}`)
   out.push(`Likely development server: ${devServerUrl(root) ?? '(not identified — see package.json)'}`)
   out.push(`Quality floor (read it before auditing or fixing): ${QUALITY_FLOOR}`)
@@ -4340,7 +4378,7 @@ async function showcaseContext() {
   const { root } = linkedProject()
   const designMdPath = findDesignMd(root)
   const runtime = detectRuntime(root)
-  const out = ['# Design Showcase context', '', `How CSS runs in the replica: ${RUNTIME_NOTE[runtime]}`]
+  const out = ['# Design Showcase context', await contentLangNote(root), '', `How CSS runs in the replica: ${RUNTIME_NOTE[runtime]}`]
   if (designMdPath) {
     const md = fs.readFileSync(path.join(root, designMdPath), 'utf8')
     // A seção de componentes é o que importa; o resto do design.md vai resumido pelos títulos.

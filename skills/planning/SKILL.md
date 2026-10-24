@@ -82,7 +82,7 @@ When the feature has a flow with 3 or more parts (screen, server, database, outs
 
 ## 7. Save to Faundr (without creating files)
 
-No plan .md files: everything goes to the dashboard, which the agent rereads in the next sessions. Write it in the user's language.
+No plan .md files: everything goes to the dashboard, which the agent rereads in the next sessions. Write it in the project's content language (Faundr shows it in the context).
 
 1. The feature and the criterion:
    `faundr feature "<short title, up to ~8 words>" --desc "<who it's for and the problem, in one sentence>" --done-when "<criterion 1>; <criterion 2>"`

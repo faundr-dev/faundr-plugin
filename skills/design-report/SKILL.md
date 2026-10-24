@@ -20,7 +20,7 @@ Problem reported by the user: $ARGUMENTS
    - `practice`: something that should exist is missing (base component, control that does nothing).
    Severity: `high` if it prevents use, fails basic accessibility or breaks on mobile; `medium` if it is a visible error with a workaround; `low` if it is a detail.
    Rule: the type's theme + short name (e.g. `responsivo/largura-fixa`, `identidade/sem-favicon`).
-3. Record it with the Bash tool, without changing the meaning of what the user said; in `--detail`, what they saw + the likely cause you found in the code (write it in the user's language):
+3. Record it with the Bash tool, without changing the meaning of what the user said; in `--detail`, what they saw + the likely cause you found in the code (write it in the project's content language, shown in the Faundr context):
    `faundr design-finding "<short title>" --kind <type> --rule <theme/name> --severity <severity> --file <path> --line <n> --detail "<details>" --manual`
 
 Confirm in one sentence with the D-n number and say it can be fixed with `/faundr:design-fix D-<n>`. Do not start fixing now.

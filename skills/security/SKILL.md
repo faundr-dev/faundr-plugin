@@ -89,7 +89,7 @@ One command per problem (do not repeat what is already in the context's list of 
 
 "Needs check": the same command, with `--severity` being the severity **if confirmed**, plus `--needs-check "<the missing fact>" --how-to-check "<how the owner checks it>"`.
 
-Write `--detail`, `--impact`, `--fix`, `--needs-check` and `--how-to-check` in the user's language, for **people who don't code** to read on the dashboard. Never paste a whole key: mask it.
+Write `--detail`, `--impact`, `--fix`, `--needs-check` and `--how-to-check` in the project's content language (Faundr shows it in the context), for **people who don't code** to read on the dashboard. Never paste a whole key: mask it.
 
 ## 7. Coverage critic (full mode)
 
@@ -103,7 +103,7 @@ At the end, with the Bash tool:
 
 `faundr security-review-done --areas "<what you reviewed; separated by ;>" --clean "<what you checked and is ok, with the named control; separated by ;>" --summary "<2 sentences, including what was left out>"` (add `--quick` in quick mode)
 
-Write these texts in the user's language.
+Write these texts in the project's content language (Faundr shows it in the context).
 
 ## 9. Answer
 

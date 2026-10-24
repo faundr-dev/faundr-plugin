@@ -7,7 +7,7 @@ allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *
 
 User request: $ARGUMENTS
 
-Separate the rule (short and affirmative, e.g. "Every server route checks access to the project"), the why and, if the user mentioned files, folders or file types, the paths. Write the rule and the why in the user's language. Use paths from the project root: a file (`src/server/hook-events.ts`), a folder (`src/server`) or a pattern (`src/routes/**/*.ts`, `*.sql`). Run with the Bash tool, with quotes, one `--file` per path:
+Separate the rule (short and affirmative, e.g. "Every server route checks access to the project"), the why and, if the user mentioned files, folders or file types, the paths. Write the rule and the why in the project's content language (Faundr shows it in the context). Use paths from the project root: a file (`src/server/hook-events.ts`), a folder (`src/server`) or a pattern (`src/routes/**/*.ts`, `*.sql`). Run with the Bash tool, with quotes, one `--file` per path:
 `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" rule "<rule>" --why "<why>" --file "<path>"`
 
 Without paths, the rule applies to everything and goes in at the start of every session. If the rule clearly talks about a part of the code but the user did not say where, suggest the paths (use `faundr graph-query` if there is a graph) and ask in one sentence before recording.

@@ -7,7 +7,7 @@ allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *
 
 User request: $ARGUMENTS
 
-Separate the decision (short, affirmative, e.g. "Auth stays in Supabase") from the why, in the user's language, and run with the Bash tool, with quotes:
+Separate the decision (short, affirmative, e.g. "Auth stays in Supabase") from the why, in the project's content language (Faundr shows it in the context), and run with the Bash tool, with quotes:
 `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" decision "<decision>" --why "<why>"`
 
 If the decision applies only to one part of the code (files, folders or patterns like `src/server/**`), add one `--file "<path>"` per path: it stops going in at the start of every session and reaches the agent before it edits those files.

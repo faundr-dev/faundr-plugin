@@ -21,7 +21,7 @@ Do not repeat what is already above.
 
 ## 3. Propose the list to the user
 
-- From 5 to 15 features, at the level the owner understands: what the person can do in the app ("Email login", "Driver sign-up", "Monthly report"), not technical names ("AuthProvider", "utils"). Write them in the user's language.
+- From 5 to 15 features, at the level the owner understands: what the person can do in the app ("Email login", "Driver sign-up", "Monthly report"), not technical names ("AuthProvider", "utils"). Write them in the project's content language (Faundr shows it in the context).
 - For each one: short title, one sentence on what it does, 1 to 4 parts (what it has) and the files that prove it.
 - Mark what looks half-done (screen not connected to the database, TODO, route without a screen) as "in progress", not as done.
 - Show the list and ask with the question tool: record all, record with adjustments (they say which) or do not record.

@@ -37,7 +37,7 @@ One command per problem:
 
 `faundr quality-finding "<short title: the problem>" --theme <theme> [--label <label>] --severity high|medium|low --confidence <80-100> --file <path> --line <n> --detail "<what it is and where, in plain language>" --impact "<why it matters for whoever uses or maintains it>" --fix "<the concrete replacement or the minimal change>" [--saves <n>]`
 
-Write `--detail`, `--impact` and `--fix` for people who **don't code** to read on the dashboard, in the user's language, but with the exact name of the function, component or feature.
+Write `--detail`, `--impact` and `--fix` for people who **don't code** to read on the dashboard, in the project's content language (Faundr shows it in the context), but with the exact name of the function, component or feature.
 
 ## 5. Record the coverage
 

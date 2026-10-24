@@ -11,7 +11,7 @@ Faundr stores only the **name, the description, the origin** (project, personal 
 1. **Read the skills:** `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" skills scan`. The response says how many it found per origin, the new ones and the ones without a "when to use".
 2. **Write the "when to use" and the topics** for each skill without a "when to use" (or only for the one the user mentioned). See the description with `faundr skills list` and save:
    `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" skills when "<name>" --when "<when to use>" --topic "<topic>" --topic "<topic>"`
-   - **When to use:** one sentence in plain language, in the user's language, from the request's point of view ("request to write or improve page copy"), up to 300 characters.
+   - **When to use:** one sentence in plain language, in the project's content language (Faundr shows it in the context), from the request's point of view ("request to write or improve page copy"), up to 300 characters.
    - **Topics:** 2 to 5 short words or phrases that, appearing in the request, should remind Claude of this skill (e.g. `headline`, `home page copy`, `copy`). Prefer words that only appear in that kind of request; avoid generic ones ("code", "project", "file"), which would bring the reminder all the time.
    - Faundr's internal skills (`faundr:*`) already have their own moment of use: save only the "when to use", without topics.
    - With many skills (more than 15 without a "when to use"), do the project ones first, then the personal ones and last the plugin ones, and say how many are left.

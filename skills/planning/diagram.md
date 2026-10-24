@@ -8,7 +8,7 @@ Only with the owner's OK: it uses more tokens than usual. The feature drawing wo
 - **Only the detours that matter**: the main error case and the way back to try again. Don't draw every detail.
 - **Lanes = who does it** (2 to 5): e.g. `Person`, `Screen`, `Server`, `Database`, `External service` (Pix, email…). Use the project's names when it helps ("Cart screen").
 - **Columns = the order** (0, 1, 2…). Pieces that happen at the same moment can share a column in different lanes. Never two pieces in the same lane and column.
-- **Plain language** in the labels, written in the user's language (up to 32 characters; detail goes in `sublabel`, up to 48).
+- **Plain language** in the labels, written in the project's content language, shown in the Faundr context (up to 32 characters; detail goes in `sublabel`, up to 48).
 - **Explanation of each piece** in `detail` (up to 400 characters, 2 to 3 sentences): what it is, why it exists and what happens there, for people who don't code. It's what opens when the owner clicks the piece on the canvas. Skip it only for the person and the result when the label already says it all.
 - Up to 30 pieces and 50 connections; for a feature, 6 to 14 pieces is usually enough.
 

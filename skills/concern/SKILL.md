@@ -7,7 +7,7 @@ allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *
 
 User request: $ARGUMENTS
 
-Separate a short, direct title (what is worrying) from the details (why it is worrying, what needs to be reviewed, when), without changing the meaning of what the user said, in the user's language. Run with the Bash tool, with quotes:
+Separate a short, direct title (what is worrying) from the details (why it is worrying, what needs to be reviewed, when), without changing the meaning of what the user said, in the project's content language (Faundr shows it in the context). Run with the Bash tool, with quotes:
 `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" concern "<title>" --why "<details>"`
 
 Confirm in one sentence. Do not treat the concern as a decision or start resolving it now.

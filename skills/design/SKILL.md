@@ -27,7 +27,7 @@ The design.md is the rule for the screens: without it there's nothing to audit a
 - **Scope** (in a second round, if needed): does it need to work on phones (yes / computer only / built for phones)? Product type (app or dashboard / site or landing page / both)? Theme (dark / light / both)? Motion (no animation / sober / expressive)? Save the answers with `faundr design-scope --mobile … --product … --theme … --motion …`.
 If the user already said any of this in this conversation, don't ask again: use it and cite it. If they answer "Other", follow what they wrote.
 
-**1c. Write `DESIGN.md` at the root** with the answers and the exact values from the code (write the prose in the user's language):
+**1c. Write `DESIGN.md` at the root** with the answers and the exact values from the code (write the prose in the project's content language, shown in the Faundr context):
 - Sections: **Principles** (3–5 sentences: what the look communicates), **Colors** (each token with name, hex value and use; no color outside this list), **Typography** (fonts, weights, heading/body sizes), **Spacing and shape** (radii, borders, cuts, shadows), **Components** (what already exists and must be reused, with the file path and when to use each variant), **Screen patterns** (page structure, empty/loading/error states, menus and modals), **Motion** (the project's curves and durations — if there are none, propose the quality floor ones: exit `cubic-bezier(0.23, 1, 0.32, 1)`, button 100–160 ms, menu 150–250 ms, modal 200–300 ms —, what doesn't animate because it's used all the time, and "respects reduced motion"), **Scope and exceptions** (the scope answers and the decided exceptions, "technique — reason", e.g. "Lucide icons only — brand choice"), **Don't** (concrete mistakes to avoid; always include: disabling phone zoom, removing the focus outline without a replacement, clickable `div` instead of a button, `transition-all`, blocking paste in fields).
 - Write the values exactly as they are in the code (e.g. `@theme` tokens, `styles.css` classes), so the automatic check recognizes the palette.
 - At the top, one line saying where each decision came from (e.g. "colors and fonts: tokens from src/styles.css, confirmed by the user on 09/29").
@@ -75,7 +75,7 @@ One command per real problem (no guessing; point to file and line):
 
 `faundr design-finding "<short title, the problem>" --kind <type> --rule <theme>/<short-name> --severity high|medium|low --file <path> --line <n> --detail "<what's wrong, why it matters and how to fix it, in plain language>"`
 
-Write the title and detail in the user's language.
+Write the title and detail in the project's content language (Faundr shows it in the context).
 
 - `--rule`: the type's theme + a short lowercase hyphenated name, reusing the same name for the same problem (e.g. `responsivo/grid-sem-celular`, `responsivo/largura-fixa`, `acessibilidade/foco-removido`, `movimento/duracao-longa`, `conteudo/sem-estado-vazio`, `identidade/sem-favicon`). It's how the owner archives or turns off a whole rule.
 - **Severity by the yardstick, not by impression:** `high` = blocks the task, fails basic accessibility (text contrast, invisible focus, zoom disabled, button without a name) or breaks on phones (horizontal scrolling, unreachable content), or a whole screen off the standard; `medium` = visible error that has a workaround; `low` = polish and consistency. Tiebreaker: "would the person open a support ticket because of this?" → at least `medium`.

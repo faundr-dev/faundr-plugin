@@ -10,7 +10,7 @@ A workflow is the script Claude follows when a request matches a topic. You only
 
 1. **Check whether it already exists.** Run `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" workflow list`. If one of them already covers the topic, show which (W-n) and stop; changing a workflow is done in the dashboard.
 2. **Ask only if it is vague.** If you cannot tell when it applies or what the steps are, ask a short question (with options). If you are proposing it because you noticed a pattern, show the steps in a list and ask whether you can save the draft.
-3. **Build the steps** in the order you would follow them. Each step is a `--step`, with the type in front when it is not a plain instruction (write the step text in the user's language; keep the type prefixes exactly as shown):
+3. **Build the steps** in the order you would follow them. Each step is a `--step`, with the type in front when it is not a plain instruction (write the step text in the project's content language, shown in the Faundr context; keep the type prefixes exactly as shown):
    - instruction: `"Search GitHub for similar repositories — 3 to 5, with an open license"`
    - Faundr skill: `"skill: /faundr:design — audit the screens touched"`
    - parallel agents: `"agentes 2: read the code — one per area, each returns what is worth copying"`

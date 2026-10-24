@@ -4,7 +4,7 @@ description: Records in Faundr what is being built. Use ALWAYS when, in a projec
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *)
 ---
 
-Use the Faundr CLI through the Bash tool (`faundr ...`; if it is not on the PATH, `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" ...`). Always with quotes. Write titles, tasks and decisions in the user's language.
+Use the Faundr CLI through the Bash tool (`faundr ...`; if it is not on the PATH, `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" ...`). Always with quotes. Write titles, tasks and decisions in the project's content language (Faundr shows it in the context).
 
 **When starting multi-step work** (new screen, integration, refactor, big improvement, "now let's go to phase 2"), **before building**:
 1. If there is no suitable current feature (`faundr board`), create one: `faundr feature "<short title>" --desc "<goal>" --done-when "<criterion>; <criterion>"` (how to know it is done, in a way that can be checked).

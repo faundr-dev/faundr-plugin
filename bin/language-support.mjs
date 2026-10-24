@@ -35,7 +35,7 @@ const NA = ['na']
 // match: nomes de linguagem da Stack (stack.languages) ou de tecnologia (stack.tech) que ligam a linha.
 export const LANGUAGE_SUPPORT = [
   {
-    id: 'js-ts', name: 'JavaScript e TypeScript', examples: 'Node, React, Next.js, TanStack',
+    id: 'js-ts', name: 'JavaScript e TypeScript', name_en: 'JavaScript & TypeScript', examples: 'Node, React, Next.js, TanStack',
     match: { languages: ['TypeScript', 'JavaScript'] },
     features: {
       mapa: ['completo'], qualidade: ['completo'], seguranca: ['completo'], dependencias: ['completo'], segredos: SECRETS,
@@ -67,7 +67,7 @@ export const LANGUAGE_SUPPORT = [
     },
   },
   {
-    id: 'svelte-astro', name: 'Svelte e Astro',
+    id: 'svelte-astro', name: 'Svelte e Astro', name_en: 'Svelte & Astro',
     match: { languages: ['Svelte', 'Astro'] },
     features: {
       mapa: ['completo'], qualidade: ['completo'],
@@ -84,7 +84,7 @@ export const LANGUAGE_SUPPORT = [
     },
   },
   {
-    id: 'flutter', name: 'Flutter e Dart',
+    id: 'flutter', name: 'Flutter e Dart', name_en: 'Flutter & Dart',
     match: { languages: ['Dart'], tech: ['Flutter'] },
     features: {
       mapa: ['completo'], qualidade: ['completo'], seguranca: ['completo'],
@@ -199,21 +199,27 @@ export function supportForStack(stack) {
 /** Linhas do projeto em que a função não roda sozinha (parcial, só o Claude ou ainda não) — para o aviso. */
 export function supportGaps(stack, feature) {
   return supportForStack(stack)
-    .map((l) => ({ id: l.id, name: l.name, status: l.features[feature]?.[0] ?? 'na', note: l.features[feature]?.[1] }))
+    .map((l) => ({ id: l.id, name: l.name, name_en: l.name_en, status: l.features[feature]?.[0] ?? 'na', note: l.features[feature]?.[1] }))
     .filter((g) => g.status === 'parcial' || g.status === 'claude' || g.status === 'nao')
 }
 
 /** Arquivo de código de qualquer linguagem da tabela (para a revisão do Claude, que lê qualquer uma). */
 export const SOURCE_FILE = /\.(m?[jt]sx?|c[jt]s|py|go|rs|java|kts?|php|cs|dart|c|h|cc|cpp|cxx|hpp|hh|hxx|vue|svelte|astro|html?|css|scss|rb|swift|sql)$|(^|\/)Dockerfile[\w.-]*$/i
 
-// As notas da tabela ficam em português (o painel mostra); para o Claude, em inglês.
+// As notas da tabela ficam em português; o inglês serve ao Claude e ao painel em inglês (sem citar o Claude).
 const NOTE_EN = {
   'só com Conan (conan.lock); o vcpkg não tem base pública de falhas conhecidas': 'only with Conan (conan.lock); vcpkg has no public database of known vulnerabilities',
   'as imagens base não têm base pública de falhas conhecidas (OSV); a Qualidade avisa imagem sem versão fixa': 'base images have no public database of known vulnerabilities (OSV); Quality flags images without a pinned version',
-  'o Claude audita lendo as telas (/faundr:design)': 'Claude audits it by reading the screens (/faundr:design)',
+  'o Claude audita lendo as telas (/faundr:design)': 'your AI agent audits it by reading the screens (/faundr:design)',
 }
 
 /** Linhas para o pacote de contexto do Claude: onde a checagem automática não cobre e ele precisa ler. */
 export function gapLines(stack, feature) {
   return supportGaps(stack, feature).map((g) => `- ${g.name.replace(' e ', ' and ')}: ${g.status === 'parcial' ? `the automatic check covers only part of it (${NOTE_EN[g.note] ?? g.note})` : "the automatic check doesn't cover it yet"}; review it by reading the code`)
 }
+
+/** Nome da linguagem na língua do painel (name_en só quando difere: 'JavaScript & TypeScript'). */
+export const supportName = (row, lang) => (lang === 'en' ? (row.name_en ?? row.name) : row.name)
+
+/** Nota de uma célula (parcial, só o agente, ainda não) na língua do painel. */
+export const supportNote = (note, lang) => (note && lang === 'en' ? (NOTE_EN[note] ?? note) : note)

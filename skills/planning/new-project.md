@@ -1,6 +1,6 @@
 # Project start
 
-Use when the owner describes a whole product ("I want to build an app for…") or the linked project has no code and no features yet. The goal is to leave the conversation with four things on the dashboard: the **Project overview** (what it is, who it's for, the planned parts), the **stages** (the first version and what comes after), the owner's **decisions** and, if they want, the drawn **architecture**. No plan file in the project. Write everything in the user's language.
+Use when the owner describes a whole product ("I want to build an app for…") or the linked project has no code and no features yet. The goal is to leave the conversation with four things on the dashboard: the **Project overview** (what it is, who it's for, the planned parts), the **stages** (the first version and what comes after), the owner's **decisions** and, if they want, the drawn **architecture**. No plan file in the project. Write everything in the project's content language (Faundr shows it in the context).
 
 Steps 2, 4 and 5 of the skill still apply (look before asking, short rounds with a recommendation, vague answers don't pass). What changes is the subject of the questions and what comes out at the end.
 

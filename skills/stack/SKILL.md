@@ -13,7 +13,7 @@ The "Detectado agora" part comes from an automatic reading of the files: it is t
 ## 2. Rules
 
 - **Never write values** of variables, keys, passwords or tokens. Only the variable name (`SUPABASE_URL`), what it is for and which service it belongs to. Do not read `.env` to get values.
-- Write for **people who don't code**, in the user's language: in `detail`, `role` and `purpose`, say what the piece does for the project ("stores the data and logs users in"), not how it works inside.
+- Write for **people who don't code**, in the project's content language (Faundr shows it in the context): in `detail`, `role` and `purpose`, say what the piece does for the project ("stores the data and logs users in"), not how it works inside.
 - Do not make things up. If it cannot be known from the files or from the conversation (server region, paid or free plan), leave it out or record it in `notes` as a question.
 - If there is a previous revision, **update** it: keep what is still true, including what came from outside the files.
 - Cut the detection noise: remove variables that are not project configuration (examples in text, variables from other tools) and technologies that do not matter for understanding the project. Small development tools (lint, formatting) can stay, with the right category.

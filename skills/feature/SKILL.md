@@ -8,7 +8,7 @@ allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *
 User request: $ARGUMENTS
 
 1. **Plan before recording.** Read `${CLAUDE_PLUGIN_ROOT}/skills/planning/SKILL.md` and follow steps 1 to 6 (size, look at the project, a few pointed questions with a recommendation, a checkable done-when and the summary for the owner to approve). Skip it if the user asked not to be asked questions or if it is an already planned stage (faundr focus). After the OK, record as below.
-2. Record the feature with the done-when criterion (the "Done when" items, separated by semicolons), in the user's language:
+2. Record the feature with the done-when criterion (the "Done when" items, separated by semicolons), in the project's content language (Faundr shows it in the context):
    `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" feature "<short title, up to ~8 words>" --desc "<description>" --done-when "<criterion 1>; <criterion 2>"`
 3. Save each choice that changes what will be built as a decision (it stays linked to the feature and comes back to the agent in the next conversations):
    `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" decision "<the choice, e.g. Payment only via Pix in this stage>" --why "<what the user answered and why>" --global`

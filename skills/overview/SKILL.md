@@ -13,7 +13,7 @@ If you need to confirm something (for example, what a command really does), read
 ## 2. Write the Overview for someone who does NOT code
 
 The reader is the project owner, who may not understand their own code. Rules:
-- Plain language, in the user's language, short sentences. No unexplained jargon (if you use "API", "hook", "graph", explain it in the glossary).
+- Plain language, in the project's content language (Faundr shows it in the context), short sentences. No unexplained jargon (if you use "API", "hook", "graph", explain it in the glossary).
 - Say **what the thing does for the person**, not how it is implemented.
 - Be specific: real names of this project's screens, commands and features.
 - If a previous Overview exists, **update it**: keep what is still true and fix what changed.

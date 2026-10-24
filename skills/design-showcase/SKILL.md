@@ -51,7 +51,7 @@ Open the component's file (and the class's CSS, when it is a global class) befor
 
 - `file`: the component's main file; `files`: all the files whose look the replica copies (the component and the classes' CSS). **These are what Faundr uses to mark the replica as outdated when the code changes**; do not forget the CSS.
 - `group`: groups on the canvas (Buttons, Fields, Cards, Navigation, Tags, Feedback, Modals, Other).
-- `usage`: when to use it, in plain language, in the user's language (from design.md).
+- `usage`: when to use it, in plain language, in the project's content language, shown in the Faundr context (from design.md).
 - `background`: the background where the component really appears (e.g. the background of the dark screens). Without it, the project's `body` background applies.
 - `width`: frame width in px (200–1400; default 480). Use more for cards and headers.
 - `variants`: 1 to 8 states side by side: default, with icon, sizes, active, disabled, empty, with long content… For hover/focus, write the variant with the state classes already applied (e.g. `bg-neutral-200` instead of `hover:bg-neutral-200`) and say so in the name ("On hover").

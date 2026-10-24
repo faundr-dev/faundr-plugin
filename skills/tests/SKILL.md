@@ -30,7 +30,7 @@ For each critical feature (and the others, if there's time), find out with Grep 
 
 `coberta` (covered) = the main paths and at least one error case have tests; `parcial` (partial) = something is tested, but an important path is missing; `sem-testes` (no tests) = nothing.
 
-Write the note in the user's language.
+Write the note in the project's content language (Faundr shows it in the context).
 
 ## 4. Write the missing tests
 
