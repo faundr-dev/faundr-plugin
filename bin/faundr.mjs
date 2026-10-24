@@ -154,9 +154,9 @@ import { envMatrix, hostingFromCli, hostingProvider } from './env-matrix.mjs'
 import { anonReads, dbFindings, dbSummary, exposedTables, migrationTables, parseProbe, PROBE_SQL, probeWithToken, supabaseTarget } from './db-test.mjs'
 import { lang, LANGS, locale, setLang, t } from './i18n.mjs'
 import { contentLangLine, ensureContentLang, languageGuidance, validContentLang } from './content-lang.mjs'
-import { agentSessionId, currentAgent, toolEdits } from './agent.mjs'
+import { agentSessionId, agentStdout, currentAgent, toolEdits } from './agent.mjs'
 import { codexLauncher, codexRulesFile, syncCodexRules } from './codex-rules.mjs'
-import { isCodexRollout, rolloutMeters } from './codex-transcript.mjs'
+import { codexExitCodeWait, isCodexRollout, rolloutMeters } from './codex-transcript.mjs'
 import { changesSince, createCheckpoint, currentTree, describeChanges, ensureSessionCheckpoint, findCheckpoint, gitRoot, listCheckpoints, restoreCheckpoint, restoreSummary } from './checkpoints.mjs'
 
 const CONFIG_DIR = path.join(os.homedir(), '.faundr')
@@ -164,8 +164,11 @@ const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json')
 const LOG_FILE = path.join(CONFIG_DIR, 'hook.log')
 const LINK_FILE = '.faundr.json'
 // Agente que rodou este comando (Claude Code ou Codex) e a sessão dele, para o painel marcar quem fez.
-const AGENT = ['hook', 'gate', 'guard'].includes(process.argv[2]) && process.argv[3] === 'codex' ? 'codex' : currentAgent()
+const AGENT = ['hook', 'gate', 'guard', 'subagent-start'].includes(process.argv[2]) && process.argv[3] === 'codex' ? 'codex' : currentAgent()
 const AGENT_SESSION_ID = agentSessionId()
+// No Codex as skills se chamam com $: tudo o que o Faundr escreve (avisos dos hooks, inclusive os que vêm do painel, e
+// a saída da CLI, que passa pelo mesmo stdout) sai com $faundr: no lugar de /faundr:.
+agentStdout(AGENT)
 // Site do Faundr no ar; para desenvolver o próprio Faundr: /faundr:login --url http://localhost:3000.
 const DEFAULT_API_URL = 'https://faundr.palasbusinessstrategy.workers.dev'
 
@@ -921,7 +924,7 @@ const CODEX_GUIDANCE = () => {
   return `[Faundr] You are running in Codex. How to read Faundr's notes and skills here:
 - "faundr <args>" means: ${cli} <args> (the faundr command is not on the PATH). In Faundr's skills, node "\${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" <args> means the same command.
 - Elsewhere in Faundr's skills, \${CLAUDE_PLUGIN_ROOT} is ${PLUGIN_ROOT}; a line like !\`command\` is a command to run first with the shell, using its output as the text that would be there; $ARGUMENTS is what the user wrote after the skill name (empty if nothing).
-- "/faundr:<name>" is the Faundr skill <name> (faundr:<name>): open its SKILL.md and follow it. "AskUserQuestion" means asking the user in chat, with numbered options and the recommended one first.
+- A skill name with a slash in front (as Claude Code writes it, inside the SKILL.md files) is the Faundr skill faundr:<name>: open its SKILL.md and follow it. When you tell the user to run a skill, write it the Codex way: $faundr:<name>. "AskUserQuestion" means asking the user in chat, with numbered options and the recommended one first.
 - Faundr's commands talk to the dashboard over the network: if one fails for lack of network in the sandbox, ask to run it again with network access.`
 }
 
@@ -1719,7 +1722,7 @@ async function workOwner({ command, args, current, text }) {
       `Note: the feature "${r.title}" belongs to ${r.by}. Do not ${release ? 'release' : 'take'} it without agreeing first: tell the user and, if they confirm, run faundr ${command} "${text || r.id.slice(0, 8)}" --force.`,
     )
   if (release) return console.log(`Feature without an owner: ${r.title} (whoever touches it first becomes the owner).`)
-  return console.log(`You are the owner of "${r.title}"${r.from ? ` (was ${r.from}'s)` : ''}. Other people's Claude will warn before touching it.`)
+  return console.log(`You are the owner of "${r.title}"${r.from ? ` (was ${r.from}'s)` : ''}. Other people's agents will warn before touching it.`)
 }
 
 async function workFocus({ root, text }) {
@@ -2372,8 +2375,10 @@ async function errorsApi(body, link = linkedProject()) {
 // Chamado pelo hook depois de cada comando Bash do agente. Só olha checagens (build, tipos, testes,
 // lint, scripts); git, grep e servidores de desenvolvimento ficam de fora.
 // Com pipe, o código de saída é o do último comando (`npm run build | tail`): a saída diz se falhou.
-function commandFailed(payload, piped, output) {
+// `exitCode`: o do Codex, que não tem evento de falha (vem da conversa; null quando não se sabe).
+function commandFailed(payload, piped, output, exitCode = null) {
   if (payload.hook_event_name === 'PostToolUseFailure') return true
+  if (!piped && exitCode !== null) return exitCode !== 0
   return Boolean(piped && outputSaysFailed(output))
 }
 
@@ -2389,8 +2394,12 @@ async function captureErrors(payload, root, projectId, config) {
   const output = toolOutput(payload)
   const piped = /\|/.test(command)
   const filtered = /\|\s*(grep|rg|sed|awk|findstr|select-string)\b/i.test(command)
-  const failed = commandFailed(payload, piped, output)
-  const issues = parseErrors(output, { kind: c.kind, root, failed, cwd: commandCwd(command, payload.cwd ?? root) })
+  // Codex: o código de saída está na conversa, no item do comando com o mesmo id (o hook roda em segundo plano).
+  const exitCode = isCodexRollout(payload.transcript_path) ? await codexExitCodeWait(payload.transcript_path, payload.tool_use_id) : null
+  const failed = commandFailed(payload, piped, output, exitCode)
+  // Falhou sem escrever nada: no Claude Code a falha sempre traz "Exit code N"; no Codex a saída vem vazia.
+  const text = output.trim() || !failed || exitCode === null ? output : `Exit code ${exitCode}`
+  const issues = parseErrors(text, { kind: c.kind, root, failed, cwd: commandCwd(command, payload.cwd ?? root) })
   const passed = !failed && !issues.length
   if (passed && filtered) return // saída filtrada vazia não prova nada
   if (!passed && !issues.length) return
@@ -2601,7 +2610,7 @@ async function blameLines(root, top, e, out) {
     return null
   })
   if (where?.session)
-    out.push(`  Made in the Claude conversation of ${new Date(where.session.startedAt).toISOString().slice(0, 16).replace('T', ' ')} UTC${where.session.prompt ? `, in the request: "${where.session.prompt}"` : ''}`)
+    out.push(`  Made in the agent conversation of ${new Date(where.session.startedAt).toISOString().slice(0, 16).replace('T', ' ')} UTC${where.session.prompt ? `, in the request: "${where.session.prompt}"` : ''}`)
   return out
 }
 
@@ -2836,7 +2845,7 @@ async function securityScan(args) {
 // Linguagens do projeto que a checagem não lê (ou só lê em parte): sem isto, "nenhum problema" engana. Devolve se havia alguma.
 function printGaps(root, feature, command) {
   const gaps = gapLines(detectStack(root).stack, feature)
-  if (gaps.length) console.log([`Outside the automatic check (Claude reviews it with ${command}):`, ...gaps].join('\n'))
+  if (gaps.length) console.log([`Outside the automatic check (the AI reviews it with ${command}):`, ...gaps].join('\n'))
   return gaps.length > 0
 }
 
@@ -3475,7 +3484,7 @@ async function qualityLadder(args) {
   const on = textArg(args)
   if (!['on', 'off', 'liga', 'desliga'].includes(on)) throw new Error('usage: faundr quality-ladder on|off')
   const r = await qualityApi({ action: 'settings', ladder: on === 'on' || on === 'liga' })
-  console.log(r.ladder ? 'Quality reminder on: Claude gets the ladder at the start of every session.' : 'Quality reminder off.')
+  console.log(r.ladder ? 'Quality reminder on: the agent gets the ladder at the start of every session.' : 'Quality reminder off.')
 }
 
 // Tamanho da mudança da sessão: tudo o que mudou desde o commit em que ela começou (commits + não commitado).
@@ -4764,7 +4773,7 @@ async function designResolve(args) {
   console.log(`Finding D-${r.ref} resolved: ${r.title}`)
 }
 
-const ORIGIN_LABEL = { lint: 'automatic check', audit: "Claude's audit", manual: 'reported by the person' }
+const ORIGIN_LABEL = { lint: 'automatic check', audit: 'AI audit', manual: 'reported by the person' }
 
 // Ordem de correção: o que quebra o uso ou a acessibilidade → estados → responsivo e fluxo → desvio do design.md → polimento.
 const FIX_STAGE = (f) => {
@@ -5118,7 +5127,7 @@ async function aiSection(items) {
   if (pending.length)
     out.push(
       '',
-      t('To generate (in order), in Claude Code:', 'Para gerar (em ordem), no Claude Code:'),
+      t('To generate (in order), in your AI agent:', 'Para gerar (em ordem), no seu agente de IA:'),
       t(`- only the essentials (${essentialList}): ${essentialCost}`, `- só o essencial (${essentialList}): ${essentialCost}`),
       t(`- everything that is missing (${pending.length}): ${costText(sum(pending), share)}`, `- tudo o que falta (${pending.length}): ${costText(sum(pending), share)}`),
       t('- or one by one, or nothing now (you can generate them later, when needed).', '- ou um por um, ou nada agora (dá para gerar depois, quando precisar).'),
@@ -5193,7 +5202,7 @@ async function setupItems({ apply, skip, refresh }) {
       title: 'Login',
       status: 'falta',
       detail: t('not signed in yet', 'ainda não entrou'),
-      why: t('sign in: faundr login (opens the browser; in Claude Code: /faundr:login).', 'faça o login: faundr login (abre o navegador; no Claude Code: /faundr:login).'),
+      why: t('sign in: faundr login (opens the browser; inside your AI agent: /faundr:login).', 'faça o login: faundr login (abre o navegador; dentro do agente de IA: /faundr:login).'),
     })
   if (!projects) return items
   add({ title: 'Login', status: 'ok', detail: t(`${projects.length} project(s) in your account`, `${projects.length} projeto(s) na sua conta`) })
@@ -5310,8 +5319,8 @@ async function setupItems({ apply, skip, refresh }) {
             status: 'falta',
             detail: t('read, but some skills have no kind', 'lidas, mas há skills sem tipo'),
             why: t(
-              'in Claude Code, run /faundr:skills: it writes when to use each one and links the ones that find problems to the dashboard.',
-              'no Claude Code, rode /faundr:skills: ele escreve quando usar cada uma e liga ao painel as que acham problemas.',
+              'run /faundr:skills in your AI agent: it writes when to use each one and links the ones that find problems to the dashboard.',
+              'rode /faundr:skills no agente de IA: ele escreve quando usar cada uma e liga ao painel as que acham problemas.',
             ),
           }
         : { title: 'Skills', status: 'ok', detail: t('connected', 'conectadas') },
@@ -5356,8 +5365,8 @@ async function setupItems({ apply, skip, refresh }) {
         applyId: 'agents-md',
         detail: t("without the team's rules block", 'sem o bloco de regras do time'),
         why: t(
-          'only worth it if the team uses another agent besides Claude Code (Codex, Cursor): the block takes the rules and decisions into AGENTS.md.',
-          'só vale se o time usa outro agente além do Claude Code (Codex, Cursor): o bloco leva as regras e decisões para o AGENTS.md.',
+          'only worth it if the team also uses an agent that does not run the plugin (Cursor, for example): the block takes the rules and decisions into AGENTS.md.',
+          'só vale se o time também usa um agente que não roda o plugin (o Cursor, por exemplo): o bloco leva as regras e decisões para o AGENTS.md.',
         ),
         apply: t('faundr setup --apply agents-md (or --skip agents-md)', 'faundr setup --apply agents-md (ou --skip agents-md)'),
       })
@@ -5401,8 +5410,8 @@ async function setupItems({ apply, skip, refresh }) {
               status: 'falta',
               detail: t('none has arrived yet', 'ainda não chegou nenhum'),
               why: t(
-                'in Claude Code, run /faundr:errors-setup so the errors of people using the app show up on the dashboard. To leave it out: faundr setup --skip errors',
-                'no Claude Code, rode /faundr:errors-setup para os erros de quem usa o app aparecerem no painel. Para deixar de fora: faundr setup --skip errors',
+                'run /faundr:errors-setup in your AI agent so the errors of people using the app show up on the dashboard. To leave it out: faundr setup --skip errors',
+                'rode /faundr:errors-setup no agente de IA para os erros de quem usa o app aparecerem no painel. Para deixar de fora: faundr setup --skip errors',
               ),
             },
       )

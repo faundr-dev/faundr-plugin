@@ -239,8 +239,8 @@ export function checkRecoveryPlan(root, files) {
       key,
       status: 'falta',
       detail: t(
-        'There is no recovery plan: what to do if a key leaks, the database is lost, an account is hacked or the site goes down. Ask Claude for a draft with /faundr:launch.',
-        'Não há plano de recuperação: o que fazer se vazar uma chave, se o banco for perdido, se uma conta for invadida ou se o site cair. Peça ao Claude um rascunho com /faundr:launch.',
+        'There is no recovery plan: what to do if a key leaks, the database is lost, an account is hacked or the site goes down. Ask your AI agent for a draft with /faundr:launch.',
+        'Não há plano de recuperação: o que fazer se vazar uma chave, se o banco for perdido, se uma conta for invadida ou se o site cair. Peça um rascunho ao agente de IA com /faundr:launch.',
       ),
       evidence: [],
     }

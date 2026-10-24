@@ -10,6 +10,15 @@ export function agentSessionId(env = process.env) {
   return (currentAgent(env) === 'codex' ? env.CODEX_SESSION_ID : env.CLAUDE_CODE_SESSION_ID) ?? null
 }
 
+/**
+ * Texto do Faundr no jeito do agente: no Codex as skills se chamam com $, então /faundr:x vira $faundr:x. Só troca
+ * no começo de uma palavra (depois de espaço, aspas, crase ou parêntese), para não mexer em caminhos de arquivo.
+ */
+export function forAgent(text, agent) {
+  if (agent !== 'codex' || typeof text !== 'string') return text
+  return text.replace(/(^|[\s(`'"“])\/faundr:/g, '$1$$faundr:')
+}
+
 // O Codex não tem o "perguntar ao usuário" nos hooks (só barrar): o Faundr barra, o agente pergunta no chat e,
 // com o sim, repete o mesmo comando, que passa uma vez.
 const CONFIRM_WINDOW_MS = 10 * 60_000
@@ -81,4 +90,11 @@ export function toolEdits(toolName, input = {}) {
     .filter((c) => typeof c === 'string')
     .join('\n')
   return [{ file, content, isNew: toolName === 'Write' }]
+}
+
+/** Faz tudo o que o processo escreve no stdout passar por forAgent (os hooks do Codex chamam com o argumento codex). */
+export function agentStdout(agent) {
+  if (agent !== 'codex') return
+  const write = process.stdout.write.bind(process.stdout)
+  process.stdout.write = (chunk, ...rest) => write(typeof chunk === 'string' ? forAgent(chunk, agent) : chunk, ...rest)
 }

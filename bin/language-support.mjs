@@ -28,7 +28,7 @@ export const SUPPORT_STATUS = {
   na: 'Não se aplica',
 }
 
-const CLAUDE_DESIGN = ['claude', 'o Claude audita lendo as telas (/faundr:design)']
+const CLAUDE_DESIGN = ['claude', 'a IA audita lendo as telas (/faundr:design)']
 const SECRETS = ['completo']
 const NA = ['na']
 
@@ -210,7 +210,7 @@ export const SOURCE_FILE = /\.(m?[jt]sx?|c[jt]s|py|go|rs|java|kts?|php|cs|dart|c
 const NOTE_EN = {
   'só com Conan (conan.lock); o vcpkg não tem base pública de falhas conhecidas': 'only with Conan (conan.lock); vcpkg has no public database of known vulnerabilities',
   'as imagens base não têm base pública de falhas conhecidas (OSV); a Qualidade avisa imagem sem versão fixa': 'base images have no public database of known vulnerabilities (OSV); Quality flags images without a pinned version',
-  'o Claude audita lendo as telas (/faundr:design)': 'your AI agent audits it by reading the screens (/faundr:design)',
+  'a IA audita lendo as telas (/faundr:design)': 'your AI agent audits it by reading the screens (/faundr:design)',
 }
 
 /** Linhas para o pacote de contexto do Claude: onde a checagem automática não cobre e ele precisa ler. */

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { outputSaysFailed, parseErrors } from '../bin/errors.mjs'
+import { classify, outputSaysFailed, parseErrors } from '../bin/errors.mjs'
 import { setLang } from '../bin/i18n.mjs'
 
 // Os títulos dos E-n vão para o painel na língua da pessoa: os testes fixam o português.
@@ -53,4 +53,9 @@ test('node --test que falhou: um erro por teste, com o motivo, sem repetir a lis
   // Saída no formato TAP também.
   const tap = parseErrors('ok 1 - soma\nnot ok 2 - aplica cupom\n  ---\n# fail 1', { kind: 'test', root: '/p', failed: true })
   assert.match(tap[0].title, /^Teste falhou: aplica cupom/)
+})
+
+test('Windows: npm.cmd e npx.cmd (o PowerShell bloqueia o npm.ps1) contam como npm e npx', () => {
+  assert.deepEqual(classify('npm.cmd test'), { kind: 'test', checkKey: 'npm test' })
+  assert.equal(classify('npx.cmd tsc --noEmit')?.checkKey, 'npx tsc --noEmit')
 })

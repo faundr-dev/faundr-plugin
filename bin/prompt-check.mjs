@@ -21,6 +21,10 @@ import { workflowsForPrompt, workflowsOnce } from './workflows.mjs'
 import { noteSkillRan, readSkillIndex, skillsOnce, typedSkill } from './skills.mjs'
 import { markSkillStart } from './ai-cost.mjs'
 import { skillStepsNote, stepOff } from './flows.mjs'
+import { agentStdout } from './agent.mjs'
+
+// Os hooks do Codex chamam com o argumento codex: as skills ali se chamam com $.
+agentStdout(process.argv[2] === 'codex' ? 'codex' : 'claude')
 
 const readState = (root) => {
   try {

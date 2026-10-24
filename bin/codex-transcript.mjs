@@ -142,4 +142,45 @@ export function rolloutMeters(file, sessionId) {
 }
 
 /** O arquivo é uma conversa do Codex (rollout-*.jsonl em ~/.codex/sessions)? */
-export const isCodexRollout = (file) => /(^|[\/])rollout-[^\/]*\.jsonl$/.test(String(file ?? ''))
+export const isCodexRollout = (file) => /(^|[\\/])rollout-[^\\/]*\.jsonl$/.test(String(file ?? ''))
+
+/**
+ * Código de saída de um comando do Codex: o hook não recebe, mas a conversa já tem o item CommandExecution com o
+ * mesmo id (tool_use_id) quando o PostToolUse roda. Lê só o fim do arquivo. Null quando não acha.
+ */
+export function codexExitCode(file, toolUseId, tailBytes = 512 * 1024) {
+  if (!file || !toolUseId) return null
+  let text = ''
+  try {
+    const fd = fs.openSync(file, 'r')
+    const size = fs.fstatSync(fd).size
+    const start = Math.max(0, size - tailBytes)
+    const buf = Buffer.alloc(size - start)
+    fs.readSync(fd, buf, 0, buf.length, start)
+    fs.closeSync(fd)
+    text = buf.toString('utf8')
+  } catch {
+    return null
+  }
+  const lines = text.split('\n')
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].includes(toolUseId) || !lines[i].includes('"exit_code"')) continue
+    try {
+      const code = JSON.parse(lines[i]).payload?.item?.exit_code
+      return typeof code === 'number' ? code : null
+    } catch {
+      // Linha cortada no começo do trecho lido: segue procurando.
+    }
+  }
+  return null
+}
+
+/** O mesmo, esperando um pouco: às vezes o hook roda antes de o Codex gravar o item do comando na conversa. */
+export async function codexExitCodeWait(file, toolUseId, { timeoutMs = 2000, everyMs = 150 } = {}) {
+  const until = Date.now() + timeoutMs
+  for (;;) {
+    const code = codexExitCode(file, toolUseId)
+    if (code !== null || Date.now() >= until) return code
+    await new Promise((resolve) => setTimeout(resolve, everyMs))
+  }
+}

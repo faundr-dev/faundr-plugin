@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { agentSessionId, codexDecision, currentAgent, patchEdits, skillFromCommand, toolEdits } from '../bin/agent.mjs'
+import { agentSessionId, codexDecision, currentAgent, forAgent, patchEdits, skillFromCommand, toolEdits } from '../bin/agent.mjs'
 
 test('agente: Codex pelo CODEX_SESSION_ID, mesmo aberto de dentro do Claude Code', () => {
   assert.equal(currentAgent({ CLAUDE_CODE_SESSION_ID: 'c1' }), 'claude')
@@ -73,4 +73,11 @@ test('Codex: a skill começa quando o agente abre o SKILL.md pelo terminal', () 
   assert.equal(skillFromCommand('cat /home/ana/.codex/plugins/cache/x/meu-plugin/1.0/skills/deploy/SKILL.md'), 'meu-plugin:deploy')
   assert.equal(skillFromCommand('cat .agents/skills/release/SKILL.md'), 'release')
   assert.equal(skillFromCommand('git status'), null)
+})
+
+test('Codex: /faundr:x vira $faundr:x nos textos, sem mexer em caminhos', () => {
+  assert.equal(forAgent('Rode /faundr:setup e depois `/faundr:undo`.', 'codex'), 'Rode $faundr:setup e depois `$faundr:undo`.')
+  assert.equal(forAgent('{"reason":"(to undo: /faundr:undo)"}', 'codex'), '{"reason":"(to undo: $faundr:undo)"}')
+  assert.equal(forAgent('plugin/faundr:x fica', 'codex'), 'plugin/faundr:x fica')
+  assert.equal(forAgent('Rode /faundr:setup', 'claude'), 'Rode /faundr:setup')
 })

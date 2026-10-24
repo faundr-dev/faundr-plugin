@@ -21,6 +21,8 @@ export function normalizeCommand(command) {
   let c = String(command ?? '').replace(/\s+/g, ' ').trim()
   c = c.replace(/^(cd\s+("[^"]*"|'[^']*'|\S+)\s*(&&|;)\s*)+/, '')
   c = c.replace(/^([A-Z_][A-Z0-9_]*=\S*\s+)+/, '')
+  // Windows: o PowerShell bloqueia o npm.ps1 e o agente (o Codex, quase sempre) chama npm.cmd, npx.cmd…
+  c = c.replace(/\b(npm|npx|pnpm|yarn|bun|node|tsc|eslint|vitest|jest|python|pytest)\.(cmd|exe|ps1)\b/gi, '$1')
   c = c.replace(/\s*\|\s*(head|tail)(\s+-n)?(\s+-?\d+)?\s*$/g, '')
   c = c.replace(/\s*[12]?>&[12]/g, '').replace(/\s*[12]?>\s*\/dev\/null/g, '')
   return c.trim().slice(0, 300)

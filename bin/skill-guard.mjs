@@ -9,7 +9,9 @@ import { blockedSkill, noteSkillRan } from './skills.mjs'
 import { markSkillStart } from './ai-cost.mjs'
 import { skillStepsNote } from './flows.mjs'
 import { findDirWith, readStdin } from './paths.mjs'
-import { skillFromCommand } from './agent.mjs'
+import { agentStdout, skillFromCommand } from './agent.mjs'
+
+agentStdout(process.argv[2] === 'codex' ? 'codex' : 'claude')
 
 try {
   const payload = JSON.parse(await readStdin())

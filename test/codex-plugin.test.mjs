@@ -22,7 +22,8 @@ test('plugin do Codex: hooks próprios, que avisam ao Faundr que vêm do Codex',
   const commands = Object.values(hooks).flatMap((groups) => groups.flatMap((g) => g.hooks.map((h) => h.command)))
   for (const c of commands) {
     assert.ok(c.includes('${PLUGIN_ROOT}'), c)
-    if (/faundr\.mjs" (hook|gate|guard)\b|guard-cmd|live\.mjs/.test(c)) assert.match(c, / codex$/, c)
+    // Todo hook do Codex avisa ao Faundr de onde vem (agente, texto com $faundr:, medição).
+    assert.match(c, / codex$/, c)
   }
   const edit = hooks.PreToolUse.find((g) => g.hooks[0].command.includes('guard codex'))
   assert.match('apply_patch', new RegExp(`^(${edit.matcher})$`))

@@ -21,7 +21,7 @@ import { takeLoopAlerts } from './loop.mjs'
 import { guardInstall } from './package-guard.mjs'
 import { pushWarning, readTeam } from './team.mjs'
 import { t } from './i18n.mjs'
-import { codexDecision } from './agent.mjs'
+import { agentStdout, codexDecision } from './agent.mjs'
 
 const CONFIG_DIR = path.join(os.homedir(), '.faundr')
 
@@ -92,6 +92,7 @@ function currentBranch(cwd) {
 // Comando e sessão atuais, para a confirmação do Codex (ver codexDecision).
 let current = { command: null, sessionId: null }
 const CODEX = process.argv[2] === 'codex'
+agentStdout(CODEX ? 'codex' : 'claude')
 
 function reply(output) {
   if (CODEX && output.permissionDecision) {

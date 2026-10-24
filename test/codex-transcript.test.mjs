@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
-import { codexMeters } from '../bin/codex-transcript.mjs'
+import { codexExitCode, codexExitCodeWait, codexMeters, isCodexRollout } from '../bin/codex-transcript.mjs'
 import { transcriptMark, transcriptUsage, usageSince } from '../bin/usage.mjs'
 
 // Rollout do Codex enxuto, com o formato real (0.164): rodada, aviso do Faundr no contexto, pedido, chamada de
@@ -82,4 +82,36 @@ test('conversa do Codex: contexto e % do plano no formato dos medidores da barra
     at: 5,
   })
   assert.equal(codexMeters(LINES.slice(0, 3)), null)
+})
+
+test('conversa do Codex: código de saída do comando pelo id que o hook recebe', () => {
+  const item = (id, code) => ({ type: 'event_msg', payload: { type: 'item_completed', item: { type: 'CommandExecution', id, status: code ? 'failed' : 'completed', exit_code: code } } })
+  const { file, done } = rollout([...LINES, item('exec-1', 0), item('exec-2', 1)])
+  try {
+    assert.equal(codexExitCode(file, 'exec-1'), 0)
+    assert.equal(codexExitCode(file, 'exec-2'), 1)
+    assert.equal(codexExitCode(file, 'exec-3'), null)
+    assert.equal(codexExitCode(null, 'exec-1'), null)
+  } finally {
+    done()
+  }
+})
+
+test('conversa do Codex: espera o item do comando chegar, se o hook rodou antes', async () => {
+  const { file, done } = rollout(LINES)
+  try {
+    const item = { type: 'event_msg', payload: { type: 'item_completed', item: { type: 'CommandExecution', id: 'exec-9', exit_code: 1 } } }
+    setTimeout(() => fs.appendFileSync(file, JSON.stringify(item) + '\n'), 200)
+    assert.equal(await codexExitCodeWait(file, 'exec-9', { timeoutMs: 2000, everyMs: 50 }), 1)
+    assert.equal(await codexExitCodeWait(file, 'exec-nunca', { timeoutMs: 120, everyMs: 50 }), null)
+  } finally {
+    done()
+  }
+})
+
+test('conversa do Codex: reconhece o arquivo pelo nome, com barra normal ou invertida', () => {
+  assert.equal(isCodexRollout(String.raw`C:\Users\ana\.codex\sessions\2026\10\24\rollout-2026-10-24T15-37-38-01a1.jsonl`), true)
+  assert.equal(isCodexRollout('/home/ana/.codex/sessions/2026/10/24/rollout-x.jsonl'), true)
+  assert.equal(isCodexRollout(String.raw`C:\Users\ana\.claude\projects\x\6b955178.jsonl`), false)
+  assert.equal(isCodexRollout(undefined), false)
 })
