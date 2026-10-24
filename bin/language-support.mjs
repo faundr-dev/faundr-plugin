@@ -23,7 +23,7 @@ export const SUPPORT_FEATURES = [
 export const SUPPORT_STATUS = {
   completo: 'Completo',
   parcial: 'Parcial',
-  claude: 'Só o Claude',
+  claude: 'Só a IA',
   nao: 'Ainda não',
   na: 'Não se aplica',
 }
