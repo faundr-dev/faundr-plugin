@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { agentSessionId, codexDecision, currentAgent, patchEdits, toolEdits } from '../bin/agent.mjs'
+import { agentSessionId, codexDecision, currentAgent, patchEdits, skillFromCommand, toolEdits } from '../bin/agent.mjs'
 
 test('agente: Codex pelo CODEX_SESSION_ID, mesmo aberto de dentro do Claude Code', () => {
   assert.equal(currentAgent({ CLAUDE_CODE_SESSION_ID: 'c1' }), 'claude')
@@ -63,4 +63,14 @@ test('Codex: "perguntar" vira barrar até o usuário dizer sim e o mesmo comando
   // Barrar de vez continua barrando.
   const deny = { permissionDecision: 'deny', permissionDecisionReason: 'x' }
   assert.deepEqual(codexDecision(deny, 'rm -rf /', null).output, deny)
+})
+
+test('Codex: a skill começa quando o agente abre o SKILL.md pelo terminal', () => {
+  assert.equal(
+    skillFromCommand(String.raw`Get-Content -LiteralPath 'C:\Users\ana\.codex\plugins\cache\faundr\faundr\0.101.1\skills\overview\SKILL.md'`),
+    'faundr:overview',
+  )
+  assert.equal(skillFromCommand('cat /home/ana/.codex/plugins/cache/x/meu-plugin/1.0/skills/deploy/SKILL.md'), 'meu-plugin:deploy')
+  assert.equal(skillFromCommand('cat .agents/skills/release/SKILL.md'), 'release')
+  assert.equal(skillFromCommand('git status'), null)
 })

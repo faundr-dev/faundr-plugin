@@ -25,3 +25,14 @@ test('nome do computador: o da configuração vale mais que o do sistema', () =>
   assert.equal(machineName({ machine: 'Notebook da Ana' }), 'Notebook da Ana')
   assert.ok(machineName({}))
 })
+
+test('estado ao vivo no Codex: o primeiro arquivo do patch e o nome da skill aberta, sem o conteúdo', () => {
+  const patch = livePayload({ tool_name: 'apply_patch', tool_input: { command: '*** Begin Patch\n*** Update File: src/a.ts\n+const segredo = 1\n*** End Patch' } }, 'codex')
+  assert.equal(patch.tool_input.file_path, 'src/a.ts')
+  assert.equal(patch.tool_input.command, undefined)
+  assert.ok(!JSON.stringify(patch).includes('segredo'))
+  const skill = livePayload({ tool_name: 'Bash', tool_input: { command: 'cat /h/.codex/plugins/cache/faundr/faundr/1.0/skills/stack/SKILL.md' } }, 'codex')
+  assert.equal(skill.tool_input.skill, 'faundr:stack')
+  // No Claude Code a skill vem pela ferramenta Skill; um cat de SKILL.md não conta.
+  assert.equal(livePayload({ tool_name: 'Bash', tool_input: { command: 'cat skills/stack/SKILL.md' } }).tool_input.skill, undefined)
+})

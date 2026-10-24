@@ -9,11 +9,13 @@ import { blockedSkill, noteSkillRan } from './skills.mjs'
 import { markSkillStart } from './ai-cost.mjs'
 import { skillStepsNote } from './flows.mjs'
 import { findDirWith, readStdin } from './paths.mjs'
+import { skillFromCommand } from './agent.mjs'
 
 try {
   const payload = JSON.parse(await readStdin())
   const root = findDirWith(payload.cwd ?? process.cwd(), '.faundr.json')
-  const name = payload.tool_input?.skill ?? payload.tool_input?.name
+  // No Codex (sem ferramenta Skill) a skill começa quando o agente abre o SKILL.md pelo terminal.
+  const name = process.argv[2] === 'codex' ? skillFromCommand(payload.tool_input?.command) : payload.tool_input?.skill ?? payload.tool_input?.name
   const s = root && name ? blockedSkill(root, name) : null
   if (s)
     process.stdout.write(

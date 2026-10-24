@@ -8,7 +8,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { toolEdits } from './agent.mjs'
+import { skillFromCommand, toolEdits } from './agent.mjs'
 
 const CONFIG_DIR = path.join(os.homedir(), '.faundr')
 const DEFAULT_API_URL = 'https://faundr.palasbusinessstrategy.workers.dev'
@@ -52,7 +52,7 @@ function gitBranch(cwd) {
 }
 
 /** O que vai para o servidor: o mínimo para saber o estado. */
-export function livePayload(p) {
+export function livePayload(p, agent = 'claude') {
   const input = p.tool_input ?? {}
   // O apply_patch do Codex traz o patch inteiro em command: daqui só sai o primeiro arquivo.
   const patch = p.tool_name === 'apply_patch'
@@ -68,7 +68,8 @@ export function livePayload(p) {
       description: typeof input.description === 'string' ? input.description.slice(0, 200) : undefined,
       command: program,
       // Nome da skill chamada (não é conteúdo): a aba Agora mostra a área e o workflow marca o passo da skill.
-      skill: typeof input.skill === 'string' ? input.skill.slice(0, 120) : undefined,
+      // No Codex, o nome da skill sai do caminho do SKILL.md que o comando abre.
+      skill: typeof input.skill === 'string' ? input.skill.slice(0, 120) : agent === 'codex' && p.tool_name === 'Bash' ? skillFromCommand(input.command) ?? undefined : undefined,
     },
     notification_type: p.notification_type,
     message: typeof p.message === 'string' ? p.message.slice(0, 200) : undefined,
@@ -95,7 +96,7 @@ async function main() {
   await fetch(`${apiUrl}/api/hooks/event`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-    body: JSON.stringify({ agent: process.argv[2] === 'codex' ? 'codex' : 'claude', projectId, git: { branch: gitBranch(cwd) }, machine: machineName(config), at, payload: livePayload(payload) }),
+    body: JSON.stringify({ agent: process.argv[2] === 'codex' ? 'codex' : 'claude', projectId, git: { branch: gitBranch(cwd) }, machine: machineName(config), at, payload: livePayload(payload, process.argv[2] === 'codex' ? 'codex' : 'claude') }),
     signal: AbortSignal.timeout(5000),
   })
 }

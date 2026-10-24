@@ -156,6 +156,7 @@ import { lang, LANGS, locale, setLang, t } from './i18n.mjs'
 import { contentLangLine, ensureContentLang, languageGuidance, validContentLang } from './content-lang.mjs'
 import { agentSessionId, currentAgent, toolEdits } from './agent.mjs'
 import { codexLauncher, codexRulesFile, syncCodexRules } from './codex-rules.mjs'
+import { isCodexRollout, rolloutMeters } from './codex-transcript.mjs'
 import { changesSince, createCheckpoint, currentTree, describeChanges, ensureSessionCheckpoint, findCheckpoint, gitRoot, listCheckpoints, restoreCheckpoint, restoreSummary } from './checkpoints.mjs'
 
 const CONFIG_DIR = path.join(os.homedir(), '.faundr')
@@ -701,6 +702,11 @@ async function hook(agent) {
   if (event === 'SessionStart') sessionStartState(root, payload.session_id)
   await bashEvents(event, payload, root, projectId, { token, apiUrl })
 
+  // Codex: sem a barra do Faundr, o contexto e a % do plano vêm da própria conversa (o custo das skills compara com eles).
+  if (agent === 'codex' && (event === 'UserPromptSubmit' || event === 'Stop') && payload.transcript_path) {
+    const meters = rolloutMeters(payload.transcript_path, payload.session_id)
+    if (meters) fs.writeFileSync(ensureFaundrPath(root, 'meters'), JSON.stringify(meters))
+  }
   const usage = event === 'Stop' || event === 'SessionEnd' ? sessionUsage(payload, root) : null
   const request = fetch(`${apiUrl}/api/hooks/event`, {
     method: 'POST',
@@ -752,7 +758,7 @@ function trackEdit(payload, projectId) {
 // Impacto: lembra a conversa desta sessão; devolve se há uso de conversas anteriores para reenviar (o fim delas
 // costuma se perder). Só reenvia junto com as checagens do início.
 function rememberUsage(agent, event, payload, root, startJobs) {
-  if (agent !== 'claude' || !CONTEXT_EVENTS.has(event) || !payload.transcript_path) return false
+  if (!CONTEXT_EVENTS.has(event) || !payload.transcript_path) return false
   const pending = readState(root).usageTranscripts ?? {}
   if (pending[payload.session_id]?.path !== payload.transcript_path)
     writeState(root, { usageTranscripts: rememberTranscript(pending, payload.session_id, payload.transcript_path) })
@@ -972,7 +978,7 @@ async function usageSync(args) {
       const res = await fetch(`${config.apiUrl}/api/hooks/event`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${config.token}` },
-        body: JSON.stringify({ agent: 'claude', projectId, payload: { hook_event_name: 'UsageSync', session_id: sid, cwd: root }, usage }),
+        body: JSON.stringify({ agent: isCodexRollout(file) ? 'codex' : 'claude', projectId, payload: { hook_event_name: 'UsageSync', session_id: sid, cwd: root }, usage }),
         signal: AbortSignal.timeout(10_000),
       })
       if (!res.ok) {

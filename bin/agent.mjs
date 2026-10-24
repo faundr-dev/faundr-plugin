@@ -30,6 +30,19 @@ export function codexDecision(output, command, pending, now = Date.now()) {
   }
 }
 
+// No Codex não há ferramenta Skill: o agente abre o SKILL.md pelo terminal. Skill de plugin fica em
+// .../plugins/cache/<catálogo>/<plugin>/<versão>/skills/<nome>/SKILL.md (vira "plugin:nome"); as outras, em .../skills/<nome>/.
+const PLUGIN_SKILL = /[\\/]plugins[\\/]cache[\\/][^\\/]+[\\/]([^\\/]+)[\\/][^\\/]+[\\/]skills[\\/]([^\\/"']+)[\\/]SKILL\.md/i
+const OTHER_SKILL = /[\\/]skills[\\/]([^\\/"']+)[\\/]SKILL\.md/i
+
+/** Skill que um comando do Codex está abrindo (ou null). */
+export function skillFromCommand(command) {
+  const text = String(command ?? '')
+  const plugin = text.match(PLUGIN_SKILL)
+  if (plugin) return `${plugin[1]}:${plugin[2]}`
+  return text.match(OTHER_SKILL)?.[1] ?? null
+}
+
 /**
  * Arquivos de um apply_patch do Codex, cada um com o texto que entra nele (as linhas com "+").
  * `kind`: add (arquivo novo), update ou delete. Um "Move to" troca o caminho final.

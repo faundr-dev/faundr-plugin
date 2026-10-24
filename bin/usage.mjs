@@ -1,17 +1,22 @@
-// Uso da sessão, lido da conversa do Claude Code (o .jsonl em transcript_path, mais os dos subagentes):
-// tokens por modelo, ferramentas, quanto o Faundr pôs no contexto, o que o aviso do fim da resposta custou e
-// a economia estimada do grafo. Nada do texto da conversa sai daqui: só números.
+// Uso da sessão, lido da conversa do Claude Code (o .jsonl em transcript_path, mais os dos subagentes) ou da do
+// Codex (traduzida para o mesmo formato em codex-transcript.mjs): tokens por modelo, ferramentas, quanto o Faundr pôs
+// no contexto, o que o aviso do fim da resposta custou e a economia estimada do grafo. Nada do texto da conversa sai
+// daqui: só números.
 import fs from 'node:fs'
 import path from 'node:path'
+import { codexEntries, isCodexEntry } from './codex-transcript.mjs'
 
 const EXPLORE_TOOLS = new Set(['Read', 'Grep', 'Glob'])
-// Bash usado para olhar o código (o mesmo papel de Read/Grep/Glob).
-const EXPLORE_BASH = /^\s*(?:cd\s+[^&;|]+(?:&&|;)\s*)?(?:grep|rg|cat|head|tail|sed\s+-n|find|ls|wc)\b/
+// Bash usado para olhar o código (o mesmo papel de Read/Grep/Glob). No Codex o terminal costuma ser o PowerShell.
+const EXPLORE_BASH = /^\s*(?:cd\s+[^&;|]+(?:&&|;)\s*)?(?:grep|rg|cat|head|tail|sed\s+-n|find|ls|wc|get-content|gc|select-string|get-childitem|type)\b/i
 const GRAPH_CMD = /\bfaundr(?:\.mjs)?["']?\s+graph-(?:query|path|explain|callers|skeleton|grep)\b/
 // Rodapé que `faundr graph-*` imprime (graphFooter).
 // Rodapé em inglês e o antigo, em português (conversas de antes da troca).
 const GRAPH_FOOTER = /\[Faundr\] (?:Graph: answer|Grafo: resposta) ~(\d+) tokens; (?:files cited|arquivos citados): \d+, ~(\d+) tokens/
 const FAUNDR_MARK = '[Faundr]'
+
+// Conversa do Codex: traduz para o formato do Claude Code. `model` é o da rodada anterior ao trecho lido.
+const normalize = (entries, model) => (entries.some(isCodexEntry) ? codexEntries(entries, { model }) : entries)
 
 function readEntries(file) {
   let text
@@ -30,7 +35,7 @@ function readEntries(file) {
       // Linha cortada (o arquivo ainda está sendo escrito): pula só ela.
     }
   }
-  return out
+  return normalize(out)
 }
 
 const contentText = (c) => (typeof c === 'string' ? c : c?.text ?? '')
@@ -281,7 +286,21 @@ function entriesFrom(file, offset) {
       // A primeira linha pode vir cortada pela marca: pula só ela.
     }
   }
-  return out
+  return normalize(out, offset ? modelBefore(file, offset) : null)
+}
+
+// Codex: o modelo vem no turn_context de cada rodada, que pode ter ficado antes da marca.
+function modelBefore(file, offset) {
+  try {
+    const fd = fs.openSync(file, 'r')
+    const buf = Buffer.alloc(offset)
+    fs.readSync(fd, buf, 0, offset, 0)
+    fs.closeSync(fd)
+    return [...buf.toString('utf8').matchAll(/"type":"turn_context".*?"model":"([^"]+)"/g)].at(-1)?.[1] ?? null
+  } catch {
+    // Arquivo ilegível: sem modelo conhecido.
+    return null
+  }
 }
 
 /** Tokens gastos depois da marca (conversa + subagentes, novos ou que cresceram), por tipo e por modelo. */
