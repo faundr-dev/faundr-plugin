@@ -11,7 +11,7 @@ import path from 'node:path'
 import { FLUTTER_RULES, FLUTTER_TEXT, flutterFileRules } from './design-flutter.mjs'
 import { isNativeProject, NATIVE_RULES, NATIVE_TEXT, nativeFileRules } from './design-native.mjs'
 import { locale, t } from './i18n.mjs'
-import { allDeps, isClaudePlugin } from './parts.mjs'
+import { allDeps, faundrIgnore, ignoredBy, isClaudePlugin } from './parts.mjs'
 
 const SKIP = /(^|\/)(node_modules|\.git|\.faundr|dist|build|out|coverage|\.claude|\.remember|\.wrangler|\.next|\.nuxt|\.svelte-kit|\.tanstack|\.vercel|\.output)(\/|$)/
 const NOT_APP = /(^|\/)(__tests__|__mocks__|fixtures?|mocks?|stories|test|tests|e2e)(\/|$)|\.(test|spec|stories)\.|\.gen\./
@@ -71,6 +71,7 @@ Object.assign(RULES, FLUTTER_RULES, NATIVE_RULES)
 // ---------- leitura do projeto ----------
 
 function walk(root) {
+  const ignored = faundrIgnore(root)
   const out = []
   const visit = (dir, depth) => {
     if (depth > 10) return
@@ -84,7 +85,7 @@ function walk(root) {
     for (const e of entries) {
       const abs = path.join(dir, e.name)
       const rel = path.relative(root, abs).split(path.sep).join('/')
-      if (SKIP.test(rel) || (e.isDirectory() && isClaudePlugin(abs))) continue
+      if (SKIP.test(rel) || ignoredBy(ignored, rel) || (e.isDirectory() && isClaudePlugin(abs))) continue
       if (e.isDirectory()) visit(abs, depth + 1)
       else out.push(rel)
     }

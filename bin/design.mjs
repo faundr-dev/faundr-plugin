@@ -9,7 +9,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { t } from './i18n.mjs'
-import { isClaudePlugin, projectParts } from './parts.mjs'
+import { faundrIgnore, ignoredBy, isClaudePlugin, projectParts } from './parts.mjs'
 import { extractTokens } from './design-tokens.mjs'
 import { detectThemes, runRules } from './design-rules.mjs'
 
@@ -40,28 +40,15 @@ export function findDesignMd(root) {
   return null
 }
 
-function ignoreList(root) {
-  try {
-    return fs
-      .readFileSync(path.join(root, '.faundrignore'), 'utf8')
-      .split(/\r?\n/)
-      .map((l) => l.trim().replace(/\\/g, '/'))
-      .filter((l) => l && !l.startsWith('#'))
-  } catch {
-    // Sem .faundrignore (o normal): nada a ignorar.
-    return []
-  }
-}
-
 /** Arquivos de tela do projeto (componentes e páginas). */
 export function uiFiles(root) {
-  const ignored = ignoreList(root)
+  const ignored = faundrIgnore(root)
   const out = []
   const walk = (dir) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       const abs = path.join(dir, e.name)
       const rel = path.relative(root, abs).split(path.sep).join('/')
-      if (SKIP.test(rel) || (e.isDirectory() && isClaudePlugin(abs)) || ignored.some((i) => rel === i || rel.startsWith(i.replace(/\/?$/, '/')))) continue
+      if (SKIP.test(rel) || (e.isDirectory() && isClaudePlugin(abs)) || ignoredBy(ignored, rel)) continue
       if (e.isDirectory()) walk(abs)
       else if ((UI_EXT.test(e.name) || isFlutterScreen(rel)) && !GENERATED.test(e.name)) out.push(rel)
     }

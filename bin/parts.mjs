@@ -18,8 +18,27 @@ const readJson = (file) => {
   }
 }
 
-/** Subpastas (até 2 níveis, sem as ocultas) em que `has(dir)` é verdade. Caminhos com "/", relativos à raiz. */
+/** Pastas e arquivos que o dono tirou do Faundr no .faundrignore (uma por linha, como no .gitignore), sem "./" e sem "/" no fim. */
+export function faundrIgnore(root) {
+  let text = ''
+  try {
+    text = fs.readFileSync(path.join(root, '.faundrignore'), 'utf8')
+  } catch {
+    // Sem .faundrignore (o normal): nada a ignorar.
+    return []
+  }
+  return text
+    .split(/\r?\n/)
+    .map((l) => l.trim().replace(/\\/g, '/').replace(/^\.?\//, '').replace(/\/+$/, ''))
+    .filter((l) => l && !l.startsWith('#'))
+}
+
+/** O caminho (relativo à raiz, com "/") está numa pasta ou é um arquivo do .faundrignore? */
+export const ignoredBy = (ignored, rel) => ignored.some((i) => rel === i || rel.startsWith(`${i}/`))
+
+/** Subpastas (até 2 níveis, sem as ocultas nem as do .faundrignore) em que `has(dir)` é verdade. Caminhos com "/", relativos à raiz. */
 export function subDirs(root, has) {
+  const ignored = faundrIgnore(root)
   const dirs = []
   const walk = (rel, depth) => {
     let entries
@@ -32,6 +51,7 @@ export function subDirs(root, has) {
     for (const e of entries) {
       if (!e.isDirectory() || e.name.startsWith('.') || SKIP_DIR.test(e.name)) continue
       const sub = rel ? `${rel}/${e.name}` : e.name
+      if (ignoredBy(ignored, sub)) continue
       if (has(sub)) dirs.push(sub)
       if (depth < 2) walk(sub, depth + 1)
     }
