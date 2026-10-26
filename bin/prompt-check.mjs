@@ -86,7 +86,7 @@ try {
       // Um aviso que falha não impede os outros (o hook nunca quebra o agente).
     }
     try {
-      if (on('prompt.skills')) notes.push(skillsOnce(root, payload.session_id, payload.prompt))
+      if (on('prompt.skills')) notes.push(skillsOnce(root, payload.session_id, payload.prompt, process.argv[2] === 'codex' ? 'codex' : 'claude'))
     } catch {
       // Um aviso que falha não impede os outros (o hook nunca quebra o agente).
     }

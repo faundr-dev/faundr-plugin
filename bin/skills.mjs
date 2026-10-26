@@ -1,6 +1,7 @@
-// Skills conectadas (/faundr:skills): acha as skills que a pessoa já usa neste projeto — as do repositório
-// (.claude/skills), as pessoais (~/.claude/skills) e as dos plugins ligados para esta pasta — e lê só o nome, a
-// descrição e se o Claude pode chamá-la sozinho. O conteúdo das skills nunca sai do computador.
+// Skills conectadas (/faundr:skills): acha as skills que a pessoa já usa neste projeto, no Claude Code e no Codex —
+// as do repositório (.claude/skills, .agents/skills), as pessoais (~/.claude/skills, ~/.agents/skills, ~/.codex/skills)
+// e as dos plugins ligados para esta pasta — e lê só o nome, a descrição e se o agente pode chamá-la sozinho. O
+// conteúdo das skills nunca sai do computador.
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -105,12 +106,86 @@ export function activePlugins(root, home = os.homedir()) {
   return out
 }
 
+// ---- Codex ---------------------------------------------------------------------------------------------------
+// Pasta do Codex: CODEX_HOME ou ~/.codex. Plugins ligados no config.toml ([plugins."nome@loja"] enabled = …), o da
+// pasta (.codex/config.toml) vencendo o da pessoa; cada um instalado em plugins/cache/<loja>/<nome>/<versão>.
+
+export const codexHome = (home = os.homedir(), env = process.env) => (home === os.homedir() && env.CODEX_HOME) || path.join(home, '.codex')
+
+/** Os [plugins."x"] de um config.toml e se estão ligados (sem "enabled", ligado). */
+export function codexPluginToggles(text) {
+  const out = {}
+  let key = null
+  for (const line of String(text ?? '').split(/\r?\n/)) {
+    const head = line.match(/^\s*\[(.+)\]\s*(#.*)?$/)
+    if (head) {
+      key = head[1].match(/^plugins\.(?:"([^"]+)"|'([^']+)'|([\w@.-]+))$/)?.slice(1).find(Boolean) ?? null
+      if (key) out[key] = true
+      continue
+    }
+    const on = key && line.match(/^\s*enabled\s*=\s*(true|false)\b/)
+    if (on) out[key] = on[1] === 'true'
+  }
+  return out
+}
+
+const readText = (file) => {
+  try {
+    return fs.readFileSync(file, 'utf8')
+  } catch {
+    // Sem config.toml: nenhum plugin dele.
+    return ''
+  }
+}
+
+/** Versão mais nova entre as pastas de um plugin no cache (26.1020.11127 > 26.1016.51333; 0.103.0 > 0.99.2). */
+const newestVersion = (dirs) =>
+  dirs.sort((a, b) => {
+    const pa = a.split(/[.-]/).map(Number)
+    const pb = b.split(/[.-]/).map(Number)
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) if ((pb[i] || 0) !== (pa[i] || 0)) return (pb[i] || 0) - (pa[i] || 0)
+    return b.localeCompare(a)
+  })[0]
+
+/** Plugins do Codex ligados nesta pasta, com a pasta de skills que o manifesto aponta (padrão ./skills). */
+export function codexPlugins(root, home = os.homedir()) {
+  const base = codexHome(home)
+  const toggles = {
+    ...codexPluginToggles(readText(path.join(base, 'config.toml'))),
+    ...codexPluginToggles(readText(path.join(root, '.codex', 'config.toml'))),
+  }
+  const out = []
+  for (const [key, on] of Object.entries(toggles)) {
+    const [name, market] = key.split('@')
+    if (!on || !name || !market) continue
+    const dir = path.join(base, 'plugins', 'cache', market, name)
+    let versions = []
+    try {
+      versions = fs.readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name)
+    } catch {
+      // Ligado no config.toml mas ainda não baixado: sem skills dele.
+      continue
+    }
+    const version = newestVersion(versions)
+    if (!version) continue
+    const installPath = path.join(dir, version)
+    const skills = readJson(path.join(installPath, '.codex-plugin', 'plugin.json'))?.skills
+    out.push({ key, name, installPath, skillsPath: path.join(installPath, typeof skills === 'string' ? skills : 'skills') })
+  }
+  return out
+}
+
 /** Todas as skills desta pasta, sem repetir nome (a do projeto vence a pessoal com o mesmo nome). */
 export function scanSkills(root, home = os.homedir()) {
   const found = [
     ...skillsIn(path.join(root, '.claude', 'skills'), 'projeto'),
+    ...skillsIn(path.join(root, '.agents', 'skills'), 'projeto'),
     ...skillsIn(path.join(home, '.claude', 'skills'), 'pessoal'),
+    ...skillsIn(path.join(home, '.agents', 'skills'), 'pessoal'),
+    // Pasta antiga das skills pessoais do Codex (as dele mesmo ficam em .system, fora da lista).
+    ...skillsIn(path.join(codexHome(home), 'skills'), 'pessoal'),
     ...activePlugins(root, home).flatMap((p) => skillsIn(path.join(p.installPath, 'skills'), 'plugin', p.name)),
+    ...codexPlugins(root, home).flatMap((p) => skillsIn(p.skillsPath, 'plugin', p.name)),
   ]
   const seen = new Set()
   return found.filter((s) => !seen.has(s.name) && seen.add(s.name))
@@ -139,8 +214,8 @@ export const onlyUser = (s) => !!s.manual || s.call === 'user'
 /** Skills cujo assunto bate com o pedido. Sem assuntos definidos, usa o nome (ex.: "copywriting"). */
 export function skillsForPrompt(list, prompt, shownIds = [], max = 2) {
   const clean = String(prompt ?? '').replace(/<pasted_content[\s\S]*?<\/pasted_content>/g, ' ')
-  // Quem já chamou a skill pelo nome não precisa do aviso.
-  if (/(^|\s)\/[\w:-]+/.test(clean.trim().split('\n')[0])) return []
+  // Quem já chamou a skill pelo nome (/nome no Claude Code, $nome no Codex) não precisa do aviso.
+  if (/(^|\s)[/$][\w:-]+/.test(clean.trim().split('\n')[0])) return []
   return list
     .filter((s) => !shownIds.includes(s.name) && skillMoment(s, 'prompt'))
     .filter((s) => {
@@ -156,13 +231,18 @@ function skillWhen(s) {
   return s.description ? ` — ${clip(s.description, 160)}` : ''
 }
 
-/** Linha de uma skill no aviso: a que só a pessoa chama vira um lembrete em uma linha para ela, nunca uma chamada. */
-const skillLine = (s) =>
-  `- ${onlyUser(s) ? `/${s.name} (only the person calls it: do not run it; say in one line "this looks like a job for /${s.name}, want to run it?")` : `skill ${s.name}`}${skillWhen(s)}`
+/** Como a pessoa chama uma skill: /nome no Claude Code, $nome no Codex. */
+const callSign = (agent) => (agent === 'codex' ? '$' : '/')
 
-export function skillNote(items, where = 'this kind of request') {
+/** Linha de uma skill no aviso: a que só a pessoa chama vira um lembrete em uma linha para ela, nunca uma chamada. */
+const skillLine = (s, agent) => {
+  const call = `${callSign(agent)}${s.name}`
+  return `- ${onlyUser(s) ? `${call} (only the person calls it: do not run it; say in one line "this looks like a job for ${call}, want to run it?")` : `skill ${s.name}`}${skillWhen(s)}`
+}
+
+export function skillNote(items, where = 'this kind of request', agent = 'claude') {
   if (!items.length) return null
-  return [`[Faundr] The team uses these skills for ${where} (call them before doing it by hand, if it makes sense):`, ...items.map(skillLine)].join('\n')
+  return [`[Faundr] The team uses these skills for ${where} (call them before doing it by hand, if it makes sense):`, ...items.map((s) => skillLine(s, agent))].join('\n')
 }
 
 /** Skills com o momento "antes de editar" cujos arquivos batem com o arquivo editado. */
@@ -172,17 +252,18 @@ export const skillsForFile = (list, rel, shownIds = []) =>
 const readState = (root) => readJson(faundrPath(root, 'state')) ?? {}
 
 /** Entrega cada skill uma vez por sessão (pelo pedido ou pelo arquivo editado): devolve o aviso e marca. */
-function skillsShownOnce(root, sid, pick, where) {
+function skillsShownOnce(root, sid, pick, where, agent) {
   if (!sid) return null
   const state = readState(root)
   const ids = state.skillsShown?.session === sid ? state.skillsShown.ids : []
   const items = pick(readSkillIndex(root), ids)
   if (!items.length) return null
   fs.writeFileSync(faundrPath(root, 'state'), JSON.stringify({ ...readState(root), skillsShown: { session: sid, ids: [...ids, ...items.map((s) => s.name)] } }, null, 2))
-  return skillNote(items, where)
+  return skillNote(items, where, agent)
 }
 
-export const skillsOnce = (root, sid, prompt) => skillsShownOnce(root, sid, (list, ids) => skillsForPrompt(list, prompt, ids), 'this kind of request')
+export const skillsOnce = (root, sid, prompt, agent = 'claude') =>
+  skillsShownOnce(root, sid, (list, ids) => skillsForPrompt(list, prompt, ids), 'this kind of request', agent)
 
 export const skillsFileOnce = (root, sid, rel) => skillsShownOnce(root, sid, (list, ids) => skillsForFile(list, rel, ids), `editing ${rel}`)
 
@@ -209,9 +290,9 @@ export function connectedSkill(root, name) {
   return s && Object.hasOwn(CONNECTED_KINDS, s.kind ?? '') && !s.name.startsWith('faundr:') ? s : null
 }
 
-/** "/nome args" digitado pela pessoa: o nome da skill, se for um. */
+/** "/nome args" (Claude Code) ou "$nome args" (Codex) digitado pela pessoa: o nome da skill, se for um. */
 export function typedSkill(prompt) {
-  return String(prompt ?? '').trim().match(/^\/([\w.:-]+)/)?.[1] ?? null
+  return String(prompt ?? '').trim().match(/^[/$]([\w.:-]+)/)?.[1] ?? null
 }
 
 /** Anota que uma skill conectada rodou nesta sessão (devolve a skill, ou null se não é conectada). */

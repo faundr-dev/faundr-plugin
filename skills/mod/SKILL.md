@@ -20,7 +20,7 @@ Call Claude Code's `plugin-authoring` skill (Skill tool). It brings what changes
 
 Before creating, see whether something simpler solves it, and say which:
 
-- fixed text below the terminal, not reacting to anything → Faundr's status line (`/faundr:statusline`) or one of its items on the dashboard (Terminal);
+- fixed text below the terminal, not reacting to anything → Faundr's status line (`/faundr:statusline`) or one of its items on the dashboard (Settings → Status line);
 - instructions Claude should follow → a rule (`/faundr:rule`) or a workflow (`/faundr:workflow`);
 - a script the user calls → a skill.
 

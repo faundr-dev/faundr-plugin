@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
-import { activePlugins, parseFrontmatter, scanSkills, skillNote, skillsForPrompt, skillsOnce, writeSkillIndex } from '../bin/skills.mjs'
+import { activePlugins, codexPlugins, codexPluginToggles, parseFrontmatter, scanSkills, skillNote, skillsForPrompt, skillsOnce, typedSkill, writeSkillIndex } from '../bin/skills.mjs'
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-skills-'))
 const skill = (dir, name, head) => {
@@ -58,6 +58,43 @@ test('acha skills do projeto, pessoais e dos plugins ligados para esta pasta', (
   assert.equal(found.find((s) => s.name === 'copy').manual, true)
   assert.equal(found.find((s) => s.name === 'tdd').description, 'Testes primeiro')
   assert.ok(!JSON.stringify(found).includes('Corpo privado'))
+})
+
+test('Codex: skills do repositório (.agents), pessoais (~/.agents, ~/.codex) e dos plugins ligados no config.toml', () => {
+  const root = tmp()
+  const home = tmp()
+  const codex = path.join(home, '.codex')
+  skill(path.join(root, '.agents', 'skills'), 'review', 'name: review\ndescription: Revisão do repo')
+  skill(path.join(home, '.agents', 'skills'), 'reach', 'name: reach\ndescription: Ler links')
+  skill(path.join(codex, 'skills'), 'antiga', 'name: antiga\ndescription: Pasta antiga')
+  skill(path.join(codex, 'skills', '.system'), 'imagegen', 'name: imagegen\ndescription: Do próprio Codex')
+  const cache = path.join(codex, 'plugins', 'cache')
+  skill(path.join(cache, 'loja', 'docs', '0.9.0', 'skills'), 'velha', 'name: velha\ndescription: Versão antiga')
+  skill(path.join(cache, 'loja', 'docs', '0.10.0', 'pecas'), 'documentos', 'name: documentos\ndescription: Documentos')
+  json(path.join(cache, 'loja', 'docs', '0.10.0', '.codex-plugin', 'plugin.json'), { name: 'docs', skills: './pecas/' })
+  skill(path.join(cache, 'loja', 'off', '1.0.0', 'skills'), 'z', 'name: z\ndescription: desligado')
+  skill(path.join(cache, 'loja', 'aqui', '1.0.0', 'skills'), 'w', 'name: w\ndescription: desligado só nesta pasta')
+  fs.writeFileSync(
+    path.join(codex, 'config.toml'),
+    '[desktop]\nenabled = false\n\n[plugins."docs@loja"]\nenabled = true\n\n[plugins."off@loja"]\nenabled = false\n\n[plugins."aqui@loja"]\nenabled = true\n\n[plugins."sumiu@loja"]\n',
+  )
+  fs.mkdirSync(path.join(root, '.codex'), { recursive: true })
+  fs.writeFileSync(path.join(root, '.codex', 'config.toml'), '[plugins."aqui@loja"]\nenabled = false\n')
+  assert.deepEqual(codexPluginToggles('[plugins.x]\n[plugins."y@m"]\nenabled = false # não\n[outra]\nenabled = true'), { x: true, 'y@m': false })
+  assert.deepEqual(codexPlugins(root, home).map((p) => p.key), ['docs@loja'])
+  assert.deepEqual(
+    scanSkills(root, home).map((s) => `${s.source}:${s.name}`).sort(),
+    ['pessoal:antiga', 'pessoal:reach', 'plugin:docs:documentos', 'projeto:review'],
+  )
+})
+
+test('Codex: $nome digitado é uma skill e o aviso diz $nome para a pessoa chamar', () => {
+  assert.equal(typedSkill('$tdd corrige o login'), 'tdd')
+  assert.equal(typedSkill('/tdd corrige o login'), 'tdd')
+  assert.deepEqual(skillsForPrompt([{ name: 'tdd', topics: ['teste'] }], '$tdd escreve o teste'), [])
+  const note = skillNote([{ name: 'copy', manual: true }], 'this kind of request', 'codex')
+  assert.match(note, /\$copy \(only the person calls it/)
+  assert.doesNotMatch(note, /\/copy/)
 })
 
 const INDEX = [
