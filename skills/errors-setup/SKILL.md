@@ -1,5 +1,5 @@
 ---
-description: Connects the published app to Faundr so the errors that happen to users show up in the Errors section (E-n). In the browser it adds Faundr's own error snippet (one line in the <head>, nothing to install); on servers, mobile and other languages it installs the official Sentry SDK (free, MIT) pointing at Faundr, with no Sentry account, without sending performance data or screen recordings. Checks it with a test error. Use when the user asks to track the published app's errors or when the Errors section suggests it.
+description: Connects the published app to Faundr so the errors that happen to users show up in the Errors section (E-n). In the browser it adds Faundr's own error snippet (one line in the <head>, nothing to install); on JavaScript servers (Node, Cloudflare Workers) it copies Faundr's single-file SDK; on mobile and other languages it installs the official Sentry SDK (free, MIT) pointing at Faundr, with no Sentry account, without sending performance data or screen recordings. Checks it with a test error. Use when the user asks to track the published app's errors or when the Errors section suggests it.
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *) Bash(npm install *) Bash(pnpm add *) Bash(yarn add *) Bash(bun add *) Bash(pip install *) Bash(uv add *) Bash(poetry add *) Bash(flutter pub add *) Bash(dart pub add *) Bash(composer require *) Read Grep Glob Edit Write
 ---
@@ -20,7 +20,16 @@ For everything that runs in the browser, use the **website snippet** printed abo
 - **CSP:** if the site has a Content-Security-Policy, add the Faundr address to `script-src` and `connect-src`.
 - In TypeScript, declare it once: `declare global { interface Window { faundr?: { capture(e: unknown): void; setUser(id: string | number | null): void } } }`.
 
-## Rules (Sentry SDK: servers, mobile and other languages)
+## JavaScript server: Faundr's file
+
+For JavaScript on the server (Node, Cloudflare Workers, Bun, and the server side of Next.js, SvelteKit, Nuxt, TanStack Start, Remix, React Router, Express, Fastify), don't install a Sentry package: run `faundr errors-sdk --dir <folder>` (e.g. `src/lib` or `server`). It copies one file with no dependency, `faundr-errors.mjs`, plus its types (`faundr-errors.d.mts`). Import it with a relative path. Running the command again updates it; don't edit the file.
+
+- It sends unhandled errors and rejected promises without a `catch` (the Node process still ends as it would without it) and errors that escape a Worker's `fetch`/`scheduled` (through `ctx.waitUntil`, without delaying the response). From the request it sends only the method and the path, never headers or body.
+- **Production only:** on Node it turns on only with `NODE_ENV=production` (or `enabled: true`). On Workers it's on, except for `localhost` (`wrangler dev`).
+- **Version = commit:** `release`; without it, it reads `COMMIT_SHA`, `VERCEL_GIT_COMMIT_SHA`, `RENDER_GIT_COMMIT`, `RAILWAY_GIT_COMMIT_SHA`, `SOURCE_VERSION` or `WORKERS_CI_COMMIT_SHA`.
+- **Frameworks catch route errors themselves:** connect their error hook to `capture(error, { request })` (table in step 1).
+
+## Rules (Sentry SDK: mobile and other languages)
 
 - **Don't use the Sentry wizard** (`npx @sentry/wizard`) or create a Sentry account: it creates a project there and asks for a token. Here the SDK only sends errors to Faundr.
 - **Errors only.** No performance, screen recording or profiles: `tracesSampleRate: 0` (or no option), no `replayIntegration`, no `browserTracingIntegration`, no `profilesSampleRate`.
@@ -32,24 +41,24 @@ For everything that runs in the browser, use the **website snippet** printed abo
 
 ## 1. Find out what the app uses
 
-Read the `package.json` (and the configuration files) and choose what goes where. **Browser = Faundr snippet**; a Sentry package only for the server side or a non-browser app:
+Read the `package.json` (and the configuration files) and choose what goes where. **Browser = Faundr snippet; JavaScript server = Faundr file** (`faundr-errors.mjs`); a Sentry package only for mobile and the other languages:
 
-| The app is | Browser | Server |
+| The app is | Browser | Server (Faundr file) |
 |---|---|---|
-| Next.js | snippet in the `<head>` of `app/layout.tsx` (or `pages/_document.tsx`) | `@sentry/nextjs` only in `instrumentation.ts` with `register()` (no `instrumentation-client.ts`) |
+| Next.js | snippet in the `<head>` of `app/layout.tsx` (or `pages/_document.tsx`) | `instrumentation.ts`: `export function register() { init({ dsn, release }) }` and `export const onRequestError = (error, request) => capture(error, { request: { method: request.method, url: request.path } })` |
 | React with Vite, plain SPA | snippet in `index.html` | — |
-| TanStack Start, Remix, React Router | snippet in the root document's `<head>` | `@sentry/cloudflare` or `@sentry/node`, depending on where it runs |
-| SvelteKit | snippet in `src/app.html` | `@sentry/sveltekit` only in `hooks.server.ts` |
-| Vue / Nuxt | snippet in `index.html` / `app.head.script` in `nuxt.config.ts` | Nuxt: server only if the user wants it (`@sentry/nuxt`, `sentry.server.config.ts`) |
+| TanStack Start, Remix, React Router | snippet in the root document's `<head>` | on Cloudflare, `withFaundr` on the server entry's `export default`; on Node, `init` at the top of the server entry |
+| SvelteKit | snippet in `src/app.html` | `hooks.server.ts`: `init(...)` at the top and `export const handleError = ({ error, event }) => { capture(error, { request: event.request }) }` |
+| Vue / Nuxt | snippet in `index.html` / `app.head.script` in `nuxt.config.ts` | Nuxt, only if the user wants it: a Nitro plugin (`server/plugins/faundr.ts`) with `init(...)` and `nitro.hooks.hook('error', (error, { event }) => capture(error, { request: event?.node.req }))` |
 | Angular | snippet in `src/index.html`, plus an `ErrorHandler` that calls `window.faundr?.capture(error)` | — |
 | Plain HTML site (no framework) | snippet in the `<head>` of each page | — |
+| Cloudflare Worker | — | `export default withFaundr((env) => ({ dsn: env.FAUNDR_DSN, release: env.COMMIT_SHA }), { fetch, scheduled })` |
+| Node (Express, Fastify, scripts) | — | `init(...)` at the top of the entry point; Express: `app.use(errorHandler())` after the routes; Fastify: `app.addHook('onError', async (req, _reply, error) => capture(error, { request: req }))` |
 
-For the apps below there is no browser snippet: choose **one** package.
+For the apps below there is no snippet or Faundr file: choose **one** package.
 
 | The app is | Package | Where to initialize |
 |---|---|---|
-| Cloudflare Worker | `@sentry/cloudflare` | `withSentry(() => ({ dsn, ... }), handler)` on the `export default` |
-| Node (Express, Fastify, scripts) | `@sentry/node` | an `instrument.mjs` imported before everything |
 | Expo / React Native | `@sentry/react-native` | `App.tsx` |
 | Python (FastAPI, Django, Flask, scripts) | `sentry-sdk` (in requirements/pyproject) | `sentry_sdk.init(...)` at the top of `main.py`/`app.py`, or in Django's `settings.py`; the FastAPI, Django and Flask integrations turn on by themselves |
 | Flutter | `sentry_flutter` (`flutter pub add sentry_flutter`) | `main()`: `await SentryFlutter.init((o) {…}, appRunner: () => runApp(const App()))` |
@@ -81,21 +90,23 @@ componentDidCatch(error: Error) {
 }
 ```
 
-Server side: install with the package manager the project already uses (check the lockfile). Minimal configuration, adapting to the package:
+JavaScript server (after `faundr errors-sdk --dir src/lib`):
 
 ```ts
-import * as Sentry from '@sentry/node' // the chosen package
-Sentry.init({
-  dsn: '<DSN above>',
-  enabled: process.env.NODE_ENV === 'production',
-  environment: 'production',
-  release: process.env.COMMIT_SHA, // the build's commit hash
-  sendDefaultPii: false,
-  tracesSampleRate: 0,
-})
+// Node: at the top of the entry point, before the rest
+import { init, errorHandler } from './lib/faundr-errors.mjs'
+init({ dsn: '<DSN above>', release: process.env.COMMIT_SHA })
+// … routes …
+app.use(errorHandler()) // Express: after the routes, before the app's own error handler
 ```
 
-The same rules in the other languages (errors only, no personal data, production only, version = commit):
+```ts
+// Cloudflare Worker: FAUNDR_DSN as a variable in wrangler.jsonc ("vars"); it's public, not a secret
+import { withFaundr } from './lib/faundr-errors.mjs'
+export default withFaundr((env) => ({ dsn: env.FAUNDR_DSN, release: env.COMMIT_SHA }), { fetch, scheduled })
+```
+
+Mobile and the other languages: install the Sentry package with the package manager the project already uses (check the lockfile), following the rules above (errors only, no personal data, production only, version = commit):
 
 ```python
 # Python: sentry-sdk
@@ -186,7 +197,7 @@ sentry_init(options);
 
 ## 3. Check with a test error
 
-1. Publish and trigger an error on purpose. **Browser snippet:** on the published site, run `faundr.capture(new Error('Faundr test'))` in the browser console (to test on localhost, add `data-dev` to the snippet just for the test and remove it afterwards). **Sentry SDK:** a temporary route or button that does `throw new Error('Faundr test')`, or `Sentry.captureException(new Error('Faundr test'))` (on localhost, `enabled: true` just for the test). In the other languages: `sentry_sdk.capture_exception(Exception("Faundr test"))` (Python), `Sentry.captureException(Exception('Faundr test'))` (Flutter/Dart), `\Sentry\captureException(new \Exception('Faundr test'))` (PHP) or `php artisan sentry:test` (Laravel), `sentry.CaptureException(errors.New("Faundr test"))` (Go), `Sentry.captureException(RuntimeException("Faundr test"))` (Java/Kotlin), `SentrySdk.CaptureException(new Exception("Faundr test"))` (C#), `sentry::capture_message("Faundr test", sentry::Level::Error)` (Rust) or `sentry_capture_event(sentry_value_new_message_event(SENTRY_LEVEL_ERROR, NULL, "Faundr test"))` (C/C++).
+1. Publish and trigger an error on purpose. **Browser snippet:** on the published site, run `faundr.capture(new Error('Faundr test'))` in the browser console (to test on localhost, add `data-dev` to the snippet just for the test and remove it afterwards). **Faundr file (JavaScript server):** `NODE_ENV=production node -e "import('./src/lib/faundr-errors.mjs').then(async (m) => { m.init({ dsn: '<DSN above>' }); await m.capture(new Error('Faundr test')) })"` (adjust the path), or a temporary route that does `await capture(new Error('Faundr test'))`. **Sentry SDK:** a temporary route or button that does `throw new Error('Faundr test')`, or `Sentry.captureException(new Error('Faundr test'))` (on localhost, `enabled: true` just for the test). In the other languages: `sentry_sdk.capture_exception(Exception("Faundr test"))` (Python), `Sentry.captureException(Exception('Faundr test'))` (Flutter/Dart), `\Sentry\captureException(new \Exception('Faundr test'))` (PHP) or `php artisan sentry:test` (Laravel), `sentry.CaptureException(errors.New("Faundr test"))` (Go), `Sentry.captureException(RuntimeException("Faundr test"))` (Java/Kotlin), `SentrySdk.CaptureException(new Exception("Faundr test"))` (C#), `sentry::capture_message("Faundr test", sentry::Level::Error)` (Rust) or `sentry_capture_event(sentry_value_new_message_event(SENTRY_LEVEL_ERROR, NULL, "Faundr test"))` (C/C++).
 2. Run `faundr errors` and see whether an E-n "[app publicado]" (published app) showed up. It may take a few seconds.
 3. Remove the test button and archive the test E-n: `faundr error-archive E-<n>`.
 

@@ -94,6 +94,7 @@
 //   faundr error-archive E-<n> [--days N | --count N | --users N]  archives for a while, up to N more times or N more people
 //   faundr error-reopen E-<n>                  reopens an archived or resolved error
 //   faundr errors-dsn                          address (DSN) for the published app to send errors to Faundr (Sentry SDK)
+//   faundr errors-sdk [--dir src/lib]          copies Faundr's server error SDK (Node, Workers) into the project
 //   faundr errors-uptime <https://site> | --off  checks the site every 5 min; down becomes E-n
 //   faundr errors-import-sentry --org O --project P  brings in the open errors of people who already use Sentry (SENTRY_AUTH_TOKEN)
 //   faundr checkpoint ["reason"]               saves a restore point of the files (Faundr already saves one by itself before changes)
@@ -2671,6 +2672,16 @@ async function errorsDsn() {
   // SDK próprio do navegador (public/sdk/v1.js), servido pelo mesmo endereço do Faundr.
   console.log(`Website snippet: <script src="${new URL(dsn).origin}/sdk/v1.js" data-dsn="${dsn}"></script>`)
   console.log(lastEventAt ? `Last error received from the published app: ${new Date(lastEventAt).toISOString().slice(0, 16).replace('T', ' ')} UTC` : 'No error received from the published app yet.')
+}
+
+// SDK de erros do servidor (plugin/sdk): arquivo único copiado para o projeto, com os tipos. Rodar de novo atualiza.
+async function errorsSdk(args) {
+  const src = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'sdk')
+  const dir = path.resolve(projectRoot(), flag(args, '--dir') ?? '.')
+  fs.mkdirSync(dir, { recursive: true })
+  for (const name of ['faundr-errors.mjs', 'faundr-errors.d.mts']) fs.copyFileSync(path.join(src, name), path.join(dir, name))
+  const rel = path.relative(projectRoot(), path.join(dir, 'faundr-errors.mjs')).replace(/\\/g, '/') || 'faundr-errors.mjs'
+  console.log(`Copied ${rel} (and its types). Import it with a relative path; the DSN comes from: faundr errors-dsn`)
 }
 
 async function errorResolve(args) {
@@ -5508,7 +5519,7 @@ async function cli() {
 
 function printCommands() {
   console.log(
-    'commands: setup | login | link | status | config | browse | browse-key | checkpoint | checkpoints | restore | team | inbox | msg | map | graph | graph-query | graph-path | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | memory-edit | workflow | skills | concern | resolve | start | done | focus | board | feature-discard | feature-restore | criteria | criteria-check | handoff | handover | weekly | resume | diagram-save | architecture-check | stack-scan | env-check | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | skill-report | security-import | security-supabase | db-test | launch-check | privacy | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-uptime | errors-import-sentry | hook',
+    'commands: setup | login | link | status | config | browse | browse-key | checkpoint | checkpoints | restore | team | inbox | msg | map | graph | graph-query | graph-path | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | memory-edit | workflow | skills | concern | resolve | start | done | focus | board | feature-discard | feature-restore | criteria | criteria-check | handoff | handover | weekly | resume | diagram-save | architecture-check | stack-scan | env-check | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | skill-report | security-import | security-supabase | db-test | launch-check | privacy | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-archive | error-reopen | errors-dsn | errors-sdk | errors-uptime | errors-import-sentry | hook',
   )
 }
 
@@ -5614,6 +5625,7 @@ function cliCommands() {
     'error-archive': (a) => errorArchive(a),
     'error-reopen': (a) => errorReopen(a),
     'errors-dsn': () => errorsDsn(),
+    'errors-sdk': () => errorsSdk(args),
     'errors-import-sentry': (a) => errorsImportSentry(a),
     'errors-uptime': (a) => errorsUptime(a),
   }
