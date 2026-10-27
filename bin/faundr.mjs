@@ -2668,6 +2668,8 @@ async function errorsDsn() {
   const { dsn, lastEventAt } = await errorsApi({ action: 'dsn' })
   if (!dsn) throw new Error('This project does not have a receiving address yet.')
   console.log(dsn)
+  // SDK próprio do navegador (public/sdk/v1.js), servido pelo mesmo endereço do Faundr.
+  console.log(`Website snippet: <script src="${new URL(dsn).origin}/sdk/v1.js" data-dsn="${dsn}"></script>`)
   console.log(lastEventAt ? `Last error received from the published app: ${new Date(lastEventAt).toISOString().slice(0, 16).replace('T', ' ')} UTC` : 'No error received from the published app yet.')
 }
 
