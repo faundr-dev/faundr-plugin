@@ -1,10 +1,11 @@
-// SDK de erros do Faundr para o servidor (Node, Cloudflare Workers, Bun): arquivo único, sem dependência, copiado para
-// o projeto com `faundr errors-sdk`. Não edite: o Faundr reescreve este arquivo para atualizar.
+// SDK de erros do Faundr para o servidor (Node, Cloudflare Workers, Bun): arquivo único, sem dependência. Vem do
+// `npm install @faundr/errors` ou é copiado para o projeto com `faundr errors-sdk`; não edite (a atualização o
+// reescreve). Publicado com scripts/publish-errors.mjs; ao mudar, suba o VERSION e o de packages/errors.
 //
-//   Node:     import { init, errorHandler } from './faundr-errors.mjs'
+//   Node:     import { init, errorHandler } from '@faundr/errors'   // ou './faundr-errors.mjs'
 //             init({ dsn: '<DSN>', release: process.env.COMMIT_SHA })   // no começo do servidor
 //             app.use(errorHandler())                                    // Express: depois das rotas
-//   Workers:  import { withFaundr } from './faundr-errors.mjs'
+//   Workers:  import { withFaundr } from '@faundr/errors'
 //             export default withFaundr((env) => ({ dsn: env.FAUNDR_DSN, release: env.COMMIT_SHA }), { fetch, scheduled })
 //   Qualquer: await capture(erro, { request })
 //
