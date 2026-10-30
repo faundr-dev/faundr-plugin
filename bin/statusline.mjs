@@ -163,7 +163,6 @@ export function launcherSource(fallback) {
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { t } from './i18n.mjs'
 import { pathToFileURL } from 'node:url'
 const base = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'plugins', 'cache', 'faundr', 'faundr')
 const num = (v) => v.split('.').map(Number)
