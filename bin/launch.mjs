@@ -3,9 +3,11 @@
 //
 // Cada item: { key, status: 'ok' | 'falta' | 'aviso' | 'na' | 'nao-verificado', detail, evidence }.
 
+import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { t } from './i18n.mjs'
+import { projectParts } from './parts.mjs'
 import { faundrPath } from './paths.mjs'
 
 const MAX_FILE = 400_000
@@ -368,6 +370,103 @@ export function productionUrl(root) {
     // Sem Stack salva (ou ilegível): sem URL de produção.
     return null
   }
+}
+
+// ---- O código compila ------------------------------------------------------------------------------------
+
+// Scripts que provam que o código compila: os tipos (mais rápido) e depois o build, em cada parte do projeto.
+const TYPES_SCRIPT = /^(typecheck|type-check|check-types|tsc)$/
+const BUILD_SCRIPT = /^build$/
+
+/** Os scripts de tipos e de build de cada parte: [{ dir, name }], tipos antes do build. */
+export function buildScripts(root, parts = projectParts(root)) {
+  return parts.flatMap(({ dir, pkg }) => {
+    const names = Object.keys(pkg.scripts ?? {})
+    return [names.find((n) => TYPES_SCRIPT.test(n)), names.find((n) => BUILD_SCRIPT.test(n))].filter(Boolean).map((name) => ({ dir, name }))
+  })
+}
+
+// Gerenciador da parte pelo arquivo de travamento; sem nenhum, npm.
+function packageManager(root, dir) {
+  const has = (f) => fs.existsSync(path.join(root, dir, f)) || fs.existsSync(path.join(root, f))
+  if (has('pnpm-lock.yaml')) return 'pnpm'
+  if (has('yarn.lock')) return 'yarn'
+  if (has('bun.lock') || has('bun.lockb')) return 'bun'
+  return 'npm'
+}
+
+// O nome do script vem das regex acima (só letras e hífen), então pode ir no shell sem escapar.
+function runScript(root, dir, name) {
+  const r = spawnSync(`${packageManager(root, dir)} run ${name}`, { cwd: path.join(root, dir), shell: true, encoding: 'utf8', windowsHide: true, timeout: 10 * 60_000 })
+  return { ok: r.status === 0, output: `${r.stdout ?? ''}\n${r.stderr ?? ''}${r.error ? `\n${r.error.message}` : ''}` }
+}
+
+// A linha que explica a falha: a primeira com "error", senão a última que não está vazia.
+function failureLine(output) {
+  const lines = output.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+  return (lines.find((l) => /\berror\b/i.test(l)) ?? lines.at(-1) ?? '').slice(0, 300)
+}
+
+/** Roda os tipos e o build de cada parte; para no primeiro que falha. */
+export function checkBuild(root, { run = runScript, parts } = {}) {
+  const key = 'compila'
+  const scripts = buildScripts(root, parts)
+  if (!scripts.length)
+    return { key, status: 'na', detail: t('No build or type-check script in package.json.', 'Nenhum script de build ou de tipos no package.json.'), evidence: [] }
+  for (const s of scripts) {
+    const where = s.dir ? ` (${s.dir})` : ''
+    const r = run(root, s.dir, s.name)
+    if (!r.ok)
+      return {
+        key,
+        status: 'falta',
+        detail: t(`\`${s.name}\`${where} failed: ${failureLine(r.output)}`, `\`${s.name}\`${where} falhou: ${failureLine(r.output)}`),
+        evidence: [`${s.dir ? `${s.dir}/` : ''}package.json`],
+      }
+  }
+  const names = scripts.map((s) => `\`${s.name}\`${s.dir ? ` (${s.dir})` : ''}`).join(', ')
+  return { key, status: 'ok', detail: t(`${names} passed.`, `${names} passou.`), evidence: [] }
+}
+
+// ---- Veredito --------------------------------------------------------------------------------------------
+
+// O que impede o lançamento: os mesmos itens do nível "Impede o lançamento" do painel, mais o código compilar.
+const BLOCKS = new Set(['compila', 'banco-testado', 'webhook-pagamento', 'segredos', 'seguranca-critica'])
+const settled = (status) => status === 'ok' || status === 'na'
+
+/** Separa os itens [{ key, status }] em o que impede o lançamento e o que falta antes de usuários reais. */
+export function launchVerdict(items) {
+  const open = items.filter((i) => !settled(i.status))
+  return { canLaunch: !open.some((i) => BLOCKS.has(i.key)), blockers: open.filter((i) => BLOCKS.has(i.key)), before: open.filter((i) => !BLOCKS.has(i.key)) }
+}
+
+/** Itens de segurança do veredito a partir dos achados em aberto (mesmo filtro do painel). */
+export function securityItems(findings) {
+  const open = findings.filter((f) => f.status === 'open' && !f.suppressed && !f.dev && f.verdict !== 'needs_check')
+  const isSecret = (f) => f.source === 'secret' || f.source === 'history'
+  const secrets = open.filter((f) => isSecret(f) && ['critical', 'high'].includes(f.severity)).length
+  const other = (sev) => open.filter((f) => !isSecret(f) && f.source !== 'database' && f.severity === sev).length
+  const critical = other('critical')
+  const high = other('high')
+  return [
+    {
+      key: 'segredos',
+      status: secrets ? 'falta' : 'ok',
+      detail: secrets
+        ? t(`${secrets} key(s) or password(s) in the code or git history: rotate them in the service (deleting from the code is not enough).`, `${secrets} chave(s) ou senha(s) no código ou no histórico: troque no serviço (apagar do código não basta).`)
+        : t('No keys or passwords in the code or git history.', 'Nenhuma chave ou senha no código nem no histórico.'),
+    },
+    {
+      key: 'seguranca-critica',
+      status: critical ? 'falta' : 'ok',
+      detail: critical ? t(`${critical} critical security problem(s) open.`, `${critical} problema(s) crítico(s) de segurança em aberto.`) : t('No critical security problems.', 'Nenhum problema crítico de segurança.'),
+    },
+    {
+      key: 'seguranca-alta',
+      status: high ? 'aviso' : 'ok',
+      detail: high ? t(`${high} high security problem(s) open.`, `${high} problema(s) alto(s) de segurança em aberto.`) : t('No high security problems.', 'Nenhum problema alto de segurança.'),
+    },
+  ]
 }
 
 export async function launchChecks(root, files, { url = productionUrl(root), fetchImpl = fetch, supabase = null } = {}) {

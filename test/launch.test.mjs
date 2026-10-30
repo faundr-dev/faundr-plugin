@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
 import { setLang } from '../bin/i18n.mjs'
-import { checkDbTest, checkHeaders, checkPaymentWebhook, checkPrivacy, checkRateLimit, productionUrl } from '../bin/launch.mjs'
+import { buildScripts, checkBuild, checkDbTest, checkHeaders, checkPaymentWebhook, checkPrivacy, checkRateLimit, launchVerdict, productionUrl, securityItems } from '../bin/launch.mjs'
 
 setLang('pt')
 
@@ -83,4 +83,69 @@ test('banco testado: lê o resultado salvo pelo db-test', () => {
 test('URL de produção vem da Stack', () => {
   const [d] = project({ '.faundr/painel/stack.json': JSON.stringify({ environments: [{ name: 'Local', url: 'http://localhost:3000' }, { name: 'Produção', url: 'https://app.dev' }] }) })
   assert.equal(productionUrl(d), 'https://app.dev')
+})
+
+test('compila: tipos antes do build, em cada parte; para no primeiro que falha e mostra a linha do erro', () => {
+  const [d] = project({
+    'package.json': '{"scripts":{"build":"vite build","typecheck":"tsc --noEmit","dev":"vite"}}',
+    'api/package.json': '{"scripts":{"build":"tsc"}}',
+  })
+  assert.deepEqual(buildScripts(d), [
+    { dir: '', name: 'typecheck' },
+    { dir: '', name: 'build' },
+    { dir: 'api', name: 'build' },
+  ])
+  const ran = []
+  const ok = checkBuild(d, { run: (_r, dir, name) => (ran.push(`${dir}:${name}`), { ok: true, output: '' }) })
+  assert.equal(ok.status, 'ok')
+  assert.deepEqual(ran, [':typecheck', ':build', 'api:build'])
+  ran.length = 0
+  const failing = (_r, dir, name) => {
+    ran.push(`${dir}:${name}`)
+    return name === 'build' ? { ok: false, output: '> vite build\nsrc/App.tsx(3,1): error TS2304: Cannot find name x\nexit 1' } : { ok: true, output: '' }
+  }
+  const bad = checkBuild(d, { run: failing })
+  assert.equal(bad.status, 'falta')
+  assert.equal(bad.detail, '`build` falhou: src/App.tsx(3,1): error TS2304: Cannot find name x')
+  assert.deepEqual(ran, [':typecheck', ':build'], 'não roda o build da outra parte depois de uma falha')
+  const [none] = project({ 'package.json': '{"scripts":{"dev":"vite"}}' })
+  assert.equal(checkBuild(none, { run: () => assert.fail('não deveria rodar') }).status, 'na')
+})
+
+test('veredito: só os itens que impedem o lançamento dão NÃO; o resto fica para antes de usuários reais', () => {
+  const v = launchVerdict([
+    { key: 'compila', status: 'ok' },
+    { key: 'webhook-pagamento', status: 'na' },
+    { key: 'testes', status: 'falta' },
+    { key: 'cabecalhos', status: 'aviso' },
+  ])
+  assert.equal(v.canLaunch, true)
+  assert.deepEqual(v.before.map((i) => i.key), ['testes', 'cabecalhos'])
+  const no = launchVerdict([
+    { key: 'compila', status: 'falta' },
+    { key: 'banco-testado', status: 'nao-verificado' },
+    { key: 'privacidade', status: 'ok' },
+  ])
+  assert.equal(no.canLaunch, false)
+  assert.deepEqual(no.blockers.map((i) => i.key), ['compila', 'banco-testado'])
+  assert.deepEqual(no.before, [])
+})
+
+test('segurança no veredito: mesmo filtro do painel (ignorado, suprimido, dev e "precisa conferir" não contam)', () => {
+  const f = (o) => ({ status: 'open', suppressed: false, dev: false, verdict: null, ...o })
+  const [secrets, critical, high] = securityItems([
+    f({ source: 'secret', severity: 'high' }),
+    f({ source: 'history', severity: 'critical' }),
+    f({ source: 'code', severity: 'critical' }),
+    f({ source: 'database', severity: 'critical' }),
+    f({ source: 'code', severity: 'high' }),
+    f({ source: 'code', severity: 'critical', suppressed: true }),
+    f({ source: 'code', severity: 'critical', dev: true }),
+    f({ source: 'code', severity: 'critical', verdict: 'needs_check' }),
+    f({ source: 'secret', severity: 'critical', status: 'ignored' }),
+  ])
+  assert.deepEqual([secrets.status, critical.status, high.status], ['falta', 'falta', 'aviso'])
+  assert.match(secrets.detail, /^2 chave/)
+  assert.match(critical.detail, /^1 problema/)
+  assert.deepEqual(securityItems([]).map((i) => i.status), ['ok', 'ok', 'ok'])
 })

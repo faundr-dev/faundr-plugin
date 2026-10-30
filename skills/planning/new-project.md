@@ -47,7 +47,7 @@ Ask: **"Anything wrong or missing? Can I record it?"** and offer the architectur
 In this order:
 
 1. **Stage 1:** `faundr feature "<stage 1>" --desc "…" --done-when "…; …"` and right after, one `faundr task "<step>"` per step (the tasks go to the current feature, which is stage 1).
-2. **Following stages:** `faundr feature "<stage 2>" --after current --desc "…"`, then `--after "<stage 2>"` and so on. They stay planned and don't replace the current one.
+2. **Following stages:** `faundr feature "<stage 2>" --after current --desc "…"`, then `--after "<stage 2>"` and so on. They stay planned and don't replace the current one. A stage that does not depend on the one before it goes after the stage it really needs (often stage 1): stages with the same previous one can later be built at the same time with `/faundr:parallel`.
 3. **Owner decisions** and what was left out: `faundr decision "…" --why "…" --global`. The stack choices you made on your own too, with `--why "Decided on my own: <reason>"`, because they'll guide all the code.
 4. **Project overview:** write `.faundr/painel/overview.json` and run `faundr overview-save`. At the start of the project there's no code, so `evidence` is `[]` on every item:
 

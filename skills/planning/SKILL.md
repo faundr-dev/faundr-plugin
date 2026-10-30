@@ -92,6 +92,7 @@ No plan .md files: everything goes to the dashboard, which the agent rereads in 
 3. The steps, in order: `faundr task "<step>"` (3 to 8, each checkable).
 4. The following stages, each after the previous one:
    `faundr feature "<stage 2>" --after current --desc "<what goes in>"`, then `faundr feature "<stage 3>" --after "<stage 2>" --desc "…"`.
+   A stage that does **not** need another one to be ready (e.g. payments and the admin screen, both after the first version) goes after the stage it really needs, not after the one before it in the list: give both the same `--after`. Stages recorded this way can be built at the same time with `/faundr:parallel`; say so to the owner in one line when there are two or more.
 5. Show the checklist with `faundr board` and say it's already on the dashboard (Features), with the done criterion.
 6. If the owner asked for the diagram, read `${CLAUDE_PLUGIN_ROOT}/skills/planning/diagram.md` and follow it (write the JSON in one go, `faundr diagram-save`, at most 2 corrections). Do this before building: the drawing is part of the plan. The command opens the canvas and waits: **approved on the canvas = OK to build**; changes requested = adjust and save again.
 7. Then start with the first step.
