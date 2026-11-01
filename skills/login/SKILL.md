@@ -14,4 +14,4 @@ If there was an error above, explain it in one sentence and stop. If the user pa
 If it worked:
 1. Show the user the code and the link above and ask them to check that the code in the browser is the same and click Authorize.
 2. In the same response, run `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" login --wait` with a timeout of 330000 ms (it waits up to 5 minutes for the approval).
-3. Report the result in one sentence. If it worked, suggest `/faundr:link` to link this folder to a project. Never read or show the contents of `~/.faundr/`.
+3. Report the result in one sentence, then pass on what the output says about this folder (already linked, linked now, linked to a project this account cannot open, or not linked). Suggest `/faundr:link` only when the output says the folder is not linked or was linked to the wrong project. Never read or show the contents of `~/.faundr/`.

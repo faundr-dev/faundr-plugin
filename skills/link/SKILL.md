@@ -9,6 +9,6 @@ Result:
 
 !`node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" link $ARGUMENTS`
 
-- If the folder was linked, confirm to the user in one sentence and say that this session's events now start showing up in the dashboard.
+- If the folder was linked, confirm to the user in one sentence (project and organization) and say that this session's events now start showing up in the dashboard and that the project's existing history (features, tasks, rules, decisions, past sessions) stays and applies here.
 - If a list of projects came back, ask the user which one to use (AskUserQuestion, one option per project) and then run with the Bash tool: `node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" link <chosen id>`.
 - If there was an error (no token, invalid token), explain it and suggest `/faundr:login`.

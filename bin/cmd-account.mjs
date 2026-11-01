@@ -12,6 +12,8 @@ import { agentsBlock, removeBlock, upsertBlock } from './agents-md.mjs'
 import { t } from './i18n.mjs'
 import { CONFIG_DIR, CONFIG_FILE, DEFAULT_API_URL, findUp, firstOf, flags, gitBranch, LINK_FILE, linkedProject, loadConfig, log, LOG_FILE, projectRoot, readJson, readState, readStdin, saveConfig, writeState } from './cli-core.mjs'
 import { dirtyFile } from './hook-events.mjs'
+import { gitRoot } from './checkpoints.mjs'
+import { guessProject } from './setup.mjs'
 import { memoryApi } from './cmd-features.mjs'
 
 export async function fetchProjects({ token, apiUrl }) {
@@ -37,7 +39,8 @@ export async function login(args) {
   if (token) {
     const projects = await fetchProjects({ token, apiUrl }) // valida antes de salvar
     saveConfig({ token, apiUrl })
-    return console.log(t(`Signed in (API: ${apiUrl}). You have ${projects.length} project(s).`, `Login feito (API: ${apiUrl}). Você tem ${projects.length} projeto(s).`))
+    console.log(t(`Signed in (API: ${apiUrl}). You have ${projects.length} project(s).`, `Login feito (API: ${apiUrl}). Você tem ${projects.length} projeto(s).`))
+    return console.log(folderAfterLogin(projects))
   }
   const wait = args.includes('--wait')
   if (!wait) await startLogin(apiUrl)
@@ -78,7 +81,8 @@ async function waitLogin() {
       const projects = await fetchProjects(pending)
       saveConfig({ token: pending.token, apiUrl: pending.apiUrl })
       fs.rmSync(PENDING_LOGIN_FILE, { force: true })
-      return console.log(t(`Signed in (API: ${pending.apiUrl}). You have ${projects.length} project(s).`, `Login feito (API: ${pending.apiUrl}). Você tem ${projects.length} projeto(s).`))
+      console.log(t(`Signed in (API: ${pending.apiUrl}). You have ${projects.length} project(s).`, `Login feito (API: ${pending.apiUrl}). Você tem ${projects.length} projeto(s).`))
+      return console.log(folderAfterLogin(projects))
     } catch (err) {
       if (!/Token inválido|Invalid token/.test(err.message)) throw err
     }
@@ -113,6 +117,36 @@ function findProject(projects, query) {
   return projects.find((p) => p.name.toLowerCase() === query.toLowerCase())
 }
 
+const projectLabel = (p) => `"${p.name}"${p.org ? t(` (organization ${p.org})`, ` (organização ${p.org})`) : ''}`
+// O histórico mora no painel, não na pasta: ligar só aponta a pasta para ele.
+const HISTORY_KEPT = () =>
+  t(
+    "Everything the team already recorded in this project (features, tasks, rules, decisions, past sessions) stays in place and now applies here. Only this computer's local files (the code map) are rebuilt.",
+    'Tudo o que o time já registrou no projeto (funcionalidades, tarefas, regras, decisões, sessões anteriores) continua lá e passa a valer aqui. Só os arquivos locais deste computador (o mapa do código) são gerados de novo.',
+  )
+
+// Depois do login, diz se a pasta atual já está ligada (o .faundr.json veio no clone), liga quando o nome da pasta
+// bate com um projeto só, ou diz que falta o /faundr:link. Assim ninguém roda link à toa num repositório já ligado.
+function folderAfterLogin(projects) {
+  const linkFile = findUp(process.cwd(), LINK_FILE)
+  if (linkFile) {
+    const id = readJson(linkFile)?.projectId
+    const p = projects.find((x) => x.id === id)
+    if (p) return t(`This folder is already linked to the project ${projectLabel(p)}: no need to run /faundr:link. ${HISTORY_KEPT()}`, `Esta pasta já está ligada ao projeto ${projectLabel(p)}: não precisa rodar /faundr:link. ${HISTORY_KEPT()}`)
+    return t(
+      `This folder is linked to a project (${id}) that this account cannot open. Ask an Owner or Admin of that project's organization to invite this account as Member (Viewer does not link folders), or sign in with the account that has access.`,
+      `Esta pasta está ligada a um projeto (${id}) que esta conta não abre. Peça para um Dono ou Admin da organização do projeto convidar esta conta como Membro (Leitura não liga pasta), ou faça login com a conta que tem acesso.`,
+    )
+  }
+  const root = gitRoot(process.cwd())
+  const guess = root && guessProject(projects, [path.basename(root), readJson(path.join(root, 'package.json'))?.name])
+  if (guess) {
+    fs.writeFileSync(path.join(root, LINK_FILE), JSON.stringify({ projectId: guess.id }, null, 2) + '\n')
+    return t(`Linked this folder to the project ${projectLabel(guess)} (the folder name matched). ${HISTORY_KEPT()} If it is the wrong project, run /faundr:link to pick another.`, `Liguei esta pasta ao projeto ${projectLabel(guess)} (o nome da pasta bateu). ${HISTORY_KEPT()} Se não for esse, rode /faundr:link para escolher outro.`)
+  }
+  return t('This folder is not linked to a project yet: run /faundr:link to pick one.', 'Esta pasta ainda não está ligada a nenhum projeto: rode /faundr:link para escolher.')
+}
+
 // Aceita o id, o nome do projeto ou nada (lista os projetos para escolher).
 export async function link(query) {
   const config = loadConfig()
@@ -120,13 +154,18 @@ export async function link(query) {
   const projects = await fetchProjects(config)
   const project = findProject(projects, query)
   if (!project) {
+    const current = projects.find((p) => p.id === readJson(findUp(process.cwd(), LINK_FILE) ?? '')?.projectId)
+    if (current && !query) console.log(t(`This folder is already linked to ${projectLabel(current)}. To switch, pick another one:`, `Esta pasta já está ligada a ${projectLabel(current)}. Para trocar, escolha outro:`))
     if (query) console.log(t(`No project found for "${query}".`, `Nenhum projeto encontrado para "${query}".`))
     console.log(projects.length ? t('Available projects:', 'Projetos disponíveis:') : t('You have no projects yet. Create one on the dashboard.', 'Você ainda não tem projetos. Crie um no painel.'))
     for (const p of projects) console.log(`- ${p.name}${p.org ? ` — ${p.org}` : ''} (${p.id})`)
     return
   }
-  fs.writeFileSync(LINK_FILE, JSON.stringify({ projectId: project.id }, null, 2) + '\n')
-  console.log(t(`Folder ${process.cwd()} linked to the project "${project.name}" (${project.id}).`, `Pasta ${process.cwd()} ligada ao projeto "${project.name}" (${project.id}).`))
+  // Na raiz do repositório (fora de um, na pasta atual): rodar dentro de src/ não cria um segundo .faundr.json.
+  const root = gitRoot(process.cwd()) ?? process.cwd()
+  fs.writeFileSync(path.join(root, LINK_FILE), JSON.stringify({ projectId: project.id }, null, 2) + '\n')
+  console.log(t(`Folder ${root} linked to the project ${projectLabel(project)}.`, `Pasta ${root} ligada ao projeto ${projectLabel(project)}.`))
+  console.log(HISTORY_KEPT())
 }
 
 export function status() {
