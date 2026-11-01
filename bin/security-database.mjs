@@ -1,0 +1,231 @@
+// Banco de dados: migração destrutiva e regras do SQL (RLS, policies, buckets, security definer)
+// (parte de security.mjs).
+import { t } from './i18n.mjs'
+import { readText, lineOf } from './security-base.mjs'
+
+// Migração que apaga ou transforma dado sem volta: o aviso entra antes de gravar, quando ainda dá para fazer backup
+// e escrever o caminho de volta. As antigas já rodaram, então não viram achado no painel.
+const MIGRATION_FILE = /(^|\/)supabase\/migrations\/.+\.sql$|(^|\/)(migrations?|db\/migrate|drizzle|prisma\/migrations)\/.+\.sql$/i
+const DESTRUCTIVE_SQL = [
+  [/\bdrop\s+table\b/i, 'deletes a whole table'],
+  [/\bdrop\s+schema\b/i, 'deletes a whole schema'],
+  [/\balter\s+table\b[^;]*\bdrop\s+(column\b|(?!constraint\b|policy\b|default\b|not\b)\w)/i, 'deletes a column'],
+  [/\btruncate\b/i, 'empties a table'],
+  [/\bdelete\s+from\s+[\w."]+\s*(;|$)/i, 'deletes every row (delete without where)'],
+  [/\bupdate\s+[\w."]+\s+set\b(?![^;]*\bwhere\b)[^;]*(;|$)/i, 'changes every row (update without where)'],
+  [/\balter\s+column\b[^;]*\btype\b/i, 'changes a column type (may lose or truncate data)'],
+  [/\brename\s+(column\s+)?[\w."]+\s+to\b/i, 'renames a table or column (the live app still uses the old name)'],
+]
+
+/** O que a migração faz que não tem volta (lista vazia se não é migração ou não apaga nada). */
+export function destructiveMigration(content, rel) {
+  if (!content || !MIGRATION_FILE.test(rel)) return []
+  const sql = strip(content)
+  return DESTRUCTIVE_SQL.filter(([re]) => re.test(sql)).map(([, what]) => what)
+}
+
+// ---- banco (migrations do Supabase) --------------------------------------------------------
+
+// Divide o SQL em comandos, respeitando strings, comentários e corpos $tag$…$tag$.
+export function splitSql(sql) {
+  const out = []
+  let start = 0
+  let i = 0
+  const push = (end) => {
+    const text = sql.slice(start, end)
+    if (text.trim()) out.push({ text, line: lineOf(sql, start + (text.length - text.trimStart().length)) })
+    start = end + 1
+  }
+  while (i < sql.length) {
+    const c = sql[i]
+    if (c === '-' && sql[i + 1] === '-') i = sql.indexOf('\n', i) === -1 ? sql.length : sql.indexOf('\n', i)
+    else if (c === '/' && sql[i + 1] === '*') i = sql.indexOf('*/', i + 2) === -1 ? sql.length : sql.indexOf('*/', i + 2) + 2
+    else if (c === "'") {
+      i++
+      while (i < sql.length && !(sql[i] === "'" && sql[i + 1] !== "'")) i += sql[i] === "'" ? 2 : 1
+      i++
+    } else if (c === '$') {
+      const tag = sql.slice(i).match(/^\$[A-Za-z_]*\$/)?.[0]
+      if (tag) {
+        const end = sql.indexOf(tag, i + tag.length)
+        i = end === -1 ? sql.length : end + tag.length
+      } else i++
+    } else if (c === ';') {
+      push(i)
+      i++
+    } else i++
+  }
+  push(sql.length)
+  return out
+}
+
+const strip = (sql) => sql.replace(/--[^\n]*/g, ' ').replace(/\/\*[\s\S]*?\*\//g, ' ')
+function tableName(raw) {
+  const parts = raw.replace(/"/g, '').toLowerCase().split('.')
+  return parts.length === 1 ? { schema: 'public', name: parts[0] } : { schema: parts[0], name: parts[1] }
+}
+
+// Política com condição "true" (não confere quem pede), exceto leitura, service_role e storage.
+function policyFinding(m, rel, stmt) {
+  const policy = m[1].replace(/"/g, '')
+  const tbl = tableName(m[2])
+  const rest = m[3]
+  const cmd = (rest.match(/ for (all|select|insert|update|delete)\b/i)?.[1] ?? 'all').toLowerCase()
+  const roles = rest.match(/ to ([\w", ]+?)(?: using| with check|$)/i)?.[1]?.toLowerCase() ?? 'public'
+  const alwaysTrue = /(using|with check) \(\s*\(?\s*(true|1\s*=\s*1)\s*\)?\s*\)/i.test(rest)
+  if (!alwaysTrue || cmd === 'select' || /service_role/.test(roles) || tbl.schema === 'storage') return null
+  const anyone = /anon|public/.test(roles)
+  const who = anyone ? t('anyone', 'qualquer pessoa') : t('any logged-in user', 'qualquer usuário logado')
+  const Who = anyone ? t('Anyone', 'Qualquer pessoa') : t('Any logged-in user', 'Qualquer usuário logado')
+  const withCheck = cmd === 'insert' || cmd === 'update' || cmd === 'all' ? ' with check ((select auth.uid()) = user_id)' : ''
+  return {
+    source: 'database',
+    rule_id: 'rls-policy-always-true',
+    severity: anyone ? 'critical' : 'high',
+    confidence: 'high',
+    title: t(`Policy "${policy}" allows ${cmd === 'all' ? 'everything' : cmd} on ${tbl.name} for ${who}`, `Política "${policy}" libera ${cmd === 'all' ? 'tudo' : cmd} em ${tbl.name} para ${who}`),
+    detail: t(
+      `The policy "${policy}" on the table ${tbl.name} has the condition "true": it does not check who is asking.`,
+      `A política "${policy}" da tabela ${tbl.name} tem a condição "true": ela não confere quem está pedindo.`,
+    ),
+    impact:
+      cmd === 'insert'
+        ? t(
+            `${Who} can create rows in ${tbl.name} with any content, including in someone else's name.`,
+            `${Who} pode criar linhas em ${tbl.name} com qualquer conteúdo, inclusive em nome de outra pessoa.`,
+          )
+        : t(
+            `${Who} can ${cmd === 'delete' ? 'delete' : 'change'} other people's rows in ${tbl.name}.`,
+            `${Who} pode ${cmd === 'delete' ? 'apagar' : 'alterar'} linhas de outras pessoas em ${tbl.name}.`,
+          ),
+    fix: t(
+      `Replace "true" with a condition that checks the owner, for example: using ((select auth.uid()) = user_id)${withCheck}. Do it in a new migration (drop policy + create policy).`,
+      `Troque "true" por uma condição que confira o dono, por exemplo: using ((select auth.uid()) = user_id)${withCheck}. Faça isso numa nova migration (drop policy + create policy).`,
+    ),
+    file: rel,
+    line: stmt.line,
+    snippet: stmt.text.trim().split('\n')[0].slice(0, 240),
+    fingerprint: `database|rls-policy-always-true|${tbl.name}|${policy}`,
+  }
+}
+
+// Bucket do Storage criado como público.
+function bucketFinding(s, rel, stmt) {
+  const cols = s.match(/buckets ?\(([^)]*)\)/i)?.[1]?.split(',').map((c) => c.trim().toLowerCase()) ?? []
+  const values = s.match(/values ?\((.*)\)/i)?.[1]?.split(',').map((v) => v.trim()) ?? []
+  const pub = cols.indexOf('public')
+  if (pub === -1 || !/^true$/i.test(values[pub] ?? '')) return null
+  const bucket = (values[cols.indexOf('id')] ?? values[cols.indexOf('name')] ?? '').replace(/'/g, '')
+  return {
+    source: 'database',
+    rule_id: 'storage-public-bucket',
+    severity: 'medium',
+    confidence: 'high',
+    title: t(`Public file bucket: ${bucket}`, `Bucket de arquivos público: ${bucket}`),
+    detail: t(
+      `The bucket ${bucket} was created as public: anyone with the link opens the files, without logging in.`,
+      `O bucket ${bucket} foi criado como público: qualquer pessoa com o link abre os arquivos, sem login.`,
+    ),
+    impact: t(
+      "If it stores documents, personal photos or customers' files, they are reachable by anyone who finds the link.",
+      'Se guardar documentos, fotos pessoais ou arquivos de clientes, eles ficam acessíveis para quem descobrir o link.',
+    ),
+    fix: t(
+      'If the files are not meant for the public, make the bucket private (public = false) and serve the files with temporary links (createSignedUrl).',
+      'Se os arquivos não são para o público, deixe o bucket privado (public = false) e entregue os arquivos com links temporários (createSignedUrl).',
+    ),
+    file: rel,
+    line: stmt.line,
+    snippet: stmt.text.trim().split('\n')[0].slice(0, 240),
+    fingerprint: `database|storage-public-bucket|${bucket}`,
+  }
+}
+
+// Função "security definer" sem search_path fixo.
+function definerFinding(m, rel, stmt) {
+  const fn = m[1].replace(/"/g, '')
+  return {
+    source: 'database',
+    rule_id: 'security-definer-search-path',
+    severity: 'medium',
+    confidence: 'medium',
+    title: t(`Function ${fn} runs with full power and no fixed search_path`, `Função ${fn} roda com poder total sem search_path fixo`),
+    detail: t(
+      `The function ${fn} is "security definer" (it runs with the permissions of whoever created it, bypassing the access rules) and does not pin the search_path.`,
+      `A função ${fn} é "security definer" (roda com as permissões de quem a criou, ignorando as regras de acesso) e não fixa o search_path.`,
+    ),
+    impact: t(
+      'Someone allowed to create objects in the database can trick the function into running their code with full power.',
+      'Alguém com permissão para criar objetos no banco pode enganar a função e fazer ela executar código dele com poder total.',
+    ),
+    fix: t(
+      `Add "set search_path = ''" to the function definition (and use full names, like public.table). Also check whether it really needs to be security definer.`,
+      `Adicione "set search_path = ''" na definição da função (e use nomes completos, como public.tabela). Confira também se ela precisa mesmo ser security definer.`,
+    ),
+    file: rel,
+    line: stmt.line,
+    snippet: stmt.text.trim().split('\n')[0].slice(0, 240),
+    fingerprint: `database|security-definer-search-path|${fn.toLowerCase()}`,
+  }
+}
+
+function rlsDisabledFinding(name, tbl) {
+  return {
+    source: 'database',
+    rule_id: 'rls-disabled',
+    severity: 'critical',
+    confidence: 'high',
+    title: t(`Table ${name} has no access protection (RLS)`, `Tabela ${name} sem proteção de acesso (RLS)`),
+    detail: t(
+      `The table public.${name} was created without "enable row level security". Without it, Supabase's access rules do not apply to it.`,
+      `A tabela public.${name} foi criada sem "enable row level security". Sem isso, as regras de acesso do Supabase não valem para ela.`,
+    ),
+    impact: t(
+      `Anyone with the app's public key (which sits in the browser) can read, change and delete everything in ${name}.`,
+      `Qualquer pessoa com a chave pública do app (que fica no navegador) pode ler, alterar e apagar tudo em ${name}.`,
+    ),
+    fix: t(
+      `In a new migration: alter table public.${name} enable row level security; and create policies that let each user see and change only their own data.`,
+      `Numa nova migration: alter table public.${name} enable row level security; e crie políticas que só deixam cada usuário ver e mudar os próprios dados.`,
+    ),
+    file: tbl.file,
+    line: tbl.line,
+    snippet: `create table public.${name} (…)`,
+    fingerprint: `database|rls-disabled|${name}`,
+  }
+}
+
+// Um comando SQL: atualiza o mapa de tabelas (criada, RLS ligado, apagada) ou devolve um achado (null se nenhum).
+function databaseStatement(stmt, rel, tables) {
+  const s = strip(stmt.text).replace(/\s+/g, ' ').trim()
+  let m
+  if ((m = s.match(/^create (?:unlogged )?table (?:if not exists )?([\w."]+)/i)) && !/ partition of /i.test(s)) {
+    const t = tableName(m[1])
+    if (t.schema === 'public') tables.set(t.name, { file: rel, line: stmt.line, rls: false })
+  } else if ((m = s.match(/^alter table (?:if exists )?(?:only )?([\w."]+) (enable|disable|force) row level security/i))) {
+    const t = tableName(m[1])
+    if (t.schema === 'public' && tables.has(t.name)) tables.get(t.name).rls = m[2].toLowerCase() !== 'disable'
+  } else if ((m = s.match(/^drop table (?:if exists )?([\w.", ]+)/i))) {
+    for (const raw of m[1].split(',')) tables.delete(tableName(raw.trim().split(' ')[0]).name)
+  } else if ((m = s.match(/^create policy ("[^"]+"|\S+) on ([\w."]+)(.*)$/i))) return policyFinding(m, rel, stmt)
+  else if (/^insert into storage\.buckets/i.test(s) && /\btrue\b/i.test(s)) return bucketFinding(s, rel, stmt)
+  else if ((m = s.match(/^create (?:or replace )?function ([\w."]+)/i)) && /security definer/i.test(s) && !/set search_path/i.test(s))
+    return definerFinding(m, rel, stmt)
+  return null
+}
+
+export function scanDatabase(root, files) {
+  const sqlFiles = files.filter((f) => /(^|\/)supabase\/.*\.sql$/i.test(f)).sort()
+  const tables = new Map() // public.nome → { file, line, rls }
+  const findings = []
+  for (const rel of sqlFiles) {
+    const text = readText(root, rel)
+    if (!text) continue
+    for (const stmt of splitSql(text)) {
+      const f = databaseStatement(stmt, rel, tables)
+      if (f) findings.push(f)
+    }
+  }
+  for (const [name, t] of tables) if (!t.rls) findings.push(rlsDisabledFinding(name, t))
+  return { findings, tables: tables.size, files: sqlFiles.length }
+}

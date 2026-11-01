@@ -12418,7 +12418,7 @@ function sfcScript(rel, source) {
 }
 var blank = (text) => text.replace(/[^\r\n]/g, " ");
 
-// engine/src/extract-code.ts
+// engine/src/extract-code-helpers.ts
 var JS_DESCEND = /* @__PURE__ */ new Set(["arrow_function", "function_expression", "function_declaration", "generator_function_declaration", "generator_function"]);
 var JS_FUNCTION_VALUES = /* @__PURE__ */ new Set(["arrow_function", "function_expression", "function", "generator_function"]);
 var JS_CONST_VALUES = /* @__PURE__ */ new Set(["object", "array", "as_expression", "satisfies_expression", "call_expression", "new_expression"]);
@@ -12426,6 +12426,7 @@ var RATIONALE = /^(?:\/\/|#)\s*(NOTE|IMPORTANT|HACK|WHY|RATIONALE|TODO|FIXME)\s*
 var KEEP_PARENT = /* @__PURE__ */ new Set(["decorated_definition", "ERROR", "enum_body_declarations"]);
 var IDENTIFIER_CALLEES = /* @__PURE__ */ new Set(["identifier", "type_identifier", "simple_identifier", "name"]);
 var line = (n) => n.startPosition.row + 1;
+var lastSegment = (text, sep) => text.split(sep).at(-1) ?? "";
 var TYPED_IMPORTS = /* @__PURE__ */ new Set(["java", "kotlin", "csharp"]);
 function span(n, body2) {
   const text = n.text;
@@ -12448,20 +12449,87 @@ function unwrap(v) {
   while ((v.type === "as_expression" || v.type === "satisfies_expression" || v.type === "parenthesized_expression") && v.namedChildren[0]) v = v.namedChildren[0];
   return v;
 }
-async function extractCode(rel, source, cfg, resolver) {
-  const tree = await parse(cfg.grammar, SFC_EXT.test(rel) ? sfcScript(rel, source) : source);
-  const out2 = new CodeExtractor(rel, cfg, resolver).run(tree.rootNode);
-  tree.delete();
-  return out2;
+function dartCallee(n) {
+  if (!n.namedChildren.some((c) => c.type === "argument_part")) return null;
+  const prev = n.previousNamedSibling;
+  if (prev?.type === "identifier") return { name: prev.text, member: false };
+  const access = prev?.type === "selector" ? prev.namedChildren.find((c) => c.type.endsWith("assignable_selector")) : null;
+  const name2 = access?.namedChildren.find((c) => c.type === "identifier")?.text;
+  if (!name2 || !prev) return null;
+  const receiver = prev.previousNamedSibling;
+  return { name: name2, member: true, receiver: receiver?.type === "identifier" || receiver?.type === "this" ? receiver.text : void 0 };
 }
-var CodeExtractor = class {
+function phpCallee(n) {
+  if (n.type === "function_call_expression") {
+    const fn9 = n.childForFieldName("function");
+    return fn9 && (fn9.type === "name" || fn9.type === "qualified_name") ? { name: lastSegment(fn9.text, "\\"), member: false } : null;
+  }
+  if (n.type === "object_creation_expression") {
+    const cls = n.namedChildren.find((c) => c.type === "name" || c.type === "qualified_name");
+    return cls ? { name: lastSegment(cls.text, "\\"), member: false } : null;
+  }
+  const name2 = n.childForFieldName("name")?.text;
+  if (!name2) return null;
+  if (n.type === "scoped_call_expression") {
+    const scope = n.childForFieldName("scope")?.text;
+    return { name: name2, member: true, receiver: scope === "self" || scope === "static" || scope === "parent" ? "self" : scope };
+  }
+  const obj = n.childForFieldName("object");
+  const thisField = obj?.type === "member_access_expression" && obj.childForFieldName("object")?.text === "$this";
+  return { name: name2, member: true, receiver: obj?.text === "$this" ? "this" : obj?.text.slice(0, 40), thisField };
+}
+function templateCalls(template) {
+  const exprs = [
+    ...[...template.matchAll(/\s(?:\([\w.-]+\)|\[[\w.@-]+\]|\[\([\w.-]+\)\]|\*ng\w+|(?:bind|on)-[\w-]+)\s*=\s*"([^"]*)"/g)].map((m) => m[1]),
+    ...[...template.matchAll(/\{\{([\s\S]*?)\}\}/g)].map((m) => m[1]),
+    ...[...template.matchAll(/@(?:if|else if|for|switch|case|defer)\s*\(([^)]*(?:\([^)]*\)[^)]*)*)\)/g)].map((m) => m[1])
+  ];
+  const names = /* @__PURE__ */ new Set();
+  for (const e of exprs) for (const m of e.matchAll(/(?<![\w$.])([A-Za-z_$][\w$]*)\s*\(/g)) names.add(m[1]);
+  return names;
+}
+function rustUsePaths(text, prefix = []) {
+  const s = text.trim();
+  const open = s.indexOf("{");
+  if (open === -1) {
+    const [, p, alias] = s.match(/^([\w:]+?)(?:::\*)?(?:\s+as\s+(\w+))?$/) ?? [];
+    if (!p) return [];
+    const segments = [...prefix, ...p.split("::").filter(Boolean)];
+    if (segments[segments.length - 1] === "self") segments.pop();
+    return segments.length ? [{ segments, alias: alias ?? null }] : [];
+  }
+  const head = s.slice(0, open).replace(/::$/, "").split("::").filter(Boolean);
+  const inner = s.slice(open + 1, s.lastIndexOf("}"));
+  const parts2 = [];
+  let depth = 0;
+  let start2 = 0;
+  for (let i2 = 0; i2 < inner.length; i2++) {
+    if (inner[i2] === "{") depth++;
+    else if (inner[i2] === "}") depth--;
+    else if (inner[i2] === "," && depth === 0) {
+      parts2.push(inner.slice(start2, i2));
+      start2 = i2 + 1;
+    }
+  }
+  parts2.push(inner.slice(start2));
+  return parts2.filter((p) => p.trim()).flatMap((p) => rustUsePaths(p, [...prefix, ...head]));
+}
+function phpUseNames(n) {
+  const group = n.namedChildren.find((c) => c.type === "namespace_use_group");
+  if (!group) return n.namedChildren.filter((c) => c.type === "namespace_use_clause").map((c) => c.namedChildren.find((x) => x.type === "qualified_name" || x.type === "name")?.text ?? "").filter(Boolean);
+  const prefix = n.namedChildren.find((c) => c.type === "namespace_name")?.text ?? "";
+  return group.namedChildren.map((c) => c.namedChildren.find((x) => x.type === "namespace_name" || x.type === "name")?.text).filter((x) => !!x).map((x) => `${prefix}\\${x}`);
+}
+
+// engine/src/extract-code-calls.ts
+var CodeExtractorBase = class {
   constructor(rel, cfg, resolver) {
     this.rel = rel;
     this.cfg = cfg;
     this.resolver = resolver;
     this.stem = fileStem(rel);
     this.fileNid = fileNodeId(rel);
-    this.out = { nodes: this.nodes, edges: this.edges, rawCalls: [], importBindings: [] };
+    this.out = { nodes: this.nodes, edges: this.edges, rawCalls: [], importBindings: this.bindings };
   }
   rel;
   cfg;
@@ -12471,6 +12539,8 @@ var CodeExtractor = class {
   nodes = [];
   edges = [];
   out;
+  // As importações com nome (o mesmo array que vai em out.importBindings).
+  bindings = [];
   seen = /* @__PURE__ */ new Set();
   functionBodies = [];
   trackedBodies = /* @__PURE__ */ new Set();
@@ -12481,17 +12551,6 @@ var CodeExtractor = class {
   indirectPairs = /* @__PURE__ */ new Set();
   // Go: nomes locais dos pacotes do próprio módulo (`store "x/internal/db"` → store).
   goPackages = /* @__PURE__ */ new Set();
-  run(root) {
-    this.addNode(this.fileNid, path9.posix.basename(this.rel), 1);
-    this.walk(root, null);
-    this.rationales(root);
-    this.walkAllCalls();
-    if (this.cfg.js) this.out.typeTable = this.typeTable(root);
-    if (TYPED_IMPORTS.has(this.cfg.importStyle)) this.out.typeTable = this.declaredTypes(root);
-    this.markCallables();
-    this.out.edges = this.localEdges();
-    return this.out;
-  }
   addNode(id, label, n, extra = {}) {
     if (!id || this.seen.has(id)) return;
     this.seen.add(id);
@@ -12538,19 +12597,243 @@ var CodeExtractor = class {
     if (cfg.name === "dart" && n.type === "method_signature") n = n.namedChildren.find((c) => c.type.endsWith("_signature")) ?? n;
     const field = cfg.nameFieldByType?.[n.type] ?? cfg.nameField ?? "name";
     let nameNode = n.childForFieldName(field);
-    if (!nameNode && cfg.nameFallback) nameNode = n.namedChildren.find((c) => cfg.nameFallback.includes(c.type)) ?? null;
+    const fallback = cfg.nameFallback;
+    if (!nameNode && fallback) nameNode = n.namedChildren.find((c) => fallback.includes(c.type)) ?? null;
     if (!nameNode && (cfg.name === "c" || cfg.name === "cpp")) {
       let d = n.childForFieldName("declarator");
       while (d && d.childForFieldName("declarator")) d = d.childForFieldName("declarator");
       nameNode = d;
     }
     if (!nameNode) return null;
-    const text = nameNode.text.replace(/<[\s\S]*>$/, "").split(/::|\./).pop().trim();
+    const text = lastSegment(nameNode.text.replace(/<[\s\S]*>$/, ""), /::|\./).trim();
     return normalizeId(text) ? text : null;
   }
   bodyOf(n) {
     if (this.cfg.name === "dart" && this.cfg.functionTypes.has(n.type)) return n.nextNamedSibling?.type === "function_body" ? n.nextNamedSibling : null;
     return n.childForFieldName("body") ?? n.namedChildren.find((c) => this.cfg.bodyFallback?.includes(c.type)) ?? null;
+  }
+  // ---- chamadas ----------------------------------------------------------------------------
+  walkAllCalls() {
+    for (const nd of this.nodes) if (nd.source_file && nd.id !== this.fileNid) this.labelToNid.set(bareLabel(nd.label), nd.id);
+    for (const [caller, body2] of this.functionBodies) this.walkCalls(body2, caller, this.localsOf(body2), true);
+  }
+  /** O nó que diz quem é chamado: construtor no `new`, tipo no Java, ou o campo da gramática. */
+  calleeNode(n) {
+    const cfg = this.cfg;
+    if (n.type === "new_expression") return n.childForFieldName("constructor");
+    if ((cfg.name === "java" || cfg.name === "csharp") && n.type === "object_creation_expression") return n.childForFieldName("type");
+    if (cfg.callFunctionField) return n.childForFieldName(cfg.callFunctionField);
+    return n.namedChildren[0];
+  }
+  calleeOf(n) {
+    if (n.type === "jsx_opening_element" || n.type === "jsx_self_closing_element") {
+      const nm = n.childForFieldName("name");
+      if (nm?.type !== "identifier" || /^[a-z]/.test(nm.text)) return null;
+      return { name: nm.text, member: false };
+    }
+    if (this.cfg.name === "dart") return dartCallee(n);
+    if (this.cfg.name === "php") return phpCallee(n);
+    const c = this.genericCallee(n);
+    if (c?.member && c.receiver && this.goPackages.has(c.receiver)) return { name: c.name, member: false };
+    if (this.cfg.name === "rust" && c?.member && c.receiver && /^(crate|self|super|[a-z_][\w]*)$/.test(lastSegment(c.receiver, "::"))) return { name: c.name, member: false };
+    return c;
+  }
+  genericCallee(n) {
+    const fn9 = this.calleeNode(n);
+    if (!fn9) return null;
+    if (this.cfg.name === "java" && n.type === "method_invocation") {
+      const obj = n.childForFieldName("object");
+      return { name: fn9.text, member: !!obj, receiver: obj?.text };
+    }
+    if (IDENTIFIER_CALLEES.has(fn9.type)) return { name: fn9.text, member: false };
+    if (this.cfg.accessorTypes.has(fn9.type)) return this.accessorCallee(fn9);
+    return null;
+  }
+  /** `obj.metodo()`, `this.campo.metodo()`, `Tipo::new()`. */
+  accessorCallee(fn9) {
+    const cfg = this.cfg;
+    const prop = cfg.accessorField ? fn9.childForFieldName(cfg.accessorField) : fn9.namedChildren[fn9.namedChildCount - 1];
+    const obj = cfg.accessorObjectField ? fn9.childForFieldName(cfg.accessorObjectField) : fn9.namedChildren[0];
+    const name2 = (prop ?? fn9.namedChildren[fn9.namedChildCount - 1])?.text.replace(/^\./, "");
+    if (!name2) return null;
+    if (obj?.type === "member_expression" && obj.childForFieldName("object")?.type === "this") {
+      return { name: name2, member: true, receiver: obj.childForFieldName("property")?.text, thisField: true };
+    }
+    if (fn9.type === "scoped_identifier" || fn9.type === "qualified_identifier") {
+      const path17 = fn9.childForFieldName("path") ?? fn9.childForFieldName("scope");
+      return { name: name2, member: true, receiver: path17?.text };
+    }
+    return { name: name2, member: true, receiver: obj?.type === "identifier" || obj?.type === "this" || obj?.type === "self" ? obj.text : obj?.text.slice(0, 40) };
+  }
+  localsOf(body2) {
+    const names = /* @__PURE__ */ new Set();
+    const params = body2.parent?.childForFieldName("parameters") ?? body2.parent?.childForFieldName("parameter");
+    for (const id of params?.descendantsOfType(["identifier", "shorthand_property_identifier_pattern"]) ?? []) names.add(id.text);
+    for (const d of body2.descendantsOfType(["variable_declarator"])) {
+      const nm = d.childForFieldName("name");
+      if (nm) for (const id of nm.type === "identifier" ? [nm] : nm.descendantsOfType(["identifier", "shorthand_property_identifier_pattern"])) names.add(id.text);
+    }
+    return names;
+  }
+  emitIndirect(caller, name2, n, context, locals) {
+    if (locals.has(name2) || name2 === "self" || name2 === "cls" || BUILTIN_GLOBALS.has(name2)) return;
+    const tgt = this.labelToNid.get(name2);
+    if (tgt) {
+      if (tgt === caller || !this.callable.has(tgt) || this.callableClass.has(tgt)) return;
+      const key = `${caller}->${tgt}`;
+      if (this.callPairs.has(key) || this.indirectPairs.has(key)) return;
+      this.indirectPairs.add(key);
+      this.addEdge(caller, tgt, "indirect_call", n, { confidence: "INFERRED", confidence_score: 0.85, context });
+    } else if (/^[A-Za-z_$][\w$]*$/.test(name2)) {
+      this.out.rawCalls.push({ caller, callee: name2, isMember: false, sourceFile: this.rel, line: line(n), indirect: true, context });
+    }
+  }
+  walkCalls(n, caller, locals, isRoot) {
+    const cfg = this.cfg;
+    if (!isRoot && cfg.boundaryTypes.has(n.type)) {
+      const inner = this.innerLocals(n, locals);
+      if (!inner) return;
+      locals = inner;
+    }
+    if (cfg.callTypes.has(n.type)) this.visitCall(n, caller, locals);
+    if (cfg.js && (n.type === "pair" || n.type === "shorthand_property_identifier")) {
+      const v = n.type === "pair" ? n.childForFieldName("value") : n;
+      if (v && (v.type === "identifier" || v.type === "shorthand_property_identifier")) this.emitIndirect(caller, v.text, v, "collection", locals);
+    }
+    for (const c of n.namedChildren) this.walkCalls(c, caller, locals, false);
+  }
+  /** Função dentro da função: só desce nas closures JS não rastreadas, somando os nomes locais delas. */
+  innerLocals(n, locals) {
+    const body2 = n.childForFieldName("body");
+    if (!(this.cfg.js && JS_DESCEND.has(n.type) && body2 && !this.trackedBodies.has(body2.id))) return null;
+    return /* @__PURE__ */ new Set([...locals, ...this.localsOf(body2)]);
+  }
+  visitCall(n, caller, locals) {
+    const cfg = this.cfg;
+    const fnNode = n.childForFieldName("function");
+    if (cfg.js && fnNode?.type === "import") return this.dynamicImport(n, caller);
+    const c = this.calleeOf(n);
+    if (c && !(!c.member && BUILTIN_GLOBALS.has(c.name))) this.directCall(n, caller, locals, c);
+    if (cfg.js || cfg.name === "python") {
+      for (const a of n.childForFieldName("arguments")?.namedChildren ?? []) {
+        if (a.type === "identifier") this.emitIndirect(caller, a.text, a, "argument", locals);
+      }
+    }
+  }
+  dynamicImport(n, caller) {
+    const arg = n.childForFieldName("arguments")?.namedChildren[0];
+    if (arg?.type !== "string") return;
+    const raw = arg.text.replace(/^['"`]|['"`]$/g, "");
+    const targetRel = this.resolver.resolveJs(raw, this.rel);
+    this.addEdge(caller, targetRel ? fileNodeId(targetRel) : makeId("ref", packageRoot(raw)), "imports_from", n, {
+      context: "import",
+      deferred: true
+    });
+  }
+  /** Chamada de método que só a fase entre arquivos sabe resolver (receptor de fora, tipo, `this.campo`). */
+  deferCall(c) {
+    const cfg = this.cfg;
+    const pyForeign = cfg.name === "python" && c.member && !["self", "cls", "super"].includes(c.receiver ?? "");
+    return c.member && BUILTIN_GLOBALS.has(c.receiver ?? "") || c.member && (/^[A-Z]/.test(c.receiver ?? "") || !!c.thisField) || pyForeign || c.member && ["java", "csharp"].includes(cfg.name);
+  }
+  directCall(n, caller, locals, c) {
+    const tgt = this.deferCall(c) ? void 0 : this.labelToNid.get(c.name);
+    if (tgt) {
+      const key = `${caller}->${tgt}`;
+      if (this.callPairs.has(key)) return;
+      this.callPairs.add(key);
+      this.addEdge(caller, tgt, "calls", n, { context: "call" });
+      return;
+    }
+    if (this.cfg.name === "python" && !c.member && locals.has(c.name)) return;
+    this.out.rawCalls.push({ caller, callee: c.name, isMember: c.member, receiver: c.receiver, sourceFile: this.rel, line: line(n) });
+  }
+  // TS: `const x = new Foo()` e parâmetros `(svc: Svc)` → tipo do receptor para `x.metodo()`.
+  typeTable(root) {
+    const table = {};
+    for (const d of root.descendantsOfType("variable_declarator")) {
+      const nm = d.childForFieldName("name");
+      const v = d.childForFieldName("value");
+      const ctor = v?.type === "new_expression" ? v.childForFieldName("constructor") : null;
+      if (nm?.type === "identifier" && ctor?.type === "identifier") table[nm.text] ??= ctor.text;
+    }
+    for (const p of root.descendantsOfType(["required_parameter", "optional_parameter"])) {
+      const nm = p.childForFieldName("pattern");
+      const ty = p.childForFieldName("type")?.namedChildren[0];
+      if (nm?.type === "identifier" && ty?.type === "type_identifier") table[nm.text] ??= ty.text;
+    }
+    return table;
+  }
+  /** Java, Kotlin e C#: `User u`, `u: Repo`, `var x = new User()`, `val y = Repo()` → tipo do receptor para `u.metodo()`. */
+  declaredTypes(root) {
+    const table = {};
+    const set = (name2, type) => {
+      const t = type?.replace(/<[\s\S]*$/, "").replace(/\?$/, "").split(".").pop();
+      if (name2 && t && /^[A-Z]\w*$/.test(t)) table[name2] ??= t;
+    };
+    const created = (v) => {
+      if (v?.type === "object_creation_expression") return v.childForFieldName("type")?.text;
+      const callee2 = v?.type === "call_expression" ? v.namedChildren[0] : null;
+      return callee2?.type === "simple_identifier" ? callee2.text : void 0;
+    };
+    for (const d of root.descendantsOfType(["formal_parameter", "parameter", "local_variable_declaration", "field_declaration", "variable_declaration"])) {
+      if (this.cfg.name === "kotlin") {
+        const ty2 = d.namedChildren.find((c) => c.type === "user_type" || c.type === "nullable_type")?.text;
+        set(d.namedChildren.find((c) => c.type === "simple_identifier")?.text, ty2 ?? (d.type === "variable_declaration" ? created(d.nextNamedSibling) : void 0));
+        continue;
+      }
+      const ty = d.childForFieldName("type");
+      if (d.type === "formal_parameter" || d.type === "parameter") {
+        set(d.childForFieldName("name")?.text, ty?.text);
+        continue;
+      }
+      for (const v of d.namedChildren.filter((c) => c.type === "variable_declarator")) {
+        const name2 = (v.childForFieldName("name") ?? v.namedChildren.find((c) => c.type === "identifier"))?.text;
+        const value = v.childForFieldName("value") ?? v.namedChildren.find((c) => c.type === "equals_value_clause")?.namedChildren[0];
+        set(name2, ty && ty.text !== "var" ? ty.text : created(value));
+      }
+    }
+    return table;
+  }
+  markCallables() {
+    for (const nd of this.nodes) {
+      if (this.callable.has(nd.id)) nd._callable = true;
+      if (this.callableClass.has(nd.id)) nd._callable_class = true;
+    }
+  }
+  // Limpeza por arquivo (§1.5): arestas saindo de nós deste arquivo; alvo local ou relação de import.
+  localEdges() {
+    const local = new Set(this.nodes.map((nd) => nd.id));
+    const dedupe = /* @__PURE__ */ new Set();
+    return this.edges.filter((e) => {
+      if (!local.has(e.source)) return false;
+      if (!local.has(e.target) && !["imports", "imports_from", "re_exports"].includes(e.relation)) return false;
+      const key = JSON.stringify(e);
+      if (dedupe.has(key)) return false;
+      dedupe.add(key);
+      return true;
+    });
+  }
+};
+
+// engine/src/extract-code.ts
+async function extractCode(rel, source, cfg, resolver) {
+  const tree = await parse(cfg.grammar, SFC_EXT.test(rel) ? sfcScript(rel, source) : source);
+  const out2 = new CodeExtractor(rel, cfg, resolver).run(tree.rootNode);
+  tree.delete();
+  return out2;
+}
+var CodeExtractor = class extends CodeExtractorBase {
+  run(root) {
+    this.addNode(this.fileNid, path9.posix.basename(this.rel), 1);
+    this.walk(root, null);
+    this.rationales(root);
+    this.walkAllCalls();
+    if (this.cfg.js) this.out.typeTable = this.typeTable(root);
+    if (TYPED_IMPORTS.has(this.cfg.importStyle)) this.out.typeTable = this.declaredTypes(root);
+    this.markCallables();
+    this.out.edges = this.localEdges();
+    return this.out;
   }
   // ---- imports -----------------------------------------------------------------------------
   importJs(n) {
@@ -12572,11 +12855,11 @@ var CodeExtractor = class {
       this.addEdge(fileNid, makeId(targetStem, imported), reexport ? "re_exports" : "imports", spec, {
         context: reexport ? "re-export" : "import"
       });
-      this.out.importBindings.push({ local, imported, targetRel });
+      this.bindings.push({ local, imported, targetRel });
     }
     const clause = n.namedChildren.find((c) => c.type === "import_clause");
     const def = clause?.namedChildren.find((c) => c.type === "identifier");
-    if (def) this.out.importBindings.push({ local: def.text, imported: "default", targetRel });
+    if (def) this.bindings.push({ local: def.text, imported: "default", targetRel });
     return true;
   }
   importPython(n) {
@@ -12593,7 +12876,7 @@ var CodeExtractor = class {
     const modNode = n.childForFieldName("module_name");
     if (!modNode) return;
     const text = modNode.text;
-    const level = text.match(/^\.*/)[0].length;
+    const level = /^\.*/.exec(text)?.[0].length ?? 0;
     const mod = text.slice(level);
     const targetRel = this.resolver.resolvePython(mod, level, rel);
     this.addEdge(fileNid, targetRel ? fileNodeId(targetRel) : makeId(mod || text), "imports_from", n, { context: "import" });
@@ -12603,7 +12886,7 @@ var CodeExtractor = class {
       const local = d.type === "aliased_import" ? d.childForFieldName("alias")?.text : imported;
       if (!imported || !local) continue;
       this.addEdge(fileNid, makeId(fileStem(targetRel), imported), "imports", d, { context: "import" });
-      this.out.importBindings.push({ local, imported, targetRel });
+      this.bindings.push({ local, imported, targetRel });
     }
   }
   /** PHP: `use App\Models\User` (e grupos `use App\{A, B}`) pelo PSR-4; `require`/`include` pelo caminho. */
@@ -12613,8 +12896,8 @@ var CodeExtractor = class {
       for (const fq of phpUseNames(n)) {
         const targetRel2 = this.resolver.resolvePhpClass(fq);
         this.addEdge(fileNid, targetRel2 ? fileNodeId(targetRel2) : makeId("ref", fq), "imports", n, { context: "import" });
-        const name2 = fq.split("\\").pop();
-        if (targetRel2) this.out.importBindings.push({ local: name2, imported: name2, targetRel: targetRel2 });
+        const name2 = lastSegment(fq, "\\");
+        if (targetRel2) this.bindings.push({ local: name2, imported: name2, targetRel: targetRel2 });
       }
       return;
     }
@@ -12640,7 +12923,7 @@ var CodeExtractor = class {
         this.addEdge(this.fileNid, makeId("ref", raw), "imports", spec, { context: "import" });
         continue;
       }
-      this.goPackages.add(spec.childForFieldName("name")?.text ?? raw.split("/").pop());
+      this.goPackages.add(spec.childForFieldName("name")?.text ?? lastSegment(raw, "/"));
       for (const t of targets) this.addEdge(this.fileNid, fileNodeId(t), "imports", spec, { context: "import" });
     }
   }
@@ -12654,10 +12937,10 @@ var CodeExtractor = class {
       this.addEdge(this.fileNid, makeId("ref", fq), "imports", n, { context: "import" });
       return;
     }
-    const imported = fq.split(".").pop();
+    const imported = lastSegment(fq, ".");
     for (const t of targets) {
       this.addEdge(this.fileNid, fileNodeId(t), "imports", n, { context: "import" });
-      if (imported !== "*") this.out.importBindings.push({ local: aliasEq ?? aliasAs ?? imported, imported, targetRel: t });
+      if (imported !== "*") this.bindings.push({ local: aliasEq ?? aliasAs ?? imported, imported, targetRel: t });
     }
   }
   /** Rust: `mod x;` → x.rs ou x/mod.rs; `mod x { … }` é caminhado; `use crate::a::B` → o arquivo do módulo a. */
@@ -12679,7 +12962,7 @@ var CodeExtractor = class {
       }
       if (hit.file === this.rel) continue;
       this.addEdge(this.fileNid, fileNodeId(hit.file), "imports", n, { context: "import" });
-      if (hit.item) this.out.importBindings.push({ local: alias ?? hit.item, imported: hit.item, targetRel: hit.file });
+      if (hit.item) this.bindings.push({ local: alias ?? hit.item, imported: hit.item, targetRel: hit.file });
     }
   }
   // Demais linguagens: o import vira referência a um módulo externo (stub criado no build).
@@ -12702,7 +12985,7 @@ var CodeExtractor = class {
   heritage(n, classNid) {
     const emit = (nameNode, relation) => {
       if (!nameNode) return;
-      const name2 = nameNode.text.replace(/<[\s\S]*$/, "").split(".").pop().trim();
+      const name2 = lastSegment(nameNode.text.replace(/<[\s\S]*$/, ""), ".").trim();
       if (normalizeId(name2)) this.addEdge(classNid, this.ensureNamed(name2), relation, nameNode);
     };
     if (this.cfg.name === "python") {
@@ -12899,280 +13182,7 @@ var CodeExtractor = class {
       this.addEdge(rid, this.fileNid, "rationale_for", c);
     }
   }
-  // ---- chamadas ----------------------------------------------------------------------------
-  walkAllCalls() {
-    for (const nd of this.nodes) if (nd.source_file && nd.id !== this.fileNid) this.labelToNid.set(bareLabel(nd.label), nd.id);
-    for (const [caller, body2] of this.functionBodies) this.walkCalls(body2, caller, this.localsOf(body2), true);
-  }
-  /** O nó que diz quem é chamado: construtor no `new`, tipo no Java, ou o campo da gramática. */
-  calleeNode(n) {
-    const cfg = this.cfg;
-    if (n.type === "new_expression") return n.childForFieldName("constructor");
-    if ((cfg.name === "java" || cfg.name === "csharp") && n.type === "object_creation_expression") return n.childForFieldName("type");
-    if (cfg.callFunctionField) return n.childForFieldName(cfg.callFunctionField);
-    return n.namedChildren[0];
-  }
-  calleeOf(n) {
-    if (n.type === "jsx_opening_element" || n.type === "jsx_self_closing_element") {
-      const nm = n.childForFieldName("name");
-      if (nm?.type !== "identifier" || /^[a-z]/.test(nm.text)) return null;
-      return { name: nm.text, member: false };
-    }
-    if (this.cfg.name === "dart") return dartCallee(n);
-    if (this.cfg.name === "php") return phpCallee(n);
-    const c = this.genericCallee(n);
-    if (c?.member && c.receiver && this.goPackages.has(c.receiver)) return { name: c.name, member: false };
-    if (this.cfg.name === "rust" && c?.member && c.receiver && /^(crate|self|super|[a-z_][\w]*)$/.test(c.receiver.split("::").pop())) return { name: c.name, member: false };
-    return c;
-  }
-  genericCallee(n) {
-    const fn9 = this.calleeNode(n);
-    if (!fn9) return null;
-    if (this.cfg.name === "java" && n.type === "method_invocation") {
-      const obj = n.childForFieldName("object");
-      return { name: fn9.text, member: !!obj, receiver: obj?.text };
-    }
-    if (IDENTIFIER_CALLEES.has(fn9.type)) return { name: fn9.text, member: false };
-    if (this.cfg.accessorTypes.has(fn9.type)) return this.accessorCallee(fn9);
-    return null;
-  }
-  /** `obj.metodo()`, `this.campo.metodo()`, `Tipo::new()`. */
-  accessorCallee(fn9) {
-    const cfg = this.cfg;
-    const prop = cfg.accessorField ? fn9.childForFieldName(cfg.accessorField) : fn9.namedChildren[fn9.namedChildCount - 1];
-    const obj = cfg.accessorObjectField ? fn9.childForFieldName(cfg.accessorObjectField) : fn9.namedChildren[0];
-    const name2 = (prop ?? fn9.namedChildren[fn9.namedChildCount - 1])?.text.replace(/^\./, "");
-    if (!name2) return null;
-    if (obj?.type === "member_expression" && obj.childForFieldName("object")?.type === "this") {
-      return { name: name2, member: true, receiver: obj.childForFieldName("property")?.text, thisField: true };
-    }
-    if (fn9.type === "scoped_identifier" || fn9.type === "qualified_identifier") {
-      const path17 = fn9.childForFieldName("path") ?? fn9.childForFieldName("scope");
-      return { name: name2, member: true, receiver: path17?.text };
-    }
-    return { name: name2, member: true, receiver: obj?.type === "identifier" || obj?.type === "this" || obj?.type === "self" ? obj.text : obj?.text.slice(0, 40) };
-  }
-  localsOf(body2) {
-    const names = /* @__PURE__ */ new Set();
-    const params = body2.parent?.childForFieldName("parameters") ?? body2.parent?.childForFieldName("parameter");
-    for (const id of params?.descendantsOfType(["identifier", "shorthand_property_identifier_pattern"]) ?? []) names.add(id.text);
-    for (const d of body2.descendantsOfType(["variable_declarator"])) {
-      const nm = d.childForFieldName("name");
-      if (nm) for (const id of nm.type === "identifier" ? [nm] : nm.descendantsOfType(["identifier", "shorthand_property_identifier_pattern"])) names.add(id.text);
-    }
-    return names;
-  }
-  emitIndirect(caller, name2, n, context, locals) {
-    if (locals.has(name2) || name2 === "self" || name2 === "cls" || BUILTIN_GLOBALS.has(name2)) return;
-    const tgt = this.labelToNid.get(name2);
-    if (tgt) {
-      if (tgt === caller || !this.callable.has(tgt) || this.callableClass.has(tgt)) return;
-      const key = `${caller}->${tgt}`;
-      if (this.callPairs.has(key) || this.indirectPairs.has(key)) return;
-      this.indirectPairs.add(key);
-      this.addEdge(caller, tgt, "indirect_call", n, { confidence: "INFERRED", confidence_score: 0.85, context });
-    } else if (/^[A-Za-z_$][\w$]*$/.test(name2)) {
-      this.out.rawCalls.push({ caller, callee: name2, isMember: false, sourceFile: this.rel, line: line(n), indirect: true, context });
-    }
-  }
-  walkCalls(n, caller, locals, isRoot) {
-    const cfg = this.cfg;
-    if (!isRoot && cfg.boundaryTypes.has(n.type)) {
-      const inner = this.innerLocals(n, locals);
-      if (!inner) return;
-      locals = inner;
-    }
-    if (cfg.callTypes.has(n.type)) this.visitCall(n, caller, locals);
-    if (cfg.js && (n.type === "pair" || n.type === "shorthand_property_identifier")) {
-      const v = n.type === "pair" ? n.childForFieldName("value") : n;
-      if (v && (v.type === "identifier" || v.type === "shorthand_property_identifier")) this.emitIndirect(caller, v.text, v, "collection", locals);
-    }
-    for (const c of n.namedChildren) this.walkCalls(c, caller, locals, false);
-  }
-  /** Função dentro da função: só desce nas closures JS não rastreadas, somando os nomes locais delas. */
-  innerLocals(n, locals) {
-    const body2 = n.childForFieldName("body");
-    if (!(this.cfg.js && JS_DESCEND.has(n.type) && body2 && !this.trackedBodies.has(body2.id))) return null;
-    return /* @__PURE__ */ new Set([...locals, ...this.localsOf(body2)]);
-  }
-  visitCall(n, caller, locals) {
-    const cfg = this.cfg;
-    const fnNode = n.childForFieldName("function");
-    if (cfg.js && fnNode?.type === "import") return this.dynamicImport(n, caller);
-    const c = this.calleeOf(n);
-    if (c && !(!c.member && BUILTIN_GLOBALS.has(c.name))) this.directCall(n, caller, locals, c);
-    if (cfg.js || cfg.name === "python") {
-      for (const a of n.childForFieldName("arguments")?.namedChildren ?? []) {
-        if (a.type === "identifier") this.emitIndirect(caller, a.text, a, "argument", locals);
-      }
-    }
-  }
-  dynamicImport(n, caller) {
-    const arg = n.childForFieldName("arguments")?.namedChildren[0];
-    if (arg?.type !== "string") return;
-    const raw = arg.text.replace(/^['"`]|['"`]$/g, "");
-    const targetRel = this.resolver.resolveJs(raw, this.rel);
-    this.addEdge(caller, targetRel ? fileNodeId(targetRel) : makeId("ref", packageRoot(raw)), "imports_from", n, {
-      context: "import",
-      deferred: true
-    });
-  }
-  /** Chamada de método que só a fase entre arquivos sabe resolver (receptor de fora, tipo, `this.campo`). */
-  deferCall(c) {
-    const cfg = this.cfg;
-    const pyForeign = cfg.name === "python" && c.member && !["self", "cls", "super"].includes(c.receiver ?? "");
-    return c.member && BUILTIN_GLOBALS.has(c.receiver ?? "") || c.member && (/^[A-Z]/.test(c.receiver ?? "") || !!c.thisField) || pyForeign || c.member && ["java", "csharp"].includes(cfg.name);
-  }
-  directCall(n, caller, locals, c) {
-    const tgt = this.deferCall(c) ? void 0 : this.labelToNid.get(c.name);
-    if (tgt) {
-      const key = `${caller}->${tgt}`;
-      if (this.callPairs.has(key)) return;
-      this.callPairs.add(key);
-      this.addEdge(caller, tgt, "calls", n, { context: "call" });
-      return;
-    }
-    if (this.cfg.name === "python" && !c.member && locals.has(c.name)) return;
-    this.out.rawCalls.push({ caller, callee: c.name, isMember: c.member, receiver: c.receiver, sourceFile: this.rel, line: line(n) });
-  }
-  // TS: `const x = new Foo()` e parâmetros `(svc: Svc)` → tipo do receptor para `x.metodo()`.
-  typeTable(root) {
-    const table = {};
-    for (const d of root.descendantsOfType("variable_declarator")) {
-      const nm = d.childForFieldName("name");
-      const v = d.childForFieldName("value");
-      const ctor = v?.type === "new_expression" ? v.childForFieldName("constructor") : null;
-      if (nm?.type === "identifier" && ctor?.type === "identifier") table[nm.text] ??= ctor.text;
-    }
-    for (const p of root.descendantsOfType(["required_parameter", "optional_parameter"])) {
-      const nm = p.childForFieldName("pattern");
-      const ty = p.childForFieldName("type")?.namedChildren[0];
-      if (nm?.type === "identifier" && ty?.type === "type_identifier") table[nm.text] ??= ty.text;
-    }
-    return table;
-  }
-  /** Java, Kotlin e C#: `User u`, `u: Repo`, `var x = new User()`, `val y = Repo()` → tipo do receptor para `u.metodo()`. */
-  declaredTypes(root) {
-    const table = {};
-    const set = (name2, type) => {
-      const t = type?.replace(/<[\s\S]*$/, "").replace(/\?$/, "").split(".").pop();
-      if (name2 && t && /^[A-Z]\w*$/.test(t)) table[name2] ??= t;
-    };
-    const created = (v) => {
-      if (v?.type === "object_creation_expression") return v.childForFieldName("type")?.text;
-      const callee2 = v?.type === "call_expression" ? v.namedChildren[0] : null;
-      return callee2?.type === "simple_identifier" ? callee2.text : void 0;
-    };
-    for (const d of root.descendantsOfType(["formal_parameter", "parameter", "local_variable_declaration", "field_declaration", "variable_declaration"])) {
-      if (this.cfg.name === "kotlin") {
-        const ty2 = d.namedChildren.find((c) => c.type === "user_type" || c.type === "nullable_type")?.text;
-        set(d.namedChildren.find((c) => c.type === "simple_identifier")?.text, ty2 ?? (d.type === "variable_declaration" ? created(d.nextNamedSibling) : void 0));
-        continue;
-      }
-      const ty = d.childForFieldName("type");
-      if (d.type === "formal_parameter" || d.type === "parameter") {
-        set(d.childForFieldName("name")?.text, ty?.text);
-        continue;
-      }
-      for (const v of d.namedChildren.filter((c) => c.type === "variable_declarator")) {
-        const name2 = (v.childForFieldName("name") ?? v.namedChildren.find((c) => c.type === "identifier"))?.text;
-        const value = v.childForFieldName("value") ?? v.namedChildren.find((c) => c.type === "equals_value_clause")?.namedChildren[0];
-        set(name2, ty && ty.text !== "var" ? ty.text : created(value));
-      }
-    }
-    return table;
-  }
-  markCallables() {
-    for (const nd of this.nodes) {
-      if (this.callable.has(nd.id)) nd._callable = true;
-      if (this.callableClass.has(nd.id)) nd._callable_class = true;
-    }
-  }
-  // Limpeza por arquivo (§1.5): arestas saindo de nós deste arquivo; alvo local ou relação de import.
-  localEdges() {
-    const local = new Set(this.nodes.map((nd) => nd.id));
-    const dedupe = /* @__PURE__ */ new Set();
-    return this.edges.filter((e) => {
-      if (!local.has(e.source)) return false;
-      if (!local.has(e.target) && !["imports", "imports_from", "re_exports"].includes(e.relation)) return false;
-      const key = JSON.stringify(e);
-      if (dedupe.has(key)) return false;
-      dedupe.add(key);
-      return true;
-    });
-  }
 };
-function dartCallee(n) {
-  if (!n.namedChildren.some((c) => c.type === "argument_part")) return null;
-  const prev = n.previousNamedSibling;
-  if (prev?.type === "identifier") return { name: prev.text, member: false };
-  const access = prev?.type === "selector" ? prev.namedChildren.find((c) => c.type.endsWith("assignable_selector")) : null;
-  const name2 = access?.namedChildren.find((c) => c.type === "identifier")?.text;
-  if (!name2) return null;
-  const receiver = prev.previousNamedSibling;
-  return { name: name2, member: true, receiver: receiver?.type === "identifier" || receiver?.type === "this" ? receiver.text : void 0 };
-}
-function phpCallee(n) {
-  if (n.type === "function_call_expression") {
-    const fn9 = n.childForFieldName("function");
-    return fn9 && (fn9.type === "name" || fn9.type === "qualified_name") ? { name: fn9.text.split("\\").pop(), member: false } : null;
-  }
-  if (n.type === "object_creation_expression") {
-    const cls = n.namedChildren.find((c) => c.type === "name" || c.type === "qualified_name");
-    return cls ? { name: cls.text.split("\\").pop(), member: false } : null;
-  }
-  const name2 = n.childForFieldName("name")?.text;
-  if (!name2) return null;
-  if (n.type === "scoped_call_expression") {
-    const scope = n.childForFieldName("scope")?.text;
-    return { name: name2, member: true, receiver: scope === "self" || scope === "static" || scope === "parent" ? "self" : scope };
-  }
-  const obj = n.childForFieldName("object");
-  const thisField = obj?.type === "member_access_expression" && obj.childForFieldName("object")?.text === "$this";
-  return { name: name2, member: true, receiver: obj?.text === "$this" ? "this" : obj?.text.slice(0, 40), thisField };
-}
-function templateCalls(template) {
-  const exprs = [
-    ...[...template.matchAll(/\s(?:\([\w.-]+\)|\[[\w.@-]+\]|\[\([\w.-]+\)\]|\*ng\w+|(?:bind|on)-[\w-]+)\s*=\s*"([^"]*)"/g)].map((m) => m[1]),
-    ...[...template.matchAll(/\{\{([\s\S]*?)\}\}/g)].map((m) => m[1]),
-    ...[...template.matchAll(/@(?:if|else if|for|switch|case|defer)\s*\(([^)]*(?:\([^)]*\)[^)]*)*)\)/g)].map((m) => m[1])
-  ];
-  const names = /* @__PURE__ */ new Set();
-  for (const e of exprs) for (const m of e.matchAll(/(?<![\w$.])([A-Za-z_$][\w$]*)\s*\(/g)) names.add(m[1]);
-  return names;
-}
-function rustUsePaths(text, prefix = []) {
-  const s = text.trim();
-  const open = s.indexOf("{");
-  if (open === -1) {
-    const [, p, alias] = s.match(/^([\w:]+?)(?:::\*)?(?:\s+as\s+(\w+))?$/) ?? [];
-    if (!p) return [];
-    const segments = [...prefix, ...p.split("::").filter(Boolean)];
-    if (segments[segments.length - 1] === "self") segments.pop();
-    return segments.length ? [{ segments, alias: alias ?? null }] : [];
-  }
-  const head = s.slice(0, open).replace(/::$/, "").split("::").filter(Boolean);
-  const inner = s.slice(open + 1, s.lastIndexOf("}"));
-  const parts2 = [];
-  let depth = 0;
-  let start2 = 0;
-  for (let i2 = 0; i2 < inner.length; i2++) {
-    if (inner[i2] === "{") depth++;
-    else if (inner[i2] === "}") depth--;
-    else if (inner[i2] === "," && depth === 0) {
-      parts2.push(inner.slice(start2, i2));
-      start2 = i2 + 1;
-    }
-  }
-  parts2.push(inner.slice(start2));
-  return parts2.filter((p) => p.trim()).flatMap((p) => rustUsePaths(p, [...prefix, ...head]));
-}
-function phpUseNames(n) {
-  const group = n.namedChildren.find((c) => c.type === "namespace_use_group");
-  if (!group) return n.namedChildren.filter((c) => c.type === "namespace_use_clause").map((c) => c.namedChildren.find((x) => x.type === "qualified_name" || x.type === "name")?.text ?? "").filter(Boolean);
-  const prefix = n.namedChildren.find((c) => c.type === "namespace_name")?.text ?? "";
-  return group.namedChildren.map((c) => c.namedChildren.find((x) => x.type === "namespace_name" || x.type === "name")?.text).filter((x) => !!x).map((x) => `${prefix}\\${x}`);
-}
 
 // engine/src/extract-docs.ts
 import fs5 from "node:fs";
