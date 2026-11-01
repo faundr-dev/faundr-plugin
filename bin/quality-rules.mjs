@@ -199,12 +199,7 @@ async function analyzeFiles(root, files, c, errors) {
       errors.push(`${rel}: ${err.message}`)
       continue
     }
-    for (const h of result.hits) {
-      if (h.rule === 'limpeza/console-log' && (!UI_FILE.test(rel) || SERVER_PATH.test(rel))) continue
-      // Dart: print é esquecimento no app (lib/); em bin/ e tool/ é a saída normal do programa.
-      if (h.rule === 'limpeza/print-esquecido' && rel.endsWith('.dart') && !/(^|\/)lib\//.test(rel)) continue
-      add(h.rule, h.line, h.ctx)
-    }
+    for (const h of result.hits) if (keepHit(h, rel)) add(h.rule, h.line, h.ctx)
     for (const r of house) if (r.files.test(rel)) for (const line of r.lines(text)) add(r.rule, line, r.ctx)
     for (const s of shortcutsIn(text)) {
       out.shortcuts.push({ file: rel, ...s })
@@ -216,16 +211,28 @@ async function analyzeFiles(root, files, c, errors) {
     out.texts.set(rel, text)
     out.modules.set(rel, result.module)
     if (test) {
-      // Data e hora reais sem relógio falso: o teste muda de resultado conforme o dia.
-      const clock = text.search(/\bnew Date\(\s*\)|\bDate\.now\(\)/)
-      if (clock >= 0 && !/useFakeTimers|setSystemTime|mock\.timers|clock\.install|page\.clock|sinon\.useFakeTimers/.test(text))
-        add('testes/hora-real', text.slice(0, clock).split('\n').length, {})
+      realClockRule(text, add)
       continue
     }
     out.metrics.set(rel, { lines: codeLines, functions: result.functions })
     if (codeLines > 600) add('complexidade/arquivo-grande', null, { lines: codeLines })
   }
   return out
+}
+
+// Achados da árvore de sintaxe que valem para este arquivo.
+function keepHit(h, rel) {
+  if (h.rule === 'limpeza/console-log' && (!UI_FILE.test(rel) || SERVER_PATH.test(rel))) return false
+  // Dart: print é esquecimento no app (lib/); em bin/ e tool/ é a saída normal do programa.
+  if (h.rule === 'limpeza/print-esquecido' && rel.endsWith('.dart') && !/(^|\/)lib\//.test(rel)) return false
+  return true
+}
+
+// Teste com data e hora reais sem relógio falso: o teste muda de resultado conforme o dia.
+function realClockRule(text, add) {
+  const clock = text.search(/\bnew Date\(\s*\)|\bDate\.now\(\)/)
+  if (clock >= 0 && !/useFakeTimers|setSystemTime|mock\.timers|clock\.install|page\.clock|sinon\.useFakeTimers/.test(text))
+    add('testes/hora-real', text.slice(0, clock).split('\n').length, {})
 }
 
 /** O que só dá para ver olhando o projeto inteiro: pacotes, instruções da IA, TODOs, código sem uso, duplicados. */
@@ -517,19 +524,25 @@ function styleRules(root, files, c) {
     if (important.length > IMPORTANT_LIMIT) c.add('css/important-em-excesso', rel, lineAt(important[0].index), { count: important.length }, text)
     for (const m of clean.matchAll(/([^{};\s][^{};]*)\{\s*\}/g)) c.add('css/regra-vazia', rel, lineAt(m.index), { selector: m[1].trim().slice(0, 60) }, text)
     if (/\.(scss|sass|less)$/.test(rel)) {
-      // Pilha dos blocos abertos: true quando o bloco é de seletor (@media, @include e afins não contam como nível).
-      const open = []
-      let worst = null
-      for (const [i, ch] of [...clean].entries()) {
-        if (ch === '{') {
-          open.push(!/^\s*@/.test(clean.slice(clean.lastIndexOf('\n', i) + 1, i)))
-          const depth = open.filter(Boolean).length
-          if (depth > NESTING_LIMIT && !worst) worst = { index: i, depth }
-        } else if (ch === '}') open.pop()
-      }
+      const worst = deepestNesting(clean)
       if (worst) c.add('css/aninhamento-fundo', rel, lineAt(worst.index), { depth: worst.depth }, text)
     }
   }
+}
+
+// Primeiro seletor aninhado além do limite no Sass/Less ({ index, depth }), ou null.
+function deepestNesting(clean) {
+  // Pilha dos blocos abertos: true quando o bloco é de seletor (@media, @include e afins não contam como nível).
+  const open = []
+  let worst = null
+  for (const [i, ch] of [...clean].entries()) {
+    if (ch === '{') {
+      open.push(!/^\s*@/.test(clean.slice(clean.lastIndexOf('\n', i) + 1, i)))
+      const depth = open.filter(Boolean).length
+      if (depth > NESTING_LIMIT && !worst) worst = { index: i, depth }
+    } else if (ch === '}') open.pop()
+  }
+  return worst
 }
 
 // As instruções do Dockerfile, com a linha em que cada uma começa (sem comentários; \ no fim continua a linha).

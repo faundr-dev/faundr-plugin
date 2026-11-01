@@ -97,13 +97,24 @@ test('conversa do Codex: código de saída do comando pelo id que o hook recebe'
   }
 })
 
-test('conversa do Codex: espera o item do comando chegar, se o hook rodou antes', async () => {
+test('conversa do Codex: espera o item do comando chegar, se o hook rodou antes', async (t) => {
+  // Relógio falso: as esperas de everyMs passam com tick(), sem depender de quanto o computador demora.
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] })
+  const passa = async (ms) => {
+    t.mock.timers.tick(ms)
+    for (let i = 0; i < 5; i++) await Promise.resolve()
+  }
   const { file, done } = rollout(LINES)
   try {
     const item = { type: 'event_msg', payload: { type: 'item_completed', item: { type: 'CommandExecution', id: 'exec-9', exit_code: 1 } } }
-    setTimeout(() => fs.appendFileSync(file, JSON.stringify(item) + '\n'), 200)
-    assert.equal(await codexExitCodeWait(file, 'exec-9', { timeoutMs: 2000, everyMs: 50 }), 1)
-    assert.equal(await codexExitCodeWait(file, 'exec-nunca', { timeoutMs: 120, everyMs: 50 }), null)
+    // A primeira leitura não acha o item; ele chega depois, enquanto a função espera.
+    const chegou = codexExitCodeWait(file, 'exec-9', { timeoutMs: 2000, everyMs: 50 })
+    fs.appendFileSync(file, JSON.stringify(item) + '\n')
+    await passa(50)
+    assert.equal(await chegou, 1)
+    const nunca = codexExitCodeWait(file, 'exec-nunca', { timeoutMs: 120, everyMs: 50 })
+    for (let i = 0; i < 3; i++) await passa(50)
+    assert.equal(await nunca, null)
   } finally {
     done()
   }

@@ -186,9 +186,24 @@ export function runLangTests(root, runner, { dir = '', files = null, out, timeou
   // flutter, dart, mvnw.cmd e gradlew.bat são .bat/.cmd no Windows: precisam do shell para abrir.
   const r = spawnSync(cmd, args, { cwd, encoding: 'utf8', windowsHide: true, timeout, maxBuffer: 64 * 1024 * 1024, shell, env: { ...process.env, CI: '1', NO_COLOR: '1' } })
   const durationMs = Date.now() - started
-  if (r.error?.code === 'ETIMEDOUT') return { runner, durationMs, error: tr(`went over the time limit (${Math.round(timeout / 60000)} min)`, `passou do tempo limite (${Math.round(timeout / 60000)} min)`) }
-  if (r.error?.code === 'ENOENT') return { runner, durationMs, error: tr(`couldn't start ${cmd} (is it installed and on the PATH?)`, `não consegui abrir o ${cmd} (ele está instalado e no PATH?)`) }
+  const failed = spawnFailed(cmd, r, timeout)
+  if (failed) return { runner, durationMs, error: failed }
   const noResult = (what) => ({ runner, durationMs, error: lastLine(r.stderr) || lastLine(r.stdout) || tr(`${runner} finished without ${what === 'relatório' ? 'a report' : 'results'} (code ${r.status})`, `o ${runner} terminou sem ${what} (código ${r.status})`) })
+  return langResult(root, runner, { dir, cwd, out, started, coverageArgs, r, durationMs, noResult })
+}
+
+/** O comando nem rodou até o fim: passou do tempo ou o programa não abriu. */
+function spawnFailed(cmd, r, timeout) {
+  if (r.error?.code === 'ETIMEDOUT') return tr(`went over the time limit (${Math.round(timeout / 60000)} min)`, `passou do tempo limite (${Math.round(timeout / 60000)} min)`)
+  if (r.error?.code === 'ENOENT') return tr(`couldn't start ${cmd} (is it installed and on the PATH?)`, `não consegui abrir o ${cmd} (ele está instalado e no PATH?)`)
+  return null
+}
+
+// Quem lê a saída (stdout) de cada executor; o resto é o do Dart/Flutter.
+const STDOUT_PARSERS = { go: fromGoJson, cargo: fromCargoTest }
+
+/** Lê o resultado de um executor que já rodou: relatório JUnit/TRX ou a saída do programa. */
+function langResult(root, runner, { dir, cwd, out, started, coverageArgs, r, durationMs, noResult }) {
   if (runner === 'phpunit' || runner === 'pest') {
     const xml = read(out)
     return xml ? { runner, durationMs, cases: null, junit: xml, error: null } : noResult('relatório')
@@ -209,7 +224,7 @@ export function runLangTests(root, runner, { dir = '', files = null, out, timeou
     const module = read(path.join(cwd, 'go.mod')).match(/^module\s+(\S+)/m)?.[1]
     if (module) fs.writeFileSync(path.join(root, COVERAGE_DIR, 'go-module.json'), JSON.stringify({ module, dir }))
   }
-  const cases = runner === 'go' ? fromGoJson(r.stdout, root, cwd) : runner === 'cargo' ? fromCargoTest(r.stdout, root, cwd) : fromDartJson(r.stdout, root, cwd)
+  const cases = (STDOUT_PARSERS[runner] ?? fromDartJson)(r.stdout, root, cwd)
   if (!cases.length) return noResult('resultados')
   return { runner, durationMs, cases, error: null }
 }
@@ -233,12 +248,7 @@ function stepper(cwd, timeout, started, env = {}) {
 
 function stepFailed(runner, what, r, { timeout, started }) {
   const tool = runner === 'make' ? 'make' : 'cmake'
-  const error =
-    r.error?.code === 'ETIMEDOUT'
-      ? tr(`went over the time limit (${Math.round(timeout / 60000)} min)`, `passou do tempo limite (${Math.round(timeout / 60000)} min)`)
-      : r.error?.code === 'ENOENT'
-        ? tr(`couldn't start ${tool} (is it installed and on the PATH?)`, `não consegui abrir o ${tool} (ele está instalado e no PATH?)`)
-        : `${tr(what.en, what.pt)} ${tr('failed', 'falhou')}: ${lastLine(r.stderr) || lastLine(r.stdout)}`
+  const error = spawnFailed(tool, r, timeout) ?? `${tr(what.en, what.pt)} ${tr('failed', 'falhou')}: ${lastLine(r.stderr) || lastLine(r.stdout)}`
   return { runner, durationMs: Date.now() - started, error }
 }
 
@@ -387,6 +397,12 @@ function copyCobertura(resultsDir, coverageDir) {
 
 const lastLine = (text) => String(text ?? '').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('{')).at(-1)?.slice(0, 300) ?? ''
 
+// Situação de um testDone do Dart: pulado, passou ou falhou.
+function dartStatus(e) {
+  if (e.skipped) return 'skipped'
+  return e.result === 'success' ? 'passed' : 'failed'
+}
+
 /**
  * JSON do package:test (uma linha por evento): suite (arquivo), testStart (nome e linha), error (falha) e testDone
  * (result success/failure/error, skipped, hidden). Os "loading …" escondidos não contam.
@@ -412,7 +428,7 @@ export function fromDartJson(stdout, root, cwd = root) {
         tests.delete(e.testID)
         continue
       }
-      t.status = e.skipped ? 'skipped' : e.result === 'success' ? 'passed' : 'failed'
+      t.status = dartStatus(e)
       t.durationMs = Math.max(0, (e.time ?? 0) - (t.start ?? 0))
     }
   }
@@ -653,10 +669,14 @@ export function fromCargoTest(text, root, cwd = root) {
     }
     tests.push({ file: block.file ? relTo(rustTestFile(block.file, t[1])) : null, name: t[1].split('::').join(' › '), status, durationMs: 0, key: t[1], note: t[3] })
   }
-  return tests.map(({ key, note, ...c }) => ({
-    ...c,
-    message: c.status === 'failed' ? (messages.get(key) ?? []).join('\n').trim().slice(0, 2000) || tr('failed', 'falhou') : c.status === 'skipped' && note ? `${tr('Skipped', 'Pulado')}: ${note}` : null,
-  }))
+  return tests.map(({ key, note, ...c }) => ({ ...c, message: cargoMessage(c.status, messages.get(key), note) }))
+}
+
+// Mensagem de um teste do cargo: o que ele escreveu ao falhar, ou o motivo de ter sido pulado.
+function cargoMessage(status, lines, note) {
+  if (status === 'failed') return (lines ?? []).join('\n').trim().slice(0, 2000) || tr('failed', 'falhou')
+  if (status === 'skipped' && note) return `${tr('Skipped', 'Pulado')}: ${note}`
+  return null
 }
 
 /** Crates da pasta (ela mesma e os membros de um workspace, até 3 níveis): nome com _ → pasta. */

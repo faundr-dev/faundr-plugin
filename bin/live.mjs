@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 import { skillFromCommand, toolEdits } from './agent.mjs'
 
 const CONFIG_DIR = path.join(os.homedir(), '.faundr')
-const DEFAULT_API_URL = 'https://faundr.palasbusinessstrategy.workers.dev'
+const DEFAULT_API_URL = 'https://faundr.dev'
 
 function readJson(file) {
   try {
@@ -51,6 +51,13 @@ function gitBranch(cwd) {
   }
 }
 
+/** Nome da skill chamada; no Codex, tirado do comando que abre o SKILL.md. */
+function skillName(input, toolName, agent) {
+  if (typeof input.skill === 'string') return input.skill.slice(0, 120)
+  if (agent === 'codex' && toolName === 'Bash') return skillFromCommand(input.command) ?? undefined
+  return undefined
+}
+
 /** O que vai para o servidor: o mínimo para saber o estado. */
 export function livePayload(p, agent = 'claude') {
   const input = p.tool_input ?? {}
@@ -69,7 +76,7 @@ export function livePayload(p, agent = 'claude') {
       command: program,
       // Nome da skill chamada (não é conteúdo): a aba Agora mostra a área e o workflow marca o passo da skill.
       // No Codex, o nome da skill sai do caminho do SKILL.md que o comando abre.
-      skill: typeof input.skill === 'string' ? input.skill.slice(0, 120) : agent === 'codex' && p.tool_name === 'Bash' ? skillFromCommand(input.command) ?? undefined : undefined,
+      skill: skillName(input, p.tool_name, agent),
     },
     notification_type: p.notification_type,
     message: typeof p.message === 'string' ? p.message.slice(0, 200) : undefined,

@@ -172,7 +172,7 @@ const AGENT_SESSION_ID = agentSessionId()
 // a saída da CLI, que passa pelo mesmo stdout) sai com $faundr: no lugar de /faundr:.
 agentStdout(AGENT)
 // Site do Faundr no ar; para desenvolver o próprio Faundr: /faundr:login --url http://localhost:3000.
-const DEFAULT_API_URL = 'https://faundr.palasbusinessstrategy.workers.dev'
+const DEFAULT_API_URL = 'https://faundr.dev'
 
 // Ferramentas que alteram arquivos: depois delas o grafo do projeto precisa ser refeito.
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'apply_patch'])
@@ -420,15 +420,7 @@ async function gate() {
   if (payload.stop_hook_active) return // já estamos continuando por causa de um Stop: não repetir
   const sid = payload.session_id
   const linkFile = findUp(payload.cwd ?? process.cwd(), LINK_FILE)
-  // Custo da IA: quanto cada skill que rodou nesta resposta gastou (vira o histórico das estimativas do setup).
-  if (linkFile && sid) await sendSkillCosts(path.dirname(linkFile), sid)
-  // Pedido, recado ou nota que chegou enquanto o agente trabalhava: entrega agora, mesmo sem arquivo mudado.
-  const inbox = linkFile && sid ? takeInbox(path.dirname(linkFile), sid) : []
-  const inboxStep = inbox.length ? `this arrived from the dashboard while you were working; handle it before finishing: ${inbox.join(' ')}` : null
-  // Evento desta sessão (commit, push ou deploy, erro novo) com skill ou workflow ligado nele: vale mesmo sem arquivo mexido.
-  // Skill conectada (segurança, testes, qualidade, erros) que rodou: registrar o resultado dela. Uma auditoria
-  // costuma só ler, então vale mesmo sem arquivo mexido.
-  const eventSteps = linkFile && sid ? [...takeSkillsRan(path.dirname(linkFile), sid), ...eventTriggers(path.dirname(linkFile), sid)] : []
+  const { inboxStep, eventSteps } = await earlyStopSteps(linkFile, sid)
   if (!linkFile || !sid || !fs.existsSync(editedFile(sid))) {
     const early = [inboxStep, ...eventSteps].filter(Boolean)
     return early.length ? blockStop(early) : undefined // o resto só quando a sessão mexeu em arquivos
@@ -440,10 +432,31 @@ async function gate() {
   cleanEditedMarkers()
   const s = await stopSignals(root, sid, projectId, token, apiUrl)
   if (!inboxStep && !eventSteps.length && !hasStopWork(s)) return
+  rememberNudges(root, sid, s)
+  blockStop(stopSteps(root, sid, s, inboxStep, eventSteps))
+}
+
+// O que vale no fim da resposta mesmo sem arquivo mexido (nada sem projeto ligado ou sem sessão).
+async function earlyStopSteps(linkFile, sid) {
+  if (!linkFile || !sid) return { inboxStep: null, eventSteps: [] }
+  const root = path.dirname(linkFile)
+  // Custo da IA: quanto cada skill que rodou nesta resposta gastou (vira o histórico das estimativas do setup).
+  await sendSkillCosts(root, sid)
+  // Pedido, recado ou nota que chegou enquanto o agente trabalhava: entrega agora, mesmo sem arquivo mudado.
+  const inbox = takeInbox(root, sid)
+  const inboxStep = inbox.length ? `this arrived from the dashboard while you were working; handle it before finishing: ${inbox.join(' ')}` : null
+  // Evento desta sessão (commit, push ou deploy, erro novo) com skill ou workflow ligado nele: vale mesmo sem arquivo mexido.
+  // Skill conectada (segurança, testes, qualidade, erros) que rodou: registrar o resultado dela. Uma auditoria
+  // costuma só ler, então vale mesmo sem arquivo mexido.
+  const eventSteps = [...takeSkillsRan(root, sid), ...eventTriggers(root, sid)]
+  return { inboxStep, eventSteps }
+}
+
+// Marca nesta sessão os avisos que já foram dados (não repetir na próxima resposta).
+function rememberNudges(root, sid, s) {
   if (s.untracked) writeState(root, { untrackedNudged: sid })
   if (s.stale) writeState(root, { overviewNudgedSession: sid })
   if (s.stackStale) writeState(root, { stackNudgedSession: sid })
-  blockStop(stopSteps(root, sid, s, inboxStep, eventSteps))
 }
 
 async function sendSkillCosts(root, sid) {
@@ -670,14 +683,7 @@ async function hook(agent) {
   const event = payload.hook_event_name
   const cwd = payload.cwd ?? process.cwd()
 
-  // Atalho do Codex para a versão atual do plugin (o caminho muda a cada versão; a regra libera só o atalho).
-  if (agent === 'codex' && event === 'SessionStart') {
-    try {
-      syncCodexRules(PLUGIN_ROOT)
-    } catch (err) {
-      log(`codex rules: ${err?.message ?? err}`)
-    }
-  }
+  if (agent === 'codex' && event === 'SessionStart') syncCodexOnStart()
   const linkFile = findUp(cwd, LINK_FILE)
   // Pasta não ligada a nenhum projeto. No Codex, o setup e o link ainda precisam saber como rodar o Faundr.
   if (!linkFile) {
@@ -695,23 +701,10 @@ async function hook(agent) {
   // Grafo do projeto: marca "sujo" quando o agente edita arquivos e, ao fim da resposta,
   // refaz o grafo num processo destacado (o hook responde na hora).
   if (event === 'PostToolUse' && EDIT_TOOLS.has(payload.tool_name)) trackEdit(payload, projectId)
-  // As checagens "do início da sessão" nascem na primeira pergunta: esse hook roda em segundo plano, e no do início
-  // abrir o processo delas custava ~1 s de espera no Windows. Elas só alimentam o painel e as próximas sessões.
-  const startJobs = event === 'UserPromptSubmit' && readState(root).startJobsSession !== payload.session_id
-  if (startJobs) writeState(root, { startJobsSession: payload.session_id })
-  const syncUsage = rememberUsage(agent, event, payload, root, startJobs)
-  // Trabalhos em segundo plano, todos num processo só (ver spawnBackground).
-  let background = []
-  if (startJobs) background = startBackground(agent, root, payload.session_id, syncUsage)
-  else if (event === 'Stop') background = stopBackground(agent, root, projectId, payload)
+  const background = hookBackground(agent, event, payload, root, projectId)
   if (event === 'SessionStart') sessionStartState(root, payload.session_id)
   await bashEvents(event, payload, root, projectId, { token, apiUrl })
-
-  // Codex: sem a barra do Faundr, o contexto e a % do plano vêm da própria conversa (o custo das skills compara com eles).
-  if (agent === 'codex' && (event === 'UserPromptSubmit' || event === 'Stop') && payload.transcript_path) {
-    const meters = rolloutMeters(payload.transcript_path, payload.session_id)
-    if (meters) fs.writeFileSync(ensureFaundrPath(root, 'meters'), JSON.stringify(meters))
-  }
+  saveCodexMeters(agent, event, payload, root)
   const usage = event === 'Stop' || event === 'SessionEnd' ? sessionUsage(payload, root) : null
   const request = fetch(`${apiUrl}/api/hooks/event`, {
     method: 'POST',
@@ -735,11 +728,44 @@ async function hook(agent) {
   if (!res.ok) return log(`${event}: HTTP ${res.status} ${await res.text()}`)
 
   const answer = await res.json()
-  saveAnswer(answer, root, payload.session_id)
+  await deliverAnswer(answer, event, root, payload.session_id, { apiUrl, token, projectId })
+}
+
+// Atalho do Codex para a versão atual do plugin (o caminho muda a cada versão; a regra libera só o atalho).
+function syncCodexOnStart() {
+  try {
+    syncCodexRules(PLUGIN_ROOT)
+  } catch (err) {
+    log(`codex rules: ${err?.message ?? err}`)
+  }
+}
+
+// Trabalhos em segundo plano deste evento, todos num processo só (ver spawnBackground).
+function hookBackground(agent, event, payload, root, projectId) {
+  // As checagens "do início da sessão" nascem na primeira pergunta: esse hook roda em segundo plano, e no do início
+  // abrir o processo delas custava ~1 s de espera no Windows. Elas só alimentam o painel e as próximas sessões.
+  const startJobs = event === 'UserPromptSubmit' && readState(root).startJobsSession !== payload.session_id
+  if (startJobs) writeState(root, { startJobsSession: payload.session_id })
+  const syncUsage = rememberUsage(agent, event, payload, root, startJobs)
+  if (startJobs) return startBackground(agent, root, payload.session_id, syncUsage)
+  if (event === 'Stop') return stopBackground(agent, root, projectId, payload)
+  return []
+}
+
+// Codex: sem a barra do Faundr, o contexto e a % do plano vêm da própria conversa (o custo das skills compara com eles).
+function saveCodexMeters(agent, event, payload, root) {
+  if (agent !== 'codex' || (event !== 'UserPromptSubmit' && event !== 'Stop') || !payload.transcript_path) return
+  const meters = rolloutMeters(payload.transcript_path, payload.session_id)
+  if (meters) fs.writeFileSync(ensureFaundrPath(root, 'meters'), JSON.stringify(meters))
+}
+
+// Resposta do painel: guarda o que veio e passa o contexto ao agente (no início da sessão, com o resumo local).
+async function deliverAnswer(answer, event, root, sessionId, project) {
+  saveAnswer(answer, root, sessionId)
   let { additionalContext } = answer
   if (event === 'SessionStart') {
-    const contentLang = await resolveContentLang(answer.contentLang, root, { apiUrl, token, projectId }, 3_000)
-    additionalContext = sessionStartContext(answer, root, payload.session_id, additionalContext, contentLang)
+    const contentLang = await resolveContentLang(answer.contentLang, root, project, 3_000)
+    additionalContext = sessionStartContext(answer, root, sessionId, additionalContext, contentLang)
   }
   if (additionalContext && CONTEXT_EVENTS.has(event)) {
     process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext } }))
@@ -2491,9 +2517,18 @@ function recipeLines(recipes) {
 async function parallelCommand(args) {
   const { root } = linkedProject()
   const sub = args[0]
-  if (sub === 'open') return parallelOpen(root, args.slice(1))
+  // Fechar sempre pode (para não prender ninguém numa mesa aberta); abrir e listar são do Duo para cima.
   if (sub === 'close') return parallelClose(root, args.slice(1))
-  const ready = readyStages((await memoryApi({ action: 'board' })).allFeatures)
+  const board = await memoryApi({ action: 'board' })
+  if (board.collab === false)
+    throw new Error(
+      t(
+        `Parallel workbenches are not part of the Free plan. The Duo plan unlocks them: ${DEFAULT_API_URL}/pricing`,
+        `As mesas em paralelo não fazem parte do plano Grátis. O plano Duo libera: ${DEFAULT_API_URL}/pt-br/precos`,
+      ),
+    )
+  if (sub === 'open') return parallelOpen(root, args.slice(1))
+  const ready = readyStages(board.allFeatures)
   const open = listMesas(root)
   if (open.length) console.log(`Open workbenches: ${open.map((m) => `${m.branch} (${m.dir})`).join('; ')}\n`)
   if (!ready.length) return console.log('No planned stage can start now: each one waits for the previous stage to finish, or none is planned (faundr feature "<stage>" --after "<previous>").')
@@ -3023,28 +3058,38 @@ async function securityContext(args) {
   }
   try {
     const { security, findings } = await securityApi({ action: 'list' })
-    const review = security?.review
-    out.push('## Last AI review')
-    out.push(review ? `${review.at} (${review.mode === 'quick' ? 'quick' : 'full'}). Covered: ${review.areas.join('; ') || '-'}. Clean: ${review.clean.join('; ') || '-'}.` : 'None yet.')
-    // Rodadas somam: a nova começa pelo que mudou desde a última e não trata o resto como "já visto e seguro".
-    if (review && !onlyFiles?.length) {
-      const changed = changedSince(root, review.at)
-      if (changed)
-        out.push(
-          '',
-          `## Changed since the last review (${changed.length}) — start here and recheck what was "clean" in these files`,
-          ...(changed.length ? changed.slice(0, 80).map((f) => `- ${f}`) : ['- (nothing: focus on what the last one did not cover)']),
-          ...(changed.length > 80 ? [`- … and ${changed.length - 80} more`] : []),
-        )
-    }
+    pushReview(out, root, security?.review, onlyFiles)
     out.push('', `## Open problems (${findings.length}) — do not record them again; confirm, discard or complete them`)
     const order = ['critical', 'high', 'medium', 'low']
-    for (const f of findings.sort((a, b) => order.indexOf(a.severity) - order.indexOf(b.severity)))
-      out.push(`- S-${f.ref} [${f.verdict === 'needs_check' ? `needs check, if confirmed ${SEVERITY_TEXT[f.severity]}` : SEVERITY_TEXT[f.severity]}${f.suppressed ? ', suppressed' : ''}] (${f.origin === 'audit' ? 'AI review' : `automatic check: ${SOURCE_TEXT[f.source]}`}) ${f.title}${f.file ? ` — ${f.file}${f.line ? `:${f.line}` : ''}` : ''}`)
+    for (const f of findings.sort((a, b) => order.indexOf(a.severity) - order.indexOf(b.severity))) out.push(securityFindingLine(f))
   } catch (err) {
     out.push(`(could not read the problems already recorded: ${err.message})`)
   }
   console.log(out.join('\n'))
+}
+
+// A última revisão com IA e, numa revisão completa, o que mudou desde ela.
+function pushReview(out, root, review, onlyFiles) {
+  out.push('## Last AI review')
+  out.push(review ? `${review.at} (${review.mode === 'quick' ? 'quick' : 'full'}). Covered: ${review.areas.join('; ') || '-'}. Clean: ${review.clean.join('; ') || '-'}.` : 'None yet.')
+  // Rodadas somam: a nova começa pelo que mudou desde a última e não trata o resto como "já visto e seguro".
+  if (!review || onlyFiles?.length) return
+  const changed = changedSince(root, review.at)
+  if (changed)
+    out.push(
+      '',
+      `## Changed since the last review (${changed.length}) — start here and recheck what was "clean" in these files`,
+      ...(changed.length ? changed.slice(0, 80).map((f) => `- ${f}`) : ['- (nothing: focus on what the last one did not cover)']),
+      ...(changed.length > 80 ? [`- … and ${changed.length - 80} more`] : []),
+    )
+}
+
+// Uma linha por problema de segurança aberto: gravidade, origem, título e onde está.
+function securityFindingLine(f) {
+  const severity = f.verdict === 'needs_check' ? `needs check, if confirmed ${SEVERITY_TEXT[f.severity]}` : SEVERITY_TEXT[f.severity]
+  const origin = f.origin === 'audit' ? 'AI review' : `automatic check: ${SOURCE_TEXT[f.source]}`
+  const place = f.file ? ` — ${f.file}${f.line ? `:${f.line}` : ''}` : ''
+  return `- S-${f.ref} [${severity}${f.suppressed ? ', suppressed' : ''}] (${origin}) ${f.title}${place}`
 }
 
 // Arquivos de código mudados desde a data (commits e o que ainda não foi commitado); null sem git.
@@ -5305,10 +5350,38 @@ async function setupItems({ apply, skip, refresh }) {
   const version = t(`version ${process.versions.node}`, `versão ${process.versions.node}`)
   add(nodeOk() ? { title: 'Node', status: 'ok', detail: version } : { title: 'Node', status: 'falta', detail: version, why: t('Faundr needs Node 20 or newer: https://nodejs.org', 'o Faundr precisa do Node 20 ou mais novo: https://nodejs.org') })
 
-  // Git: sem ele não há pontos de volta nem "o que mudou".
   const linkFile0 = findUp(cwd, LINK_FILE)
+  const gitRoot = setupGit(add, { cwd, linkFile0, apply })
+
+  // Login: sem ele, nada do resto funciona.
+  const config = loadConfig()
+  const projects = await setupLogin(add, config)
+  if (!projects) return items
+
+  const linkFile = setupProject(add, { linkFile0, root: gitRoot, projects, config })
+  if (!linkFile) return items
+  const root = path.dirname(linkFile)
+  const skipped = new Set([...(readState(root).setupSkipped ?? []), ...skip])
+  if (skip.length) writeState(root, { setupSkipped: [...skipped] })
+  const declined = (id, title) => skipped.has(id) && add({ title, status: 'ok', detail: t(`you chose to leave it out (to turn it on: faundr setup --apply ${id})`, `você preferiu deixar de fora (para ligar: faundr setup --apply ${id})`) })
+
+  setupGitignore(add, root, apply)
+  setupStatusline(add, { self, apply, declined })
+  setupChecks(add, { root, self, refresh })
+  setupSkills(add, root, self)
+  setupCodexRules(add, { apply, declined })
+  setupAgentsMd(add, { root, self, apply, declined })
+  setupSupabase(add, root, declined)
+  await setupErrors(add, { root, linkFile, config, declined })
+  return items
+}
+
+// Git: sem ele não há pontos de volta nem "o que mudou". Devolve a raiz provável do projeto.
+function setupGit(add, { cwd, linkFile0, apply }) {
   const top = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8', windowsHide: true })
-  let root = linkFile0 ? path.dirname(linkFile0) : top.status === 0 ? path.resolve(top.stdout.trim()) : cwd
+  let root = cwd
+  if (linkFile0) root = path.dirname(linkFile0)
+  else if (top.status === 0) root = path.resolve(top.stdout.trim())
   if (top.status === 0) add({ title: 'Git', status: 'ok', detail: t('the folder is in a repository', 'a pasta está num repositório') })
   else if (apply.has('git')) {
     const r = spawnSync('git', ['init'], { cwd: root, encoding: 'utf8', windowsHide: true })
@@ -5322,29 +5395,32 @@ async function setupItems({ apply, skip, refresh }) {
       why: t('without git, Faundr cannot keep restore points or see what changed.', 'sem git, o Faundr não guarda pontos de volta nem vê o que mudou.'),
       apply: 'faundr setup --apply git',
     })
+  return root
+}
 
-  // Login: sem ele, nada do resto funciona.
-  const config = loadConfig()
-  let projects = null
-  if (config.token)
-    projects = await fetchProjects(config).catch((err) => {
-      add({ title: 'Login', status: 'falta', detail: err.message, why: t('sign in again: faundr login (opens the browser).', 'entre de novo: faundr login (abre o navegador).') })
-      return null
-    })
-  else
+// Login: os projetos da conta, ou null (o item já diz o que fazer).
+async function setupLogin(add, config) {
+  if (!config.token) {
     add({
       title: 'Login',
       status: 'falta',
       detail: t('not signed in yet', 'ainda não entrou'),
       why: t('sign in: faundr login (opens the browser; inside your AI agent: /faundr:login).', 'faça o login: faundr login (abre o navegador; dentro do agente de IA: /faundr:login).'),
     })
-  if (!projects) return items
-  add({ title: 'Login', status: 'ok', detail: t(`${projects.length} project(s) in your account`, `${projects.length} projeto(s) na sua conta`) })
+    return null
+  }
+  const projects = await fetchProjects(config).catch((err) => {
+    add({ title: 'Login', status: 'falta', detail: err.message, why: t('sign in again: faundr login (opens the browser).', 'entre de novo: faundr login (abre o navegador).') })
+    return null
+  })
+  if (projects) add({ title: 'Login', status: 'ok', detail: t(`${projects.length} project(s) in your account`, `${projects.length} projeto(s) na sua conta`) })
+  return projects
+}
 
-  // Pasta ligada ao projeto do painel: pelo nome, quando um só bate.
-  let linkFile = linkFile0
-  if (linkFile) {
-    const id = readJson(linkFile)?.projectId
+// Pasta ligada ao projeto do painel: pelo nome, quando um só bate. Devolve o arquivo da ligação, ou null.
+function setupProject(add, { linkFile0, root, projects, config }) {
+  if (linkFile0) {
+    const id = readJson(linkFile0)?.projectId
     const p = projects.find((x) => x.id === id)
     add(
       p
@@ -5356,33 +5432,30 @@ async function setupItems({ apply, skip, refresh }) {
             why: t('link it again: faundr link "<project name>".', 'ligue de novo: faundr link "<nome do projeto>".'),
           },
     )
-    if (!p) return items
-  } else {
-    const pkgName = readJson(path.join(root, 'package.json'))?.name
-    const guess = guessProject(projects, [path.basename(root), pkgName])
-    if (guess) {
-      linkFile = path.join(root, LINK_FILE)
-      fs.writeFileSync(linkFile, JSON.stringify({ projectId: guess.id }, null, 2) + '\n')
-      add({ title: t('Project', 'Projeto'), status: 'feito', detail: t(`folder linked to "${guess.name}" (the name matched)`, `pasta ligada a "${guess.name}" (o nome bateu)`) })
-    } else {
-      const list = `${projects.slice(0, 8).map((p) => `"${p.name}"`).join(', ')}${projects.length > 8 ? ', …' : ''}`
-      add({
-        title: t('Project', 'Projeto'),
-        status: 'falta',
-        detail: t('the folder is not linked to any project', 'a pasta não está ligada a nenhum projeto'),
-        why: projects.length
-          ? t(`choose which one it is and run faundr link "<name>" (your projects: ${list}).`, `escolha qual é e rode faundr link "<nome>" (seus projetos: ${list}).`)
-          : t(`create the project on the dashboard (${config.apiUrl}) and run faundr link "<name>".`, `crie o projeto no painel (${config.apiUrl}) e rode faundr link "<nome>".`),
-      })
-      return items
-    }
+    return p ? linkFile0 : null
   }
-  root = path.dirname(linkFile)
-  const skipped = new Set([...(readState(root).setupSkipped ?? []), ...skip])
-  if (skip.length) writeState(root, { setupSkipped: [...skipped] })
-  const declined = (id, title) => skipped.has(id) && add({ title, status: 'ok', detail: t(`you chose to leave it out (to turn it on: faundr setup --apply ${id})`, `você preferiu deixar de fora (para ligar: faundr setup --apply ${id})`) })
+  const pkgName = readJson(path.join(root, 'package.json'))?.name
+  const guess = guessProject(projects, [path.basename(root), pkgName])
+  if (guess) {
+    const linkFile = path.join(root, LINK_FILE)
+    fs.writeFileSync(linkFile, JSON.stringify({ projectId: guess.id }, null, 2) + '\n')
+    add({ title: t('Project', 'Projeto'), status: 'feito', detail: t(`folder linked to "${guess.name}" (the name matched)`, `pasta ligada a "${guess.name}" (o nome bateu)`) })
+    return linkFile
+  }
+  const list = `${projects.slice(0, 8).map((p) => `"${p.name}"`).join(', ')}${projects.length > 8 ? ', …' : ''}`
+  add({
+    title: t('Project', 'Projeto'),
+    status: 'falta',
+    detail: t('the folder is not linked to any project', 'a pasta não está ligada a nenhum projeto'),
+    why: projects.length
+      ? t(`choose which one it is and run faundr link "<name>" (your projects: ${list}).`, `escolha qual é e rode faundr link "<nome>" (seus projetos: ${list}).`)
+      : t(`create the project on the dashboard (${config.apiUrl}) and run faundr link "<name>".`, `crie o projeto no painel (${config.apiUrl}) e rode faundr link "<nome>".`),
+  })
+  return null
+}
 
-  // .gitignore: a pasta local do Faundr não vai para o git.
+// .gitignore: a pasta local do Faundr não vai para o git.
+function setupGitignore(add, root, apply) {
   const ignoreFile = path.join(root, '.gitignore')
   const ignore = fs.existsSync(ignoreFile) ? fs.readFileSync(ignoreFile, 'utf8') : ''
   if (gitignoreCoversFaundr(ignore)) add({ title: '.gitignore', status: 'ok', detail: t('already leaves .faundr/ out', 'já deixa .faundr/ de fora') })
@@ -5398,31 +5471,37 @@ async function setupItems({ apply, skip, refresh }) {
       why: t("the code map and Faundr's local reports would go to git.", 'o mapa do código e os relatórios locais do Faundr iriam para o git.'),
       apply: 'faundr setup --apply gitignore',
     })
+}
 
-  // Linha de status: liga sozinha; se já existe outra, só troca com o OK.
+// Linha de status: liga sozinha; se já existe outra, só troca com o OK.
+function setupStatusline(add, { self, apply, declined }) {
   const statusTitle = t('Status line', 'Linha de status')
-  if (AGENT === 'codex') add({ title: statusTitle, status: 'ok', detail: t('only in Claude Code (Codex has no custom status line)', 'só no Claude Code (o Codex não tem barra de status própria)') })
-  else if (!declined('statusline', statusTitle)) {
-    const r = installStatusline({ pluginFile: self, force: apply.has('statusline') })
-    if (r.ok) add({ title: statusTitle, status: r.already ? 'ok' : 'feito', detail: r.already ? t("Faundr's is on", 'a do Faundr está ligada') : t(`turned on in ${r.settingsFile}`, `ligada em ${r.settingsFile}`) })
-    else if (r.exists || /já existe|already exists/.test(r.reason))
-      add({
-        title: statusTitle,
-        status: 'pedir',
-        applyId: 'statusline',
-        detail: t('you already use another status line', 'você já usa outra barra de status'),
-        why: t(
-          "Faundr's shows the project, the stage and the warnings; switching replaces the one you use today.",
-          'a do Faundr mostra o projeto, a etapa e os avisos; trocar substitui a que você usa hoje.',
-        ),
-        apply: t('faundr setup --apply statusline (or --skip statusline)', 'faundr setup --apply statusline (ou --skip statusline)'),
-      })
-    else add({ title: statusTitle, status: 'erro', detail: r.reason })
+  if (AGENT === 'codex') {
+    add({ title: statusTitle, status: 'ok', detail: t('only in Claude Code (Codex has no custom status line)', 'só no Claude Code (o Codex não tem barra de status própria)') })
+    return
   }
+  if (declined('statusline', statusTitle)) return
+  const r = installStatusline({ pluginFile: self, force: apply.has('statusline') })
+  if (r.ok) add({ title: statusTitle, status: r.already ? 'ok' : 'feito', detail: r.already ? t("Faundr's is on", 'a do Faundr está ligada') : t(`turned on in ${r.settingsFile}`, `ligada em ${r.settingsFile}`) })
+  else if (r.exists || /já existe|already exists/.test(r.reason))
+    add({
+      title: statusTitle,
+      status: 'pedir',
+      applyId: 'statusline',
+      detail: t('you already use another status line', 'você já usa outra barra de status'),
+      why: t(
+        "Faundr's shows the project, the stage and the warnings; switching replaces the one you use today.",
+        'a do Faundr mostra o projeto, a etapa e os avisos; trocar substitui a que você usa hoje.',
+      ),
+      apply: t('faundr setup --apply statusline (or --skip statusline)', 'faundr setup --apply statusline (ou --skip statusline)'),
+    })
+  else add({ title: statusTitle, status: 'erro', detail: r.reason })
+}
 
-  // Primeiras checagens: só na primeira vez (ou com --refresh), para o setup de novo ser rápido e não mudar nada.
+// Primeiras checagens: só na primeira vez (ou com --refresh), para o setup de novo ser rápido e não mudar nada.
+function setupChecks(add, { root, self, refresh }) {
   const state = readState(root)
-  if (state.setupAt && !refresh)
+  if (state.setupAt && !refresh) {
     add({
       title: t('Map and checks', 'Mapa e checagens'),
       status: 'ok',
@@ -5431,16 +5510,18 @@ async function setupItems({ apply, skip, refresh }) {
         `feitos em ${new Date(state.setupAt).toLocaleDateString(locale())} (para refazer: faundr setup --refresh)`,
       ),
     })
-  else {
-    for (const [cmd, label] of SETUP_JOBS) {
-      const title = label()
-      const r = spawnSync(process.execPath, [self, cmd, '--quiet'], { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 600_000 })
-      add(r.status === 0 ? { title, status: 'feito', detail: t('sent to the dashboard', 'enviado ao painel') } : { title, status: 'erro', detail: (r.stdout || r.stderr || t('failed', 'falhou')).trim().split('\n').at(-1) })
-    }
-    writeState(root, { setupAt: new Date().toISOString() })
+    return
   }
+  for (const [cmd, label] of SETUP_JOBS) {
+    const title = label()
+    const r = spawnSync(process.execPath, [self, cmd, '--quiet'], { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 600_000 })
+    add(r.status === 0 ? { title, status: 'feito', detail: t('sent to the dashboard', 'enviado ao painel') } : { title, status: 'erro', detail: (r.stdout || r.stderr || t('failed', 'falhou')).trim().split('\n').at(-1) })
+  }
+  writeState(root, { setupAt: new Date().toISOString() })
+}
 
-  // Skills: o Faundr lê sozinho; o "quando usar" e o tipo de cada uma o Claude escreve.
+// Skills: o Faundr lê sozinho; o "quando usar" e o tipo de cada uma o Claude escreve.
+function setupSkills(add, root, self) {
   const skills = spawnSync(process.execPath, [self, 'skills', 'scan'], { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 120_000 })
   // Só o tipo muda o painel (skill conectada); o "quando usar" é um aviso a mais, que a mesma skill escreve.
   const pending = /Without a kind|Sem tipo/.test(skills.stdout ?? '')
@@ -5459,98 +5540,105 @@ async function setupItems({ apply, skip, refresh }) {
           }
         : { title: 'Skills', status: 'ok', detail: t('connected', 'conectadas') },
     )
+}
 
-  // Codex: os comandos do agente rodam sem rede na área protegida; a regra deixa só os do Faundr falarem com o painel.
+// Codex: os comandos do agente rodam sem rede na área protegida; a regra deixa só os do Faundr falarem com o painel.
+function setupCodexRules(add, { apply, declined }) {
   const rulesTitle = t('Codex rule', 'Regra do Codex')
-  if (AGENT === 'codex' && !declined('codex-rules', rulesTitle)) {
-    // Já aprovada antes: só reescreve se o texto mudou.
-    if (fs.existsSync(codexRulesFile()) && syncCodexRules(PLUGIN_ROOT, { create: true })) add({ title: rulesTitle, status: 'ok', detail: t('Faundr commands can reach the dashboard', 'os comandos do Faundr falam com o painel') })
-    else if (apply.has('codex-rules')) {
-      syncCodexRules(PLUGIN_ROOT, { create: true })
-      add({ title: rulesTitle, status: 'feito', detail: t(`created ${codexRulesFile()} (takes effect in the next Codex session)`, `criada em ${codexRulesFile()} (vale a partir da próxima sessão do Codex)`) })
-    } else
-      add({
-        title: rulesTitle,
-        status: 'pedir',
-        applyId: 'codex-rules',
-        detail: t('Faundr commands are blocked from the network', 'os comandos do Faundr ficam sem rede'),
-        why: t(
-          "Codex runs the agent's commands without network, so recording tasks and features on the dashboard fails. The rule lets only Faundr's command (node …/faundr.mjs) run outside the sandbox; the rest stays as it is.",
-          'o Codex roda os comandos do agente sem rede, e gravar tarefas e funcionalidades no painel falha. A regra libera só o comando do Faundr (node …/faundr.mjs) fora da área protegida; o resto continua igual.',
-        ),
-        apply: t('faundr setup --apply codex-rules (or --skip codex-rules)', 'faundr setup --apply codex-rules (ou --skip codex-rules)'),
-      })
-  }
+  if (AGENT !== 'codex' || declined('codex-rules', rulesTitle)) return
+  // Já aprovada antes: só reescreve se o texto mudou.
+  if (fs.existsSync(codexRulesFile()) && syncCodexRules(PLUGIN_ROOT, { create: true })) add({ title: rulesTitle, status: 'ok', detail: t('Faundr commands can reach the dashboard', 'os comandos do Faundr falam com o painel') })
+  else if (apply.has('codex-rules')) {
+    syncCodexRules(PLUGIN_ROOT, { create: true })
+    add({ title: rulesTitle, status: 'feito', detail: t(`created ${codexRulesFile()} (takes effect in the next Codex session)`, `criada em ${codexRulesFile()} (vale a partir da próxima sessão do Codex)`) })
+  } else
+    add({
+      title: rulesTitle,
+      status: 'pedir',
+      applyId: 'codex-rules',
+      detail: t('Faundr commands are blocked from the network', 'os comandos do Faundr ficam sem rede'),
+      why: t(
+        "Codex runs the agent's commands without network, so recording tasks and features on the dashboard fails. The rule lets only Faundr's command (node …/faundr.mjs) run outside the sandbox; the rest stays as it is.",
+        'o Codex roda os comandos do agente sem rede, e gravar tarefas e funcionalidades no painel falha. A regra libera só o comando do Faundr (node …/faundr.mjs) fora da área protegida; o resto continua igual.',
+      ),
+      apply: t('faundr setup --apply codex-rules (or --skip codex-rules)', 'faundr setup --apply codex-rules (ou --skip codex-rules)'),
+    })
+}
 
-  // Bloco de regras no AGENTS.md: só para quem usa outro agente além do Claude Code.
-  if (!declined('agents-md', 'AGENTS.md')) {
-    if (readState(root).agentsMd?.length) add({ title: 'AGENTS.md', status: 'ok', detail: t(`Faundr block in ${readState(root).agentsMd.join(', ')}`, `bloco do Faundr em ${readState(root).agentsMd.join(', ')}`) })
-    else if (apply.has('agents-md')) {
-      const r = spawnSync(process.execPath, [self, 'agents-md'], { cwd: root, encoding: 'utf8', windowsHide: true })
-      add({
-        title: 'AGENTS.md',
-        status: r.status === 0 ? 'feito' : 'erro',
-        detail: r.status === 0 ? t("block with the team's rules and decisions", 'bloco com as regras e decisões do time') : (r.stdout || r.stderr).trim().split('\n').at(-1),
-      })
-    } else
-      add({
-        title: 'AGENTS.md',
-        status: 'pedir',
-        applyId: 'agents-md',
-        detail: t("without the team's rules block", 'sem o bloco de regras do time'),
-        why: t(
-          'only worth it if the team also uses an agent that does not run the plugin (Cursor, for example): the block takes the rules and decisions into AGENTS.md.',
-          'só vale se o time também usa um agente que não roda o plugin (o Cursor, por exemplo): o bloco leva as regras e decisões para o AGENTS.md.',
-        ),
-        apply: t('faundr setup --apply agents-md (or --skip agents-md)', 'faundr setup --apply agents-md (ou --skip agents-md)'),
-      })
-  }
+// Bloco de regras no AGENTS.md: só para quem usa outro agente além do Claude Code.
+function setupAgentsMd(add, { root, self, apply, declined }) {
+  if (declined('agents-md', 'AGENTS.md')) return
+  if (readState(root).agentsMd?.length) add({ title: 'AGENTS.md', status: 'ok', detail: t(`Faundr block in ${readState(root).agentsMd.join(', ')}`, `bloco do Faundr em ${readState(root).agentsMd.join(', ')}`) })
+  else if (apply.has('agents-md')) {
+    const r = spawnSync(process.execPath, [self, 'agents-md'], { cwd: root, encoding: 'utf8', windowsHide: true })
+    add({
+      title: 'AGENTS.md',
+      status: r.status === 0 ? 'feito' : 'erro',
+      detail: r.status === 0 ? t("block with the team's rules and decisions", 'bloco com as regras e decisões do time') : (r.stdout || r.stderr).trim().split('\n').at(-1),
+    })
+  } else
+    add({
+      title: 'AGENTS.md',
+      status: 'pedir',
+      applyId: 'agents-md',
+      detail: t("without the team's rules block", 'sem o bloco de regras do time'),
+      why: t(
+        'only worth it if the team also uses an agent that does not run the plugin (Cursor, for example): the block takes the rules and decisions into AGENTS.md.',
+        'só vale se o time também usa um agente que não roda o plugin (o Cursor, por exemplo): o bloco leva as regras e decisões para o AGENTS.md.',
+      ),
+      apply: t('faundr setup --apply agents-md (or --skip agents-md)', 'faundr setup --apply agents-md (ou --skip agents-md)'),
+    })
+}
 
-  // Supabase: o token pessoal confere backups e o Security Advisor (fica só no computador).
+// Supabase: o token pessoal confere backups e o Security Advisor (fica só no computador).
+function setupSupabase(add, root, declined) {
   const supabaseTitle = t('Supabase token', 'Token do Supabase')
-  if (!declined('supabase-token', supabaseTitle) && supabaseTarget(root)) {
-    add(
-      process.env.SUPABASE_ACCESS_TOKEN
-        ? { title: supabaseTitle, status: 'ok', detail: t('SUPABASE_ACCESS_TOKEN set on this computer', 'SUPABASE_ACCESS_TOKEN definido neste computador') }
-        : {
-            title: supabaseTitle,
-            status: 'falta',
-            detail: t('the project uses Supabase and the personal token is not set', 'o projeto usa Supabase e o token pessoal não está definido'),
-            why: t(
-              "to check the backups and the Security Advisor: create one at https://supabase.com/dashboard/account/tokens and set SUPABASE_ACCESS_TOKEN in your computer's variables (never in the chat). To leave it out: faundr setup --skip supabase-token",
-              'para conferir os backups e o Security Advisor: crie em https://supabase.com/dashboard/account/tokens e defina SUPABASE_ACCESS_TOKEN nas variáveis do seu computador (nunca no chat). Para deixar de fora: faundr setup --skip supabase-token',
-            ),
-          },
-    )
-  }
+  if (declined('supabase-token', supabaseTitle) || !supabaseTarget(root)) return
+  add(
+    process.env.SUPABASE_ACCESS_TOKEN
+      ? { title: supabaseTitle, status: 'ok', detail: t('SUPABASE_ACCESS_TOKEN set on this computer', 'SUPABASE_ACCESS_TOKEN definido neste computador') }
+      : {
+          title: supabaseTitle,
+          status: 'falta',
+          detail: t('the project uses Supabase and the personal token is not set', 'o projeto usa Supabase e o token pessoal não está definido'),
+          why: t(
+            "to check the backups and the Security Advisor: create one at https://supabase.com/dashboard/account/tokens and set SUPABASE_ACCESS_TOKEN in your computer's variables (never in the chat). To leave it out: faundr setup --skip supabase-token",
+            'para conferir os backups e o Security Advisor: crie em https://supabase.com/dashboard/account/tokens e defina SUPABASE_ACCESS_TOKEN nas variáveis do seu computador (nunca no chat). Para deixar de fora: faundr setup --skip supabase-token',
+          ),
+        },
+  )
+}
 
-  // Erros do app publicado: chegam ao painel depois de ligar o SDK (skill errors-setup).
+// Erros do app publicado: chegam ao painel depois de ligar o SDK (skill errors-setup).
+async function setupErrors(add, { root, linkFile, config, declined }) {
   const errorsTitle = t('Published app errors', 'Erros do app publicado')
-  if (!declined('errors', errorsTitle)) {
-    const errors = await errorsApi({ action: 'dsn' }, { root, projectId: readJson(linkFile).projectId, config }).catch(() => null)
-    if (errors)
-      add(
-        errors.lastEventAt
-          ? {
-              title: errorsTitle,
-              status: 'ok',
-              detail: t(
-                `arriving on the dashboard (last on ${new Date(errors.lastEventAt).toLocaleDateString(locale())})`,
-                `chegando ao painel (último em ${new Date(errors.lastEventAt).toLocaleDateString(locale())})`,
-              ),
-            }
-          : {
-              title: errorsTitle,
-              status: 'falta',
-              detail: t('none has arrived yet', 'ainda não chegou nenhum'),
-              why: t(
-                'run /faundr:errors-setup in your AI agent so the errors of people using the app show up on the dashboard. To leave it out: faundr setup --skip errors',
-                'rode /faundr:errors-setup no agente de IA para os erros de quem usa o app aparecerem no painel. Para deixar de fora: faundr setup --skip errors',
-              ),
-            },
-      )
-  }
-  return items
+  if (declined('errors', errorsTitle)) return
+  const errors = await errorsApi({ action: 'dsn' }, { root, projectId: readJson(linkFile).projectId, config }).catch((err) => {
+    // O item é só informativo: sem resposta do painel, fica de fora em vez de travar o setup; o motivo vai para o log.
+    log(`setup errors: ${err?.message ?? err}`)
+    return null
+  })
+  if (!errors) return
+  add(
+    errors.lastEventAt
+      ? {
+          title: errorsTitle,
+          status: 'ok',
+          detail: t(
+            `arriving on the dashboard (last on ${new Date(errors.lastEventAt).toLocaleDateString(locale())})`,
+            `chegando ao painel (último em ${new Date(errors.lastEventAt).toLocaleDateString(locale())})`,
+          ),
+        }
+      : {
+          title: errorsTitle,
+          status: 'falta',
+          detail: t('none has arrived yet', 'ainda não chegou nenhum'),
+          why: t(
+            'run /faundr:errors-setup in your AI agent so the errors of people using the app show up on the dashboard. To leave it out: faundr setup --skip errors',
+            'rode /faundr:errors-setup no agente de IA para os erros de quem usa o app aparecerem no painel. Para deixar de fora: faundr setup --skip errors',
+          ),
+        },
+  )
 }
 
 function statuslineInstall(args) {

@@ -13,8 +13,11 @@ const TOOL_NAME = { exec_command: 'Bash', shell: 'Bash', shell_command: 'Bash', 
 
 export const isCodexEntry = (e) => ['session_meta', 'turn_context', 'response_item', 'event_msg', 'token_usage_record'].includes(e?.type)
 
-const textOfParts = (parts) =>
-  typeof parts === 'string' ? parts : Array.isArray(parts) ? parts.map((p) => (typeof p === 'string' ? p : p?.text ?? '')).join('') : ''
+function textOfParts(parts) {
+  if (typeof parts === 'string') return parts
+  if (!Array.isArray(parts)) return ''
+  return parts.map((p) => (typeof p === 'string' ? p : p?.text ?? '')).join('')
+}
 
 function unquote(literal) {
   if (literal.startsWith('"')) {
@@ -45,50 +48,69 @@ function callTools(p) {
   return { names: [TOOL_NAME[p.name] ?? p.name], command: String(command ?? '') }
 }
 
+/** token_usage_record → resposta com os tokens no formato do Claude Code. */
+function usageEntry(p, model, index) {
+  const u = p.usage
+  const cached = u.cached_input_tokens ?? 0
+  return {
+    type: 'assistant',
+    message: {
+      id: p.response_id ?? `${p.turn_id}:${index}`,
+      model: model ?? 'codex',
+      content: [],
+      // No Codex a entrada já inclui o que veio do cache; no Claude Code são separados.
+      usage: {
+        input_tokens: Math.max(0, (u.input_tokens ?? 0) - cached),
+        cache_read_input_tokens: cached,
+        cache_creation_input_tokens: u.cache_write_input_tokens ?? 0,
+        output_tokens: u.output_tokens ?? 0,
+      },
+    },
+  }
+}
+
+/** Item da resposta (chamada de ferramenta, saída dela, contexto posto pelos hooks) → entradas. */
+function responseItemEntries(p) {
+  if (p.type === 'custom_tool_call' || p.type === 'function_call') {
+    const { names, command } = callTools(p)
+    const content = names.map((name, i) => ({ type: 'tool_use', id: i ? `${p.call_id}#${i}` : p.call_id, name, input: { command: i ? '' : command } }))
+    return [{ type: 'assistant', message: { id: `tools:${p.call_id}`, content, usage: {} } }]
+  }
+  if (p.type === 'custom_tool_call_output' || p.type === 'function_call_output') {
+    const text = typeof p.output === 'string' ? p.output : textOfParts(p.output?.content ?? p.output)
+    return [{ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: p.call_id, content: text }] } }]
+  }
+  if (p.type === 'message' && p.role === 'developer') {
+    const text = textOfParts(p.content)
+    if (!text.includes(FAUNDR_MARK)) return []
+    return [
+      { attachment: { type: 'hook_additional_context', content: [text] } },
+      // O Codex não guarda a saída do hook à parte: o que entrou no contexto é o que foi mandado.
+      { attachment: { type: 'hook_success', stdout: JSON.stringify({ hookSpecificOutput: { additionalContext: text } }) } },
+    ]
+  }
+  return []
+}
+
+/** Evento concluído (pedido da pessoa, Stop barrado) → entradas. */
+function eventMsgEntries(p) {
+  if (p.type !== 'item_completed') return []
+  if (p.item?.type === 'UserMessage') return [{ type: 'user', message: { content: [{ type: 'text', text: textOfParts(p.item.content) }] } }]
+  if (p.item?.type !== 'HookPrompt') return []
+  // O Stop barrado vira um novo pedido com o motivo: é o aviso do fim da resposta.
+  const text = textOfParts(p.item.fragments)
+  return text.includes(FAUNDR_MARK) ? [{ attachment: { type: 'hook_blocking_error', hookEvent: 'Stop', blockingError: { blockingError: text } } }] : []
+}
+
 /** Linhas do rollout do Codex → entradas no formato da conversa do Claude Code. `model`: o da rodada anterior. */
 export function codexEntries(lines, { model = null } = {}) {
   const out = []
   for (const e of lines) {
     const p = e.payload ?? {}
     if (e.type === 'turn_context' && p.model) model = p.model
-    else if (e.type === 'token_usage_record' && p.usage) {
-      const u = p.usage
-      const cached = u.cached_input_tokens ?? 0
-      out.push({
-        type: 'assistant',
-        message: {
-          id: p.response_id ?? `${p.turn_id}:${out.length}`,
-          model: model ?? 'codex',
-          content: [],
-          // No Codex a entrada já inclui o que veio do cache; no Claude Code são separados.
-          usage: {
-            input_tokens: Math.max(0, (u.input_tokens ?? 0) - cached),
-            cache_read_input_tokens: cached,
-            cache_creation_input_tokens: u.cache_write_input_tokens ?? 0,
-            output_tokens: u.output_tokens ?? 0,
-          },
-        },
-      })
-    } else if (e.type === 'response_item' && (p.type === 'custom_tool_call' || p.type === 'function_call')) {
-      const { names, command } = callTools(p)
-      const content = names.map((name, i) => ({ type: 'tool_use', id: i ? `${p.call_id}#${i}` : p.call_id, name, input: { command: i ? '' : command } }))
-      out.push({ type: 'assistant', message: { id: `tools:${p.call_id}`, content, usage: {} } })
-    } else if (e.type === 'response_item' && (p.type === 'custom_tool_call_output' || p.type === 'function_call_output')) {
-      const text = typeof p.output === 'string' ? p.output : textOfParts(p.output?.content ?? p.output)
-      out.push({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: p.call_id, content: text }] } })
-    } else if (e.type === 'response_item' && p.type === 'message' && p.role === 'developer') {
-      const text = textOfParts(p.content)
-      if (!text.includes(FAUNDR_MARK)) continue
-      out.push({ attachment: { type: 'hook_additional_context', content: [text] } })
-      // O Codex não guarda a saída do hook à parte: o que entrou no contexto é o que foi mandado.
-      out.push({ attachment: { type: 'hook_success', stdout: JSON.stringify({ hookSpecificOutput: { additionalContext: text } }) } })
-    } else if (e.type === 'event_msg' && p.type === 'item_completed' && p.item?.type === 'UserMessage') {
-      out.push({ type: 'user', message: { content: [{ type: 'text', text: textOfParts(p.item.content) }] } })
-    } else if (e.type === 'event_msg' && p.type === 'item_completed' && p.item?.type === 'HookPrompt') {
-      // O Stop barrado vira um novo pedido com o motivo: é o aviso do fim da resposta.
-      const text = textOfParts(p.item.fragments)
-      if (text.includes(FAUNDR_MARK)) out.push({ attachment: { type: 'hook_blocking_error', hookEvent: 'Stop', blockingError: { blockingError: text } } })
-    }
+    else if (e.type === 'token_usage_record' && p.usage) out.push(usageEntry(p, model, out.length))
+    else if (e.type === 'response_item') out.push(...responseItemEntries(p))
+    else if (e.type === 'event_msg') out.push(...eventMsgEntries(p))
   }
   return out
 }
@@ -127,6 +149,7 @@ export function rolloutMeters(file, sessionId) {
   try {
     text = fs.readFileSync(file, 'utf8')
   } catch {
+    // Conversa apagada ou ainda não criada: sem medidores (o null documentado), a barra fica com os que já tinha.
     return null
   }
   const lines = []
@@ -160,6 +183,7 @@ export function codexExitCode(file, toolUseId, tailBytes = 512 * 1024) {
     fs.closeSync(fd)
     text = buf.toString('utf8')
   } catch {
+    // Conversa ilegível: sem código de saída (o null documentado), o mesmo de quando o item ainda não foi gravado.
     return null
   }
   const lines = text.split('\n')

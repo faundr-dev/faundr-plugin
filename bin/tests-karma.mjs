@@ -120,10 +120,16 @@ export function fromKarmaJson(text, root, dir = '') {
       const decl = new RegExp(`\\bdescribe\\s*\\(\\s*['"\`]${esc}['"\`]`)
       fileOf.set(top, specFiles.find((f) => decl.test(f.text))?.rel ?? null)
     }
-    const status = s.skipped ? 'skipped' : s.success ? 'passed' : 'failed'
+    const status = specStatus(s)
     const message = status === 'failed' ? (s.log ?? []).join('\n').split('\n').filter((l) => !/^\s*at <Jasmine>/.test(l)).join('\n').trim().slice(0, 2000) || t('failed', 'falhou') : null
     return { file: fileOf.get(top), name: [...(s.suite ?? []), s.description].join(' › '), status, durationMs: Math.round(s.time ?? 0), message }
   })
+}
+
+// Situação de um spec do Karma: pulado, passou ou falhou.
+function specStatus(s) {
+  if (s.skipped) return 'skipped'
+  return s.success ? 'passed' : 'failed'
 }
 
 // Os .spec.ts da pasta (sem node_modules e dist), lidos uma vez.

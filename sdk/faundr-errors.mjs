@@ -57,6 +57,7 @@ const cwd = (() => {
   try {
     return proc?.cwd?.().replace(/\\/g, '/').replace(/\/?$/, '/')
   } catch {
+    // Ambiente sem pasta atual (cwd apagada, Worker): os caminhos saem como vieram, e o SDK nunca quebra o app.
     return null
   }
 })()
@@ -82,7 +83,9 @@ export function init(opts = {}) {
   let dsn = null
   try {
     dsn = new URL(opts.dsn)
-  } catch {}
+  } catch {
+    // DSN ausente ou inválido: o SDK fica desligado (enabled false) em vez de derrubar o app na inicialização.
+  }
   const env = proc?.env ?? {}
   options = {
     dsnText: opts.dsn,
@@ -110,6 +113,13 @@ function request(req) {
   const path = raw.replace(/^https?:\/\/[^/]+/, '').replace(/[?#].*$/, '') || '/'
   const method = String(req.method || 'GET').toUpperCase()
   return { transaction: `${method} ${path}`, request: { method, url: path } }
+}
+
+// Onde o app roda, para o painel separar os erros por ambiente.
+function runtime() {
+  if (isWorker) return { name: 'cloudflare-workers' }
+  if (proc?.versions?.bun) return { name: 'bun', version: proc.versions.bun }
+  return { name: 'node', version: proc?.version }
 }
 
 /** Manda um erro ao Faundr. A promessa nunca falha (serve para ctx.waitUntil). */
@@ -142,7 +152,7 @@ export async function capture(error, extra = {}) {
     environment: options.environment,
     release: options.release,
     sdk: { name: 'faundr.server', version: VERSION },
-    contexts: { runtime: isWorker ? { name: 'cloudflare-workers' } : proc?.versions?.bun ? { name: 'bun', version: proc.versions.bun } : { name: 'node', version: proc?.version } },
+    contexts: { runtime: runtime() },
     exception: {
       values: [{ type, value: scrub(value), stacktrace: stack && { frames: stack }, mechanism: { type: extra.mechanism || 'generic', handled: extra.handled ?? true } }],
     },

@@ -56,7 +56,9 @@ export const planTokens = (t) => Math.round((t?.input ?? 0) + (t?.output ?? 0) +
 
 const median = (xs) => {
   const s = [...xs].sort((a, b) => a - b)
-  return s.length ? (s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2) : null
+  if (!s.length) return null
+  if (s.length % 2) return s[(s.length - 1) / 2]
+  return (s[s.length / 2 - 1] + s[s.length / 2]) / 2
 }
 
 /**
@@ -115,6 +117,7 @@ const readJson = (file) => {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8'))
   } catch {
+    // Arquivo (estado ou medidores da barra) ainda não criado ou cortado no meio da gravação: quem chama trata o null como "não tem".
     return null
   }
 }

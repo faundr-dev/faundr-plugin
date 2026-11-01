@@ -14,7 +14,9 @@ const systemLang = () => (/^pt/i.test(globalThis.navigator?.language ?? '') ? 'p
 export function measureFindings(m, screen, lang = systemLang()) {
   const t = (en, pt) => (lang === 'pt' ? pt : en)
   const num = (n) => (lang === 'pt' ? String(n).replace('.', ',') : String(n))
-  const theme = m.tema === 'claro' ? t('light', 'claro') : m.tema === 'escuro' ? t('dark', 'escuro') : m.tema
+  let theme = m.tema
+  if (m.tema === 'claro') theme = t('light', 'claro')
+  else if (m.tema === 'escuro') theme = t('dark', 'escuro')
   const at = `${screen} ${t('at', 'em')} ${m.largura} px${m.tema ? ` (${t(`${theme} theme`, `tema ${theme}`)})` : ''}`
   const out = []
   const add = (rule, kind, severity, title, detail) => out.push({ rule, kind, severity, title, detail: `${detail} ${t('Page', 'Página')}: ${m.url}.`.slice(0, 2000) })

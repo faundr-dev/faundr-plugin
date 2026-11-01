@@ -275,6 +275,7 @@ function entriesFrom(file, offset) {
     fs.closeSync(fd)
     text = buf.toString('utf8')
   } catch {
+    // Conversa apagada ou ilegível: nada novo a somar desde o offset; a próxima leitura tenta de novo.
     return []
   }
   const out = []

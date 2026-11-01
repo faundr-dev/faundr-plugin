@@ -57,6 +57,70 @@ const assertExample = (c) => {
 const lineWord = () => t('line', 'linha')
 const linesWord = () => t('lines', 'linhas')
 
+// "O que é" do catch vazio, conforme a linguagem (Python, Go/Rust ou o catch de sempre).
+const catchEmptyWhat = (c) => {
+  if (c.py) return t('An except block only has pass: it does nothing with the error.', 'Um bloco except só tem pass: não faz nada com o erro.')
+  if (HANDLER[c.lang]) return t(`A ${handler(c)} block is empty: the error is checked and then forgotten.`, `Um bloco ${handler(c)} está vazio: o erro é conferido e esquecido.`)
+  return t('A catch block (or .catch) does nothing with the error.', 'Um bloco catch (ou .catch) não faz nada com o erro.')
+}
+
+// "O que é" do catch que devolve valor vazio, conforme a linguagem.
+const catchNullWhat = (c) => {
+  if (c.py) return t('The except returns None, [], {} or False without logging the error.', 'O except devolve None, [], {} ou False sem registrar o erro.')
+  if (isGo(c)) {
+    return t(
+      'The if err != nil returns nil, zero or false and leaves err out: the caller gets "no error".',
+      'O if err != nil devolve nil, zero ou false e deixa o err de fora: quem chamou recebe "sem erro".',
+    )
+  }
+  if (c.lang === 'rust') {
+    return t(
+      'The Err(_) becomes None, false, zero or the default value: the caller gets a result without knowing there was an error.',
+      'O Err(_) vira None, false, zero ou o valor padrão: quem chamou recebe um resultado sem saber que deu erro.',
+    )
+  }
+  return t(
+    `The catch returns ${c.lang ? 'null, false or an empty list' : 'null, undefined, [] or {}'} without logging the error.`,
+    `O catch devolve ${c.lang ? 'null, false ou uma lista vazia' : 'null, undefined, [] ou {}'} sem registrar o erro.`,
+  )
+}
+
+// Textos do print esquecido: PHP (vai para a página), linguagem de servidor (tem log próprio) ou app.
+const printWhat = (c, call, log) => {
+  if (c.lang === 'php') return t(`${c.call ?? 'var_dump()'} writes the variable straight onto the page.`, `${c.call ?? 'var_dump()'} escreve a variável direto na página.`)
+  if (log) return t(`${call} writes straight to the program output, outside the entry point (main).`, `${call} escreve direto na saída do programa, fora do ponto de entrada (main).`)
+  return t(`${call} writes to the app console.`, `${call} escreve no console do app.`)
+}
+const printWhy = (c, log) => {
+  if (c.lang === 'php') return t('It shows internal data to people using the site and breaks the HTML or JSON of the response.', 'Mostra dados internos para quem usa o site e quebra o HTML ou o JSON da resposta.')
+  if (log) return t('With no level or date, it gets lost in the server output and may leak data into the log.', 'Sem nível nem data, some no meio da saída do servidor e pode vazar dados no log.')
+  return t(
+    "Nobody sees it in the live app, but it may leak data into the device log and makes the app slower.",
+    'No app publicado ninguém vê, mas pode vazar dados no log do aparelho e deixa o app mais lento.',
+  )
+}
+const printFix = (c, log) => {
+  if (c.lang === 'php') return t("Delete it. To record something, use the framework's log (Log::info in Laravel).", 'Apague. Para registrar algo, use o log do framework (Log::info no Laravel).')
+  if (log) return t(`Delete the ones that were for testing. To record something for real, use ${log}.`, `Apague os que eram para teste. Para registrar algo de verdade, use ${log}.`)
+  return t(
+    'Delete the ones that were for testing. To record something for real, use the logging package or the error service.',
+    'Apague os que eram para teste. Para registrar algo de verdade, use o pacote logging ou o serviço de erros.',
+  )
+}
+
+// "O que é" da parada de depuração esquecida, conforme a linguagem.
+const debuggerWhat = (c) => {
+  if (c.py) return t(`${c.call ?? 'breakpoint()'} stops the program waiting for someone to type in the terminal.`, `${c.call ?? 'breakpoint()'} para o programa esperando alguém digitar no terminal.`)
+  if (c.lang === 'php') {
+    return t(
+      `${c.call ?? 'dd()'} shows the variable and stops the request right away: people using the site see the debug screen.`,
+      `${c.call ?? 'dd()'} mostra a variável e para o pedido na hora: quem usa o site vê a tela de depuração.`,
+    )
+  }
+  if (c.lang === 'dart' || DEBUG_STOP[c.lang]) return t(`${DEBUG_STOP[c.lang]} stops the program when it runs with the debugger on.`, `${DEBUG_STOP[c.lang]} para o programa quando ele roda com o depurador ligado.`)
+  return t('The debugger statement stops the code when DevTools is open.', 'A instrução debugger para o código quando o DevTools está aberto.')
+}
+
 export const TEXT = {
   'desempenho/consulta-sem-limite': (c, n, all) => {
     const tables = [...new Set(all.map((x) => x.table))].join(', ')
@@ -108,11 +172,7 @@ export const TEXT = {
       `${n > 1 ? `${n} errors swallowed` : 'Error swallowed'} silently (${c.py ? 'except: pass' : `empty ${handler(c)}`})`,
       `${n > 1 ? `${n} erros engolidos` : 'Erro engolido'} em silêncio (${c.py ? 'except: pass' : `${handler(c)} vazio`})`,
     ),
-    c.py
-      ? t('An except block only has pass: it does nothing with the error.', 'Um bloco except só tem pass: não faz nada com o erro.')
-      : HANDLER[c.lang]
-        ? t(`A ${handler(c)} block is empty: the error is checked and then forgotten.`, `Um bloco ${handler(c)} está vazio: o erro é conferido e esquecido.`)
-        : t('A catch block (or .catch) does nothing with the error.', 'Um bloco catch (ou .catch) não faz nada com o erro.'),
+    catchEmptyWhat(c),
     t(
       'When something fails here, nobody finds out: the app carries on as if it worked and the problem shows up later, far from the cause.',
       'Quando algo falha aqui, ninguém fica sabendo: o app segue como se tivesse dado certo e o problema aparece depois, longe da causa.',
@@ -143,22 +203,7 @@ export const TEXT = {
   ],
   'falha/catch-devolve-nulo': (c, n) => [
     n > 1 ? t(`${n} errors replaced by an empty value`, `${n} erros trocados por valor vazio`) : t('Error replaced by an empty value', 'Erro trocado por valor vazio'),
-    c.py
-      ? t('The except returns None, [], {} or False without logging the error.', 'O except devolve None, [], {} ou False sem registrar o erro.')
-      : isGo(c)
-        ? t(
-            'The if err != nil returns nil, zero or false and leaves err out: the caller gets "no error".',
-            'O if err != nil devolve nil, zero ou false e deixa o err de fora: quem chamou recebe "sem erro".',
-          )
-        : c.lang === 'rust'
-          ? t(
-              'The Err(_) becomes None, false, zero or the default value: the caller gets a result without knowing there was an error.',
-              'O Err(_) vira None, false, zero ou o valor padrão: quem chamou recebe um resultado sem saber que deu erro.',
-            )
-          : t(
-              `The catch returns ${c.lang ? 'null, false or an empty list' : 'null, undefined, [] or {}'} without logging the error.`,
-              `O catch devolve ${c.lang ? 'null, false ou uma lista vazia' : 'null, undefined, [] ou {}'} sem registrar o erro.`,
-            ),
+    catchNullWhat(c),
     t(
       'The caller cannot tell "there is no data" from "something failed": the screen shows empty when it actually failed.',
       'Quem chamou não consegue diferenciar "não tem dados" de "deu erro": a tela mostra vazio quando, na verdade, falhou.',
@@ -346,43 +391,16 @@ export const TEXT = {
     const log = serverLog(c)
     return [
       t(`${n} ${call} left behind`, `${n} ${call} esquecido${n > 1 ? 's' : ''}`),
-      c.lang === 'php'
-        ? t(`${c.call ?? 'var_dump()'} writes the variable straight onto the page.`, `${c.call ?? 'var_dump()'} escreve a variável direto na página.`)
-        : log
-          ? t(`${call} writes straight to the program output, outside the entry point (main).`, `${call} escreve direto na saída do programa, fora do ponto de entrada (main).`)
-          : t(`${call} writes to the app console.`, `${call} escreve no console do app.`),
-      c.lang === 'php'
-        ? t('It shows internal data to people using the site and breaks the HTML or JSON of the response.', 'Mostra dados internos para quem usa o site e quebra o HTML ou o JSON da resposta.')
-        : log
-          ? t('With no level or date, it gets lost in the server output and may leak data into the log.', 'Sem nível nem data, some no meio da saída do servidor e pode vazar dados no log.')
-          : t(
-              "Nobody sees it in the live app, but it may leak data into the device log and makes the app slower.",
-              'No app publicado ninguém vê, mas pode vazar dados no log do aparelho e deixa o app mais lento.',
-            ),
-      c.lang === 'php'
-        ? t("Delete it. To record something, use the framework's log (Log::info in Laravel).", 'Apague. Para registrar algo, use o log do framework (Log::info no Laravel).')
-        : log
-          ? t(`Delete the ones that were for testing. To record something for real, use ${log}.`, `Apague os que eram para teste. Para registrar algo de verdade, use ${log}.`)
-          : t(
-              'Delete the ones that were for testing. To record something for real, use the logging package or the error service.',
-              'Apague os que eram para teste. Para registrar algo de verdade, use o pacote logging ou o serviço de erros.',
-            ),
+      printWhat(c, call, log),
+      printWhy(c, log),
+      printFix(c, log),
     ]
   },
   'limpeza/debugger': (c, n) => {
     const stop = c.py ? 'breakpoint()' : (DEBUG_STOP[c.lang] ?? 'debugger')
     return [
       t(`${n} ${stop} left behind`, `${n} ${stop} esquecido${n > 1 ? 's' : ''}`),
-      c.py
-        ? t(`${c.call ?? 'breakpoint()'} stops the program waiting for someone to type in the terminal.`, `${c.call ?? 'breakpoint()'} para o programa esperando alguém digitar no terminal.`)
-        : c.lang === 'php'
-          ? t(
-              `${c.call ?? 'dd()'} shows the variable and stops the request right away: people using the site see the debug screen.`,
-              `${c.call ?? 'dd()'} mostra a variável e para o pedido na hora: quem usa o site vê a tela de depuração.`,
-            )
-          : c.lang === 'dart' || DEBUG_STOP[c.lang]
-            ? t(`${DEBUG_STOP[c.lang]} stops the program when it runs with the debugger on.`, `${DEBUG_STOP[c.lang]} para o programa quando ele roda com o depurador ligado.`)
-            : t('The debugger statement stops the code when DevTools is open.', 'A instrução debugger para o código quando o DevTools está aberto.'),
+      debuggerWhat(c),
       c.py
         ? t('It is leftover debugging; on the server, the request hangs waiting.', 'É sobra de depuração; no servidor, o pedido fica travado esperando.')
         : t('It is leftover debugging; it should not go to the live site.', 'É sobra de depuração; não deveria ir para o site publicado.'),

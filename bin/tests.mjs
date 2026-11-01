@@ -286,8 +286,8 @@ export function insideDir(dir, list) {
  */
 export function runTests(root, runner, { dir = '', python = null, changed = false, files = null, exclude = [], timeout = RUN_TIMEOUT, nodeArgs = null, coverage = false } = {}) {
   const bin = RUNNERS[runner] ? binFor(root, dir, runner) : null
-  if (!bin && RUNNERS[runner]) return { runner, error: tr(`${runner} is not installed (run npm install ${dir ? `in ${dir}/` : 'in the project'})`, `${runner} não está instalado (rode npm install ${dir ? `em ${dir}/` : 'no projeto'})`) }
-  if (runner === 'pytest' && !python) return { runner, error: tr("couldn't find the project's Python (pass the path with --python, e.g. --python .venv/Scripts/python.exe)", 'não achei o Python do projeto (passe o caminho com --python, ex.: --python .venv/Scripts/python.exe)') }
+  const missing = missingRunner(runner, bin, dir, python)
+  if (missing) return { runner, error: missing }
   fs.mkdirSync(path.join(root, OUT_DIR), { recursive: true })
   const tag = dir ? `-${dir.replace(/\//g, '_')}` : ''
   const out = path.join(root, OUT_DIR, `${runner}${tag}.${runner === 'node' || runner === 'pytest' ? 'xml' : 'json'}`).split(path.sep).join('/')
@@ -297,20 +297,9 @@ export function runTests(root, runner, { dir = '', python = null, changed = fals
     // Relatório antigo preso por outro processo: o novo sobrescreve.
   }
   const started = Date.now()
-  // Cobertura: pasta própria do Faundr na raiz (o Vitest apaga a pasta de relatório antes de rodar), limpa a cada rodada.
-  const covArgs = coverage ? (coverageArgs(runner, root, dir) ?? []) : []
-  if (covArgs.length) {
-    fs.rmSync(path.join(root, COVERAGE_DIR), { recursive: true, force: true })
-    // O node --test não cria a pasta do relatório sozinho.
-    fs.mkdirSync(path.join(root, COVERAGE_DIR), { recursive: true })
-  }
+  const covArgs = coverage ? prepareCoverage(root, runner, dir) : []
   const local = files?.length ? insideDir(dir, files) : null
-  if (LANG_RUNNERS.includes(runner)) {
-    const xmlOut = out.replace(/\.json$/, '.xml')
-    const r = runLangTests(root, runner, { dir, files: local, out: xmlOut, timeout, coverageArgs: covArgs })
-    if (r.junit) return { runner, durationMs: r.durationMs, cases: junitCaseFiles(runner, fromJUnit(r.junit, root), root, dir), error: null }
-    return { ...r, cases: r.cases ? r.cases.map((c) => ({ ...c, message: c.message ? clean(c.message) : null })) : r.cases }
-  }
+  if (LANG_RUNNERS.includes(runner)) return runLangRunner(root, runner, { dir, local, out, timeout, covArgs })
   const args = commandFor(runner, out, { changed, files: local, nodeArgs, exclude: insideDir(dir, exclude) })
   const full = withCoverageArgs(runner, args, covArgs, local)
   const r = spawnSync(runner === 'pytest' ? python : process.execPath, [...(bin ? [bin] : []), ...full], {
@@ -327,6 +316,32 @@ export function runTests(root, runner, { dir = '', python = null, changed = fals
   if (failed) return { runner, durationMs, error: failed }
   if (runner === 'node' || runner === 'pytest') return xmlReport(root, runner, dir, out, r, durationMs)
   return jsonReport(root, runner, out, r, durationMs)
+}
+
+/** O executor não tem como rodar: pacote não instalado ou Python do projeto não encontrado. */
+function missingRunner(runner, bin, dir, python) {
+  if (!bin && RUNNERS[runner]) return tr(`${runner} is not installed (run npm install ${dir ? `in ${dir}/` : 'in the project'})`, `${runner} não está instalado (rode npm install ${dir ? `em ${dir}/` : 'no projeto'})`)
+  if (runner === 'pytest' && !python) return tr("couldn't find the project's Python (pass the path with --python, e.g. --python .venv/Scripts/python.exe)", 'não achei o Python do projeto (passe o caminho com --python, ex.: --python .venv/Scripts/python.exe)')
+  return null
+}
+
+// Cobertura: pasta própria do Faundr na raiz (o Vitest apaga a pasta de relatório antes de rodar), limpa a cada rodada.
+function prepareCoverage(root, runner, dir) {
+  const covArgs = coverageArgs(runner, root, dir) ?? []
+  if (covArgs.length) {
+    fs.rmSync(path.join(root, COVERAGE_DIR), { recursive: true, force: true })
+    // O node --test não cria a pasta do relatório sozinho.
+    fs.mkdirSync(path.join(root, COVERAGE_DIR), { recursive: true })
+  }
+  return covArgs
+}
+
+// Executores de outras linguagens (tests-langs.mjs): relatório JUnit ou casos já prontos, com as mensagens limpas.
+function runLangRunner(root, runner, { dir, local, out, timeout, covArgs }) {
+  const xmlOut = out.replace(/\.json$/, '.xml')
+  const r = runLangTests(root, runner, { dir, files: local, out: xmlOut, timeout, coverageArgs: covArgs })
+  if (r.junit) return { runner, durationMs: r.durationMs, cases: junitCaseFiles(runner, fromJUnit(r.junit, root), root, dir), error: null }
+  return { ...r, cases: r.cases ? r.cases.map((c) => ({ ...c, message: c.message ? clean(c.message) : null })) : r.cases }
 }
 
 // node --test: os reporters vêm em pares com o destino; os arquivos ficam no fim.
