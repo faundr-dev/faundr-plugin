@@ -141,7 +141,9 @@ export async function teamCommand() {
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data.error ?? `API error (${res.status})`)
   writeTeam(root, data.team)
-  console.log(teamLines(data.team, AGENT_SESSION_ID ?? null).join('\n'))
+  console.log(`Online now:\n${teamLines(data.team, AGENT_SESSION_ID ?? null).join('\n')}`)
+  // O time inteiro da organização (servidor antigo não manda): quem nunca fez commit aparece aqui também.
+  if (data.members?.length) console.log(`\nWhole team${data.org ? ` (organization ${data.org})` : ''}:\n${data.members.map((m) => `- ${m}`).join('\n')}`)
 }
 
 // O que mudou nos arquivos desde o ponto de volta (vazio quando não deu para saber).

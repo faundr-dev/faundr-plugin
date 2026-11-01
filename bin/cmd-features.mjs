@@ -20,7 +20,20 @@ export async function memoryApi(body) {
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data.error ?? `API error (${res.status})`)
+  // Seguiu com o OK na funcionalidade de outra pessoa: o servidor mandou um recado ao dono.
+  if (data.notified) console.log(`Faundr sent ${data.notified} a message saying what you changed (it reaches them at their next question). Tell the user.`)
   return data
+}
+
+// "ontem", "há 3 dias": quando o dono mexeu e quando esteve no projeto (o servidor manda as datas).
+function ago(iso) {
+  const days = Math.floor((Date.now() - Date.parse(iso)) / 86_400_000)
+  if (days <= 0) return 'today'
+  return days === 1 ? 'yesterday' : `${days} days ago`
+}
+function recency(r) {
+  const parts = [r?.changedAt && `last change on it ${ago(r.changedAt)}`, r?.ownerSeenAt && `the owner was last in the project ${ago(r.ownerSeenAt)}`].filter(Boolean)
+  return parts.length ? ` (${parts.join('; ')})` : ''
 }
 
 // Funcionalidade pelo nome (ou "atual"), para --after e --feature.
@@ -325,7 +338,7 @@ async function workAssign({ command, args, current, text }) {
     )
   if (!r.taken)
     return console.log(
-      `Note: the task "${r.title}" already belongs to ${r.by}${r.feature ? ` (owner of the feature "${r.feature}")` : ''}${r.at ? ` (taken on ${new Date(r.at).toLocaleString('en-US', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })})` : ''}. Do not touch it without agreeing first: tell the user and, if they confirm it is fine, run faundr claim "${text}" --force.`,
+      `Note: the task "${r.title}" already belongs to ${r.by}${r.feature ? ` (owner of the feature "${r.feature}")` : ''}${r.at ? ` (taken on ${new Date(r.at).toLocaleString('en-US', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })})` : ''}${recency(r)}. Do not touch it without agreeing first: tell the user and, if they confirm it is fine, run faundr claim "${text}" --force.`,
     )
   return console.log(`Task taken: ${r.title}${r.from ? ` (was ${r.from}'s)` : ''}. It shows with your name on the dashboard; when you finish, faundr done "${text}".`)
 }
@@ -333,8 +346,10 @@ async function workAssign({ command, args, current, text }) {
 // Funcionalidade (ou tarefa) de outra pessoa: o comando não gravou. Mostra o aviso e como seguir com o OK.
 function ownerBlocked(b, retry) {
   if (!b) return false
-  const day = b.since ? ` (since ${b.since.slice(0, 10)})` : ''
-  console.log(`Note: "${b.title}" belongs to ${b.ownerName}${day}. Nothing was saved. Do not touch it without agreeing first: tell the user and, if they confirm it is fine, run: ${retry}`)
+  const day = b.since ? ` (owner since ${b.since.slice(0, 10)})` : ''
+  console.log(
+    `Note: "${b.title}" belongs to ${b.ownerName}${day}${recency(b)}. Nothing was saved. Do not touch it without agreeing first: tell the user (whose it is and when they last touched it) and, if they confirm it is fine, run: ${retry} — Faundr then sends ${b.ownerName} a message saying what changed.`,
+  )
   return true
 }
 
@@ -346,7 +361,7 @@ async function workOwner({ command, args, current, text }) {
   const r = await memoryApi({ action: 'feature-owner', query, release, force: args.includes('--force') })
   if (!r.done)
     return console.log(
-      `Note: the feature "${r.title}" belongs to ${r.by}. Do not ${release ? 'release' : 'take'} it without agreeing first: tell the user and, if they confirm, run faundr ${command} "${text || r.id.slice(0, 8)}" --force.`,
+      `Note: the feature "${r.title}" belongs to ${r.by}${recency(r)}. Do not ${release ? 'release' : 'take'} it without agreeing first: tell the user and, if they confirm, run faundr ${command} "${text || r.id.slice(0, 8)}" --force.`,
     )
   if (release) return console.log(`Feature without an owner: ${r.title} (whoever touches it first becomes the owner).`)
   return console.log(`You are the owner of "${r.title}"${r.from ? ` (was ${r.from}'s)` : ''}. Other people's agents will warn before touching it.`)

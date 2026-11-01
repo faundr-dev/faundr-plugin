@@ -1,6 +1,6 @@
 {
   "name": "faundr",
-  "version": "0.111.5",
+  "version": "0.111.6",
   "description": "Connects your Claude Code sessions to the Faundr platform.",
   "author": {
     "name": "Faundr"
