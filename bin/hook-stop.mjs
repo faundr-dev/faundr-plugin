@@ -163,7 +163,40 @@ async function earlyStopSteps(linkFile, sid) {
   // Skill conectada (segurança, testes, qualidade, erros) que rodou: registrar o resultado dela. Uma auditoria
   // costuma só ler, então vale mesmo sem arquivo mexido.
   const eventSteps = [...takeSkillsRan(root, sid), ...eventTriggers(root, sid)]
+  const tasksStep = await committedTasksStep(root, sid)
+  if (tasksStep) eventSteps.unshift(tasksStep)
   return { inboxStep, eventSteps }
+}
+
+// Depois de um commit ou push: as tarefas ainda abertas da funcionalidade atual, para marcar as que ele terminou.
+// Sem isso o trabalho ia para o git e o quadro ficava parado (a tarefa só muda com faundr done).
+async function committedTasksStep(root, sid) {
+  if (readState(root).committedTasks !== sid) return null
+  writeState(root, { committedTasks: null })
+  const featureId = currentFeature(root, sid)
+  const { projectId } = readJson(path.join(root, LINK_FILE)) ?? {}
+  const { token, apiUrl } = loadConfig()
+  if (!featureId || !projectId || !token) return null
+  try {
+    const res = await fetch(`${apiUrl}/api/cli/memory`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ projectId, action: 'board', featureId }),
+      signal: AbortSignal.timeout(6000),
+    })
+    if (!res.ok) return null
+    const f = (await res.json()).features?.[0]
+    const open = (f?.tasks ?? []).map((t, i) => ({ ...t, n: i + 1 })).filter((t) => t.task_status !== 'completed')
+    return open.length ? committedTasksText(f.title, open) : null
+  } catch (err) {
+    // Sem rede ou painel fora do ar: o lembrete fica para o próximo commit.
+    log(`committed tasks: ${err?.message ?? err}`)
+    return null
+  }
+}
+
+function committedTasksText(title, open) {
+  return `you committed or pushed in this session and "${title}" still has open tasks: ${open.map((t) => `${t.n}. ${t.title}`).join('; ')}. Mark with faundr done <#> each one whose work is in that commit (only what is really done; if none is, mark nothing) and tell the user in one line what you marked`
 }
 
 // Marca nesta sessão os avisos que já foram dados (não repetir na próxima resposta).

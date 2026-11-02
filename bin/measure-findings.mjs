@@ -102,5 +102,27 @@ export function measureFindings(m, screen, lang = systemLang()) {
         `Menos de 12 px de respiro até a borda: ${list(m.borda, who)}. Dê padding lateral de pelo menos 16 px no celular.`,
       ),
     )
+  if (m.navegacao?.coluna)
+    add(
+      'responsivo/menu-lateral-no-celular',
+      'responsive',
+      'high',
+      t(`Side menu column fixed on the phone: ${at}`, `Menu lateral fixo no celular: ${at}`),
+      t(
+        `${who(m.navegacao.coluna)} stays fixed on the left taking ${m.navegacao.coluna.w} px of a ${m.largura} px screen, usually with icons only (and labels that only show on mouse hover). Below 768 px, hide the column and open the menu from a ☰ button in the header, over the page.`,
+        `${who(m.navegacao.coluna)} fica fixo na esquerda ocupando ${m.navegacao.coluna.w} px de uma tela de ${m.largura} px, em geral só com ícones (e os nomes só aparecem passando o mouse). Abaixo de 768 px, esconda a coluna e abra o menu por um botão ☰ no header, por cima da página.`,
+      ),
+    )
+  if (m.navegacao?.semBotao)
+    add(
+      'responsivo/sem-menu-no-celular',
+      'responsive',
+      'high',
+      t(`No way to open the menu on the phone: ${at}`, `Sem como abrir o menu no celular: ${at}`),
+      t(
+        'The page has a menu (nav/aside with links) hidden at this width and no button to open it: on the phone the person cannot reach the other screens. Add a ☰ button (with aria-expanded) that opens the menu.',
+        'A página tem um menu (nav/aside com links) escondido nesta largura e nenhum botão para abrir: no celular a pessoa não chega às outras telas. Coloque um botão ☰ (com aria-expanded) que abre o menu.',
+      ),
+    )
   return out
 }

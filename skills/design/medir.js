@@ -39,6 +39,9 @@
   const clipped = all
     .filter((el) => {
       if (!el.innerText || el.children.length > 3 || !visible(el)) return false
+      // Texto só para leitor de tela (sr-only: caixa de 1 px recortada) é escondido de propósito.
+      const box = el.getBoundingClientRect()
+      if (box.width <= 1 && box.height <= 1) return false
       const s = getComputedStyle(el)
       if (!/hidden|clip/.test(s.overflowX + s.overflowY) || s.textOverflow === 'ellipsis' || s.webkitLineClamp !== 'none') return false
       return el.scrollWidth > el.clientWidth + 2 || el.scrollHeight > el.clientHeight + 2
@@ -90,6 +93,24 @@
         .map((el) => ({ el: describe(el), text: label(el) }))
     : []
 
+  // 7. Navegação no celular: coluna de menu fixa comendo a largura da tela, ou menu escondido sem botão para abrir.
+  let nav = null
+  if (mobile) {
+    const links = (el) => el.querySelectorAll('a[href],button').length
+    const column = all.find((el) => {
+      const s = getComputedStyle(el)
+      if (!/fixed|sticky/.test(s.position) || !visible(el)) return false
+      const r = el.getBoundingClientRect()
+      return r.left <= 1 && r.width >= 40 && r.width <= 160 && r.height > window.innerHeight * 0.5 && links(el) >= 3
+    })
+    const hiddenNav = [...document.querySelectorAll('nav, aside')].some((el) => !visible(el) && links(el) >= 3)
+    const toggle = [...document.querySelectorAll('button,[role=button]')].some(
+      (el) => visible(el) && (el.hasAttribute('aria-expanded') || /menu|navega/i.test(`${el.getAttribute('aria-label') ?? ''} ${el.textContent ?? ''}`)),
+    )
+    if (column) nav = { coluna: { el: describe(column), w: Math.round(column.getBoundingClientRect().width) } }
+    else if (hiddenNav && !toggle) nav = { semBotao: true }
+  }
+
   return JSON.stringify({
     url: location.pathname + location.search,
     largura: W,
@@ -100,6 +121,7 @@
     miudo: tiny,
     lento: slow,
     borda: edge,
+    navegacao: nav,
   })
 })(
   (() => {

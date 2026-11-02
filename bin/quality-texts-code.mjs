@@ -248,7 +248,7 @@ export const TEXT_CODE = {
     ),
   ],
   'tipos/as-any': (c, n) => [
-    t(`${n} forced conversion${n > 1 ? 's' : ''} to any (as any)`, `${n} conversão${n > 1 ? 'ões' : ''} forçada${n > 1 ? 's' : ''} para any (as any)`),
+    t(`${n} forced conversion${n > 1 ? 's' : ''} to any (as any)`, `${n} ${n > 1 ? 'conversões forçadas' : 'conversão forçada'} para any (as any)`),
     t('"as any" tells TypeScript to stop complaining instead of fixing the type.', '"as any" manda o TypeScript parar de reclamar em vez de corrigir o tipo.'),
     t('It almost always hides a real error that TypeScript had found.', 'Quase sempre esconde um erro de verdade que o TypeScript tinha achado.'),
     t('Fix the type at the source; if the data comes from outside, check its shape before using it.', 'Corrija o tipo na origem; se o dado vem de fora, confira o formato antes de usar.'),

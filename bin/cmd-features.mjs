@@ -146,6 +146,7 @@ async function workCommand(command, args) {
 async function workFeature({ args, root, current, text }) {
   if (!text) throw new Error('usage: faundr feature "<title>" [--desc "..."] [--done-when "a; b"] [--after current|"<name of the previous stage>"] [--existing --parts "a; b"]')
   const after = flag(args, '--after')
+  if (!args.includes('--existing') && (await reusePlannedStage(root, args, text, after))) return
   if (after) {
     // Próxima etapa: fica planejada, ligada à anterior; a funcionalidade atual não muda.
     const prev = await findFeature(after, current)
@@ -159,6 +160,24 @@ async function workFeature({ args, root, current, text }) {
   setCurrentFeature(root, id)
   console.log(`Feature created and set as current: ${text}`)
   if (criteria.length) console.log(`Done when: ${criteria.map((c, i) => `${i + 1}. ${c}`).join(' ')}`)
+}
+
+// Já existe uma etapa com esse nome, ainda sem terminar: usa ela em vez de criar outra igual (a etapa planejada ficava
+// vazia no quadro, ao lado da cópia com o trabalho). Com --after, só avisa; sem, ela vira a atual.
+async function reusePlannedStage(root, args, text, after) {
+  const { allFeatures = [] } = await memoryApi({ action: 'board' })
+  const same = allFeatures.find((f) => !f.finished && f.title.trim().toLowerCase() === text.trim().toLowerCase())
+  if (!same) return false
+  if (after) {
+    console.log(`Already recorded: "${same.title}" (${same.planned ? 'planned stage' : 'in progress'}). Nothing new created.`)
+    return true
+  }
+  setCurrentFeature(root, same.id)
+  const criteria = (flag(args, '--done-when') ?? '').split(';').map((c) => c.trim()).filter(Boolean)
+  for (const c of criteria) await memoryApi({ action: 'criteria', featureId: same.id, text: c })
+  console.log(`"${same.title}" was already on the board${same.planned ? ' as a planned stage' : ''}: it is now the current feature (no copy created).`)
+  if (criteria.length) console.log(`Done when added: ${criteria.map((c, i) => `${i + 1}. ${c}`).join(' ')}`)
+  return true
 }
 
 // Inventário de projeto antigo: o que já funcionava antes do Faundr entra pronto e não vira a atual.
@@ -227,13 +246,28 @@ async function workCriteriaCheck({ args, current, text }) {
 }
 
 async function workTask({ args, current, text }) {
-  if (!text) throw new Error('usage: faundr task "<description>" [--feature "<stage name>"]')
+  if (!text) throw new Error('usage: faundr task "<description>" [--feature "<stage name>"] [--force]')
   const target = flag(args, '--feature')
   const parent = target ? await findFeature(target, current) : null
+  if (!parent && current && !args.includes('--force') && (await finishedWithEmptyNext(current, text))) return
   const r = await memoryApi({ action: 'add', kind: 'task', title: text, parentId: parent?.id ?? current, force: args.includes('--force') })
   if (ownerBlocked(r.blocked, `faundr task "${text}"${target ? ` --feature "${target}"` : ''} --force`)) return
   if (parent) return console.log(`Task added to "${parent.title}": ${text}`)
   return console.log(current ? `Task added: ${text}` : `Task added (no current feature — use faundr feature "<title>" to group it): ${text}`)
+}
+
+// A atual já terminou e a próxima etapa está vazia: a tarefa nova quase sempre é dessa etapa (o trabalho da etapa
+// caía na funcionalidade pronta e a etapa ficava no quadro sem nada). Não grava; diz como seguir.
+async function finishedWithEmptyNext(current, text) {
+  const { allFeatures = [] } = await memoryApi({ action: 'board' })
+  const byId = new Map(allFeatures.map((f) => [f.id, f]))
+  const f = byId.get(current)
+  const next = f?.finished && (f.next ?? []).map((id) => byId.get(id)).find((n) => n && !n.finished && !n.tasks.length)
+  if (!next) return false
+  console.log(
+    `Nothing saved: "${f.title}" is already finished and its next stage "${next.title}" has no tasks yet. If this task is part of that stage, start it first: faundr focus "${next.title}" (then faundr task again). If it really belongs to "${f.title}": faundr task "${text}" --force`,
+  )
+  return true
 }
 
 // Arquivos da regra ou decisão: os de --file; com padrão proibido e sem arquivos, o projeto todo; senão, os automáticos.
