@@ -67,6 +67,52 @@ export async function designMeasureScript(args) {
     for (let n = doc.elementFromPoint(win.innerWidth - 4, win.innerHeight - 4); n && n.nodeType === 1; n = n.parentElement) { const l = lum(n); if (l != null) return l }
     return 1
   }
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+  const name = (el) => (el.getAttribute('aria-label') || el.innerText || '').trim().split('\\n')[0].slice(0, 30)
+  const shown = (win, el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && win.getComputedStyle(el).visibility !== 'hidden' }
+  // Painel aberto por cima da tela (drawer, painel lateral): fixo e cobrindo boa parte da largura.
+  const panels = (win, doc) => [...doc.querySelectorAll('body *')].filter((el) => {
+    if (win.getComputedStyle(el).position !== 'fixed' || !shown(win, el)) return false
+    const r = el.getBoundingClientRect()
+    return r.width >= win.innerWidth * 0.6 && r.height >= win.innerHeight * 0.5
+  })
+  const states = async (f, w, t) => {
+    const win = f.contentWindow, doc = f.contentDocument, found = []
+    const measure = (estado) => ({ ...JSON.parse(win.eval(code)), largura: w, estado, ...(t && { tema: t }) })
+    // Abas da tela: botões de alternar ou role=tab dentro de um cabeçalho fixo (o segundo header).
+    const tabs = () => [...doc.querySelectorAll('[aria-pressed], [role=tab]')].filter((b) => shown(win, b) && b.closest('[role=tablist], header, .sticky, [class*=sticky]'))
+    const first = tabs().slice(0, 9).map(name)
+    for (const label of first.slice(1)) {
+      const b = tabs().find((x) => name(x) === label)
+      if (!b) continue
+      b.click()
+      await wait(1800)
+      try { found.push(measure('aba ' + label)) } catch {}
+    }
+    const again = tabs().find((x) => name(x) === first[0])
+    if (again) { again.click(); await wait(1500) }
+    // Um item aberto: o primeiro da lista da tela. Com um painel por cima, o menu ☰ tem que abrir acima dele.
+    const before = new Set(panels(win, doc))
+    const item = [...doc.querySelectorAll('main li button, main li a[href], main [role=row], main article button')].find((el) => shown(win, el))
+    if (!item) return found
+    item.click()
+    await wait(1800)
+    const panel = panels(win, doc).find((el) => !before.has(el))
+    try { found.push(measure('item aberto')) } catch {}
+    const toggle = [...doc.querySelectorAll('button[aria-expanded]')].find((b) => shown(win, b) && b.getBoundingClientRect().top < 80 && /menu/i.test(b.getAttribute('aria-label') || ''))
+    if (panel && toggle) {
+      toggle.click()
+      await wait(500)
+      const nav = [...doc.querySelectorAll('nav, aside')].find((el) => shown(win, el) && el.getBoundingClientRect().left <= 1 && !before.has(el))
+      if (nav) {
+        const r = nav.getBoundingClientRect()
+        const top = doc.elementFromPoint(r.left + r.width / 2, r.top + Math.min(r.height / 2, 200))
+        if (top && !nav.contains(top)) found[found.length - 1] = { ...found[found.length - 1], menuPorBaixo: { el: panel.tagName.toLowerCase() + (panel.getAttribute('role') ? '[role=' + panel.getAttribute('role') + ']' : ''), text: name(panel) } }
+      }
+      toggle.click()
+    }
+    return found
+  }
   const out = []
   for (const { w, tema: t } of ${JSON.stringify(runs)}) {
     const f = document.createElement('iframe')
@@ -87,13 +133,15 @@ export async function designMeasureScript(args) {
       }
       const res = JSON.parse(f.contentWindow.eval(code))
       out.push({ ...res, largura: w, areaUtil: res.largura, ...(t && { tema: t }) })
+      // No celular, mede também o que só aparece depois de um toque: as outras abas da tela e um item aberto.
+      if (w < 768 && (t ?? null) === ${JSON.stringify(runs[0]?.tema ?? null)}) out.push(...(await states(f, w, t)))
     } catch (e) { out.push({ largura: w, ...(t && { tema: t }), erro: String(e) }) }
     f.remove()
   }
   // O resultado completo fica na página (a resposta da ferramenta é curta): pegue uma medição por vez.
   window.__faundrMedicao = out
   return out
-    .map((m, i) => { const at = \`[\${i}] \${m.largura} px\${m.tema ? ' ' + m.tema : ''}\`; return m.erro ? \`\${at}: failed (\${m.erro})\` : \`\${at}: \${m.rolagem ? 'SCROLLS SIDEWAYS, ' : ''}\${m.toque.length} touch, \${m.cortado.length} cut off, \${m.contraste.length} contrast, \${m.miudo.length} tiny, \${m.lento.length} slow, \${m.borda.length} edge\` })
+    .map((m, i) => { const at = \`[\${i}] \${m.largura} px\${m.tema ? ' ' + m.tema : ''}\${m.estado ? ' (' + m.estado + ')' : ''}\`; return m.erro ? \`\${at}: failed (\${m.erro})\` : \`\${at}: \${m.rolagem ? 'SCROLLS SIDEWAYS, ' : ''}\${m.toque.length} touch, \${m.cortado.length} cut off, \${m.contraste.length} contrast, \${m.miudo.length} tiny, \${m.lento.length} slow, \${m.borda.length} edge, \${m.espremido?.length ?? 0} squeezed\${m.menuPorBaixo ? ', MENU BEHIND PANEL' : ''}\` })
     .join(' | ') + ' — to save each one: JSON.stringify(window.__faundrMedicao[i])'
 })()`)
 }
@@ -118,6 +166,8 @@ export async function designMeasureSave(args) {
 // Uma medição: manda os problemas da tela naquela largura (e tema) e conta o que mudou.
 async function saveMeasure(m, screen, args) {
   const tema = m?.tema === 'claro' || m?.tema === 'escuro' ? m.tema : undefined
+  // Estado medido depois de um toque (outra aba, item aberto) vira uma tela própria: "Qualidade → aba Por arquivo".
+  if (m?.estado) screen = `${screen} → ${m.estado}`
   const at = `${screen} at ${m?.largura} px${tema ? ` (${tema} theme)` : ''}`
   if (m?.erro) return console.log(`${at}: the measurement failed (${m.erro})`)
   if (!Number.isInteger(m?.largura)) throw new Error('The file does not look like the result of the measurement script ("largura" is missing).')

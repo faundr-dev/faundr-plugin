@@ -111,6 +111,20 @@
     else if (hiddenNav && !toggle) nav = { semBotao: true }
   }
 
+  // 8. Texto espremido (celular): coluna de texto que sobrou estreita ao lado de um botão ou etiqueta e virou uma
+  // tira de poucas letras por linha. Não passa da borda nem corta, então as outras medidas não pegam.
+  const squeezed = mobile
+    ? all
+        .filter((el) => [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim().length >= 20) && visible(el))
+        .filter((el) => {
+          const r = el.getBoundingClientRect()
+          const line = parseFloat(getComputedStyle(el).lineHeight) || parseFloat(getComputedStyle(el).fontSize) * 1.4
+          return r.width < W * 0.25 && r.height / line > 3
+        })
+        .slice(0, 5)
+        .map((el) => ({ el: describe(el), text: label(el), w: Math.round(el.getBoundingClientRect().width) }))
+    : []
+
   return JSON.stringify({
     url: location.pathname + location.search,
     largura: W,
@@ -122,6 +136,7 @@
     lento: slow,
     borda: edge,
     navegacao: nav,
+    espremido: squeezed,
   })
 })(
   (() => {

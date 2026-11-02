@@ -124,5 +124,27 @@ export function measureFindings(m, screen, lang = systemLang()) {
         'A página tem um menu (nav/aside com links) escondido nesta largura e nenhum botão para abrir: no celular a pessoa não chega às outras telas. Coloque um botão ☰ (com aria-expanded) que abre o menu.',
       ),
     )
+  if (m.espremido?.length)
+    add(
+      'responsivo/texto-espremido',
+      'responsive',
+      'medium',
+      t(`Text squeezed into a thin column: ${at}`, `Texto espremido numa coluna fina: ${at}`),
+      t(
+        `The text sits beside a button or tag and is left a few letters wide per line: ${list(m.espremido, (x) => `${who(x)} ${x.w} px wide`)}. Give the text a minimum width (e.g. min-w-48 instead of min-w-0 with flex-wrap) so the button drops to the next line on phones.`,
+        `O texto fica ao lado de um botão ou etiqueta e sobra com poucas letras por linha: ${list(m.espremido, (x) => `${who(x)} com ${x.w} px`)}. Dê uma largura mínima ao texto (ex.: min-w-48 no lugar de min-w-0, com flex-wrap) para o botão descer para a linha de baixo no celular.`,
+      ),
+    )
+  if (m.menuPorBaixo)
+    add(
+      'responsivo/menu-por-baixo',
+      'responsive',
+      'high',
+      t(`Phone menu opens behind an open panel: ${at}`, `Menu do celular abre por baixo de um painel aberto: ${at}`),
+      t(
+        `With ${who(m.menuPorBaixo)} open, the ☰ button opens the menu under it: the person cannot leave the screen without closing the panel first. Put the phone menu (and its backdrop) above drawers and side panels (higher z-index), or close the panel when the menu opens.`,
+        `Com ${who(m.menuPorBaixo)} aberto, o botão ☰ abre o menu por baixo dele: a pessoa não sai da tela sem antes fechar o painel. Ponha o menu do celular (e o fundo escuro dele) acima dos painéis laterais (z-index maior), ou feche o painel quando o menu abrir.`,
+      ),
+    )
   return out
 }
