@@ -21,8 +21,8 @@ Note on rate limiting in serverless (Vercel, Netlify, Cloudflare Workers, Supaba
 - Typical severity: high when each call costs money (SMS, LLM, image generation, paid APIs) or sends messages to third parties (spam on behalf of the domain, sender blocked); medium for heavy routes (reports, exports, searches).
 - Where to look: calls to `resend.emails.send`, `sgMail.send`, `nodemailer` `sendMail`, `twilio.messages.create`, `openai.chat.completions.create`, `anthropic.messages.create`, `generateText`/`streamText` (Vercel AI SDK), image APIs; contact forms, "invite a friend", "send by email"; routes that generate PDF/CSV.
 - How to confirm by reading the code: for each route that triggers cost, check: does it require login? does it have a per-user limit (and per-IP if anonymous)? does it have a usage cap per plan/day? Is the email/SMS recipient controlled by the user?
-- Ruled out if: per-user limit with shared storage + login required; or a daily quota stored in the database and checked before the call.
-- Does not rule out: "only logged-in users use it" (open sign-up = anyone); spending limit configured at the provider (avoids bankruptcy, but one user still exhausts everyone's quota, taking the service down).
+- Ruled out if: per-user limit with shared storage + login required; or a daily quota stored in the database and checked before the call, on every path that reaches the provider (for AI, see `llm-custo-sem-limite`, items 6 and 7).
+- Does not rule out: "only logged-in users use it" (open sign-up = anyone); spending limit configured at the provider (avoids bankruptcy, but one user still exhausts everyone's quota, taking the service down); a quota checked only on some branches, or skipped by a field the client controls; check and record in separate steps (parallel requests pass together).
 - How to fix: require login, limit by `user.id`, record usage and check the quota before calling the provider; on public forms, Turnstile/hCaptcha verified on the server.
 - CWE: CWE-770
 

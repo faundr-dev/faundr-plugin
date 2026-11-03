@@ -23,8 +23,10 @@ Reference: OWASP Top 10 for LLM Applications. The numbers changed between the 20
   3. Is `max_tokens` (OpenAI/Anthropic) or `maxOutputTokens` (AI SDK v5+; `maxTokens` in v4) fixed on the server? Is the input size limited (size of `messages`, number of messages, file size)?
   4. Does the client choose the `model`? (it can switch to the most expensive one)
   5. Do agents have a step/tool cap?
-- Ruled out if: login + per-user limit (e.g.: `@upstash/ratelimit`) or a quota in the database + `max_tokens` and model fixed on the server + a step cap.
-- Does not rule out: a spending limit in the provider's dashboard as the only defense; in-memory rate limit in serverless; the whole `messages` history accepted from the client without a size limit.
+  6. Follow every path from the request to the AI call, not just the main one. Does each path that calls the model pass the quota check? Look for branches that skip it based on something the client sends (`turns.length > 0`, `continue`, `step`, `chained`, `retry`, a conversation or session id the server never stored), and for "free" exemptions ("free if there was an X in the last N minutes") that can be used again and again.
+  7. Are the check and the record one step? "Count the uses → call the AI → insert the use" lets parallel requests all pass the count. The safe shape is reserving the use in the database before the call (an atomic function or a lock per user), and giving it back if the call fails.
+- Ruled out if: login + per-user limit (e.g.: `@upstash/ratelimit`) or a quota in the database + `max_tokens` and model fixed on the server + a step cap, and items 6 and 7 hold for every path that calls the model.
+- Does not rule out: a spending limit in the provider's dashboard as the only defense (one user empties it and the AI goes down for everyone); in-memory rate limit in serverless; the whole `messages` history accepted from the client without a size limit; a quota that exists but that only the first call of a conversation checks (the client fakes a later turn and every call is free); a per-IP limit as the only cap on calls after the first.
 - How to fix:
   ```ts
   const user = await requireUser();
