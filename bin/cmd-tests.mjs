@@ -8,6 +8,7 @@ import { projectFiles } from './security.mjs'
 import { AGENT, AGENT_SESSION_ID, firstOf, flag, linkedProject, log, readState, textArg, writeState } from './cli-core.mjs'
 import { contentLangNote } from './hook-events.mjs'
 import { memoryApi } from './cmd-features.mjs'
+import { patternLines } from './patterns.mjs'
 
 // ---- Testes ------------------------------------------------------------------------------------
 
@@ -262,6 +263,7 @@ export async function testsContext(args) {
     out.push(`(could not read the dashboard data: ${err.message})`)
   }
   if (args.includes('--fix')) out.push('Fix mode: work on the FAILING and FLAKY tests above (or on what the user pointed to).')
+  out.push(...(await patternLines('tests')))
   console.log(out.join('\n'))
 }
 

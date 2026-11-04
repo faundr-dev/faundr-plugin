@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { classify, outputSaysFailed, parseErrors } from '../bin/errors.mjs'
+import { classify, outputSaysFailed, parseErrors, summarySaysPassed } from '../bin/errors.mjs'
 import { setLang } from '../bin/i18n.mjs'
 
 // Os títulos dos E-n vão para o painel na língua da pessoa: os testes fixam o português.
@@ -37,6 +37,22 @@ test('com pipe: resumo de zero falhas não é falha; falha de verdade é', () =>
   assert.equal(outputSaysFailed(NODE_FAILED), true)
   assert.equal(outputSaysFailed('error TS2322: Type string is not assignable'), true)
   assert.equal(outputSaysFailed('Tests  1 failed | 11 passed'), true)
+})
+
+test('saída filtrada prova que passou só quando o resumo do executor de testes ficou nela', () => {
+  // `node --test x 2>&1 | grep -E "^ℹ (pass|fail)"`: sobra só o resumo, e ele diz que nada falhou.
+  assert.equal(summarySaysPassed('ℹ pass 2\nℹ fail 0'), true)
+  assert.equal(summarySaysPassed(NODE_PASSED), true)
+  assert.equal(summarySaysPassed('# pass 3\n# fail 0'), true)
+  assert.equal(summarySaysPassed('Tests:       12 passed, 12 total'), true)
+  assert.equal(summarySaysPassed('====== 4 passed in 0.31s ======'), true)
+  // Falhou, nenhum passou ou o filtro tirou o resumo: não prova nada.
+  assert.equal(summarySaysPassed('ℹ pass 1\nℹ fail 1'), false)
+  assert.equal(summarySaysPassed('ℹ pass 0\nℹ fail 0'), false)
+  assert.equal(summarySaysPassed('Tests:       1 failed, 11 passed, 12 total'), false)
+  assert.equal(summarySaysPassed('==== 1 failed, 3 passed in 0.4s ===='), false)
+  assert.equal(summarySaysPassed(''), false)
+  assert.equal(summarySaysPassed('✔ soma (0.5ms)'), false)
 })
 
 test('node --test que passou não vira erro, nem a última linha do resumo', () => {

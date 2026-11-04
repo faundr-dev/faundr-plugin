@@ -17,7 +17,8 @@ import { featureIntent, featureNudge, ruleIntent, ruleNudge } from './intent.mjs
 import { memoryNote, readMemoryIndex, relevantMemory } from './rules.mjs'
 import { readTeam, teamPromptNote } from './team.mjs'
 import { takeInbox } from './inbox.mjs'
-import { workflowsForPrompt, workflowsOnce } from './workflows.mjs'
+import { workflowsForRequest } from './workflows.mjs'
+import { rememberPrompt } from './workflow-run.mjs'
 import { noteSkillRan, readSkillIndex, skillsOnce, typedSkill } from './skills.mjs'
 import { markSkillStart } from './ai-cost.mjs'
 import { skillStepsNote, stepOff } from './flows.mjs'
@@ -81,7 +82,9 @@ try {
       // Um aviso que falha não impede os outros (o hook nunca quebra o agente).
     }
     try {
-      notes.push(workflowsOnce(root, payload.session_id, (list, ids) => workflowsForPrompt(list, payload.prompt, ids), 'This request'))
+      // A frase que responde uma pergunta do workflow é conferida contra estas mensagens (faundr workflow step --answer).
+      rememberPrompt(root, payload.session_id, payload.prompt)
+      notes.push(workflowsForRequest(root, payload.session_id, payload.prompt))
     } catch {
       // Um aviso que falha não impede os outros (o hook nunca quebra o agente).
     }

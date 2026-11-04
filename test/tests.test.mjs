@@ -114,6 +114,8 @@ E       assert 21 == 22</failure></testcase>
     ],
   )
   assert.match(cases[1].message, /assert 21 == 22/)
+  // O código do teste que o pytest repete em volta da falha não sai do computador.
+  assert.doesNotMatch(cases[1].message, /def test_dias_uteis|^>/m)
   assert.match(cases[2].message, /KeyError/)
   assert.equal(cases[3].message, 'Pulado: precisa de rede')
 })

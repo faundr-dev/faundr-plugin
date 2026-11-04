@@ -378,15 +378,18 @@ const rel = (root, file) => (file ? path.relative(root, path.resolve(root, file)
 const lastLine = (text) => String(text ?? '').split('\n').map((l) => l.trim()).filter(Boolean).at(-1)?.slice(0, 300) ?? ''
 const firstLine = (text) => String(text ?? '').split('\n').map((l) => l.trim()).find(Boolean)?.slice(0, 300) ?? ''
 
-// Mensagem de falha: sem cores, sem as linhas de dentro das bibliotecas, caminhos relativos ao projeto (a pasta do
-// computador da pessoa não sai daqui) e segredos mascarados.
+// Mensagem de falha: sem cores, sem as linhas de dentro das bibliotecas, sem as linhas de código que o executor
+// mostra em volta do erro (" 12 | const x = …", que não sai do computador), caminhos relativos ao projeto (a pasta
+// do computador da pessoa não sai daqui) e segredos mascarados.
+const CODE_FRAME = /^\s*>?\s*\d+\s*\|/
+const CODE_MARK = /^\s*\|\s*[\^~]/
 let projectRoot = ''
 function clean(message) {
   const roots = projectRoot ? [projectRoot, projectRoot.split(path.sep).join('/')].map((r) => r.replace(/[\\/]+$/, '')) : []
   let text = String(message ?? '')
     .replace(/\u001b\[[0-9;]*m/g, '')
     .split('\n')
-    .filter((l) => !/node_modules|node:internal|^\s*at (async )?(Promise|processTicksAndRejections|new Promise)\b/.test(l))
+    .filter((l) => !/node_modules|node:internal|^\s*at (async )?(Promise|processTicksAndRejections|new Promise)\b/.test(l) && !CODE_FRAME.test(l) && !CODE_MARK.test(l))
     .slice(0, 12)
     .join('\n')
   for (const r of roots) text = text.split(`file:///${r.replace(/^\//, '')}/`).join('').split(`${r}/`).join('').split(`${r}\\`).join('')
@@ -487,9 +490,16 @@ export function fromJUnit(xml, root) {
   return out
 }
 
-// O resumo (ex.: "assert 21 == 22") primeiro; depois o trecho do código em que quebrou. Pulado: o motivo.
+// O pytest repete o código do teste em volta da falha: sai só o que ele marcou como erro (linhas "E ") e onde foi.
+function pytestBody(text) {
+  const lines = text.split('\n')
+  if (!lines.some((l) => /^E\s/.test(l))) return text
+  return lines.filter((l) => /^E\s/.test(l) || /^\S+\.py:\d+/.test(l)).join('\n')
+}
+
+// O resumo (ex.: "assert 21 == 22") primeiro; depois as linhas de erro e onde quebrou. Pulado: o motivo.
 function pytestMessage(failure, skipNote) {
-  if (failure) return clean([attr(failure[2] ?? failure[4], 'message'), unescapeXml(failure[3] ?? '').replace(/\r/g, '')].filter(Boolean).join('\n'))
+  if (failure) return clean([attr(failure[2] ?? failure[4], 'message'), pytestBody(unescapeXml(failure[3] ?? '').replace(/\r/g, ''))].filter(Boolean).join('\n'))
   return skipNote ? `${tr('Skipped', 'Pulado')}: ${skipNote}` : null
 }
 

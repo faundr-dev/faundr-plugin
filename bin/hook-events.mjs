@@ -8,7 +8,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { findDesignMd, uiFiles } from './design.mjs'
 import { ensureFaundrPath, faundrPath, organizeFaundrDir } from './paths.mjs'
-import { maskPayload } from './security.mjs'
+import { hookPayload } from './hook-payload.mjs'
 import { rememberTranscript, transcriptUsage, transcriptsToSync } from './usage.mjs'
 import { onlyUser, readSkillIndex, skillMoment, writeSkillIndex } from './skills.mjs'
 import { readWorkflows, workflowMoment, writeWorkflows } from './workflows.mjs'
@@ -18,6 +18,7 @@ import { recordEdit } from './loop.mjs'
 import { machineName } from './live.mjs'
 import { writeTeam } from './team.mjs'
 import { addSessionNotes, takeAcks, writeInbox } from './inbox.mjs'
+import { takeFailures } from './failures.mjs'
 import { lang } from './i18n.mjs'
 import { contentLangLine, ensureContentLang, languageGuidance, validContentLang } from './content-lang.mjs'
 import { toolEdits } from './agent.mjs'
@@ -136,8 +137,11 @@ export async function hook(agent) {
       at: startedAt,
       ack: takeAcks(root, payload.session_id),
       currentFeatureId: currentFeature(root, payload.session_id),
-      payload: maskPayload(payload),
+      // Só os campos que o servidor lê: conteúdo de arquivo e saída das ferramentas ficam aqui (ver hook-payload.mjs).
+      payload: hookPayload(payload),
       usage,
+      // Checagens do plugin que quebraram ou travaram desde o último evento (ver failures.mjs).
+      failures: takeFailures(projectId),
     }),
     signal: AbortSignal.timeout(hookTimeout(event)),
   })

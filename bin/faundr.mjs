@@ -3,6 +3,7 @@
 //
 //   faundr login [--url https://...]           sign in through the browser (--start only asks for the code, --wait waits for approval)
 //   faundr login <token> [--url https://...]   saves an existing token (outside the chat)
+//   faundr logout                              deletes this computer's token from Faundr and from ~/.faundr
 //   faundr link <projectId>                    links the current folder to a project
 //   faundr setup [--apply …] [--skip …] [--refresh]  sets Faundr up in one go (does the safe part, lists what needs an OK)
 //   faundr status                              shows the configuration and the link
@@ -93,7 +94,7 @@
 //   faundr error-recipe E-<n> --cause "…" --fix "…"  saves why it broke and what fixed it (shown when it, or the same error elsewhere, appears)
 //   faundr parallel [open "<a>; <b>" | close <name>|--all]  stages ready to go in parallel; opens/closes a workbench (git worktree) per stage
 //     --next-deploy                            error from the published app: the old version may still send it; only comes back if it shows up in a new version
-//   faundr error-archive E-<n> [--days N | --count N | --users N]  archives for a while, up to N more times or N more people
+//   faundr error-archive E-<n> [--days N | --count N | --users N | --not-an-error]  archives for a while, up to N more times or N more people; --not-an-error when the capture misread something (archived for good)
 //   faundr error-reopen E-<n>                  reopens an archived or resolved error
 //   faundr errors-dsn                          address (DSN) for the published app to send errors to Faundr (Sentry SDK)
 //   faundr errors-sdk [--dir src/lib]          copies Faundr's server error SDK (Node, Workers) into the project
@@ -117,6 +118,7 @@
 
 import { t } from './i18n.mjs'
 import { log } from './cli-core.mjs'
+import { recordFailure } from './failures.mjs'
 import { gate } from './hook-stop.mjs'
 import { hook, usageSync } from './hook-events.mjs'
 import { guard } from './hook-guard.mjs'
@@ -134,12 +136,16 @@ import { testsContext, testsIgnore, testsMap, testsMutation, testsRun, testsScan
 import { browseCommand, browseKeyCommand, checkpointCommand, checkpointsList, checkpointsSync, inboxCommand, listenCommand, msgCommand, restoreCommand, teamCommand } from './cmd-checkpoints.mjs'
 import { designArchive, designContext, designFinding, designLint, designReopen, showcaseContext, showcaseSave } from './cmd-design.mjs'
 import { designCoverage, designMeasureSave, designMeasureScript, designResolve, designScope, designShow } from './cmd-design-audit.mjs'
-import { agentsMd, link, login, status, statusline, usageDebug } from './cmd-account.mjs'
+import { agentsMd, link, login, logout, status, statusline, usageDebug } from './cmd-account.mjs'
 import { configCommand, setup, statuslineInstall } from './cmd-setup.mjs'
 
 // Nomes em português de antes da 0.99: continuam funcionando, com aviso, até saírem numa próxima versão.
 const RENAMED = { fila: 'inbox', recado: 'msg', escutar: 'listen', mapa: 'map', lgpd: 'privacy', pegar: 'claim', soltar: 'release', dono: 'own', 'soltar-dono': 'disown' }
 const RENAMED_FLAGS = { '--feito': '--done', '--para': '--to' }
+// Checagens que rodam em segundo plano (--quiet): o erro vai para o log, não para a tela.
+const QUIET_CHECKS = ['skills', 'graph', 'design-lint', 'security-scan', 'quality-scan', 'tests-scan', 'stack-scan', 'env-check', 'usage-sync', 'checkpoints-sync', 'architecture-check']
+// Acima disto o hook já atrasa o agente (o do início da sessão tem 10 s no total).
+const SLOW_HOOK_MS = 5000
 const [typed, ...typedArgs] = process.argv.slice(2)
 const command = RENAMED[typed] ?? typed
 const args = typedArgs.map((a) => RENAMED_FLAGS[a] ?? a)
@@ -154,6 +160,7 @@ if (command === 'statusline') {
     log(`statusline: ${err?.message ?? err}`)
   }
 } else if (command === 'hook' || command === 'gate' || command === 'guard' || command === 'subagent-start') {
+  const startedAt = Date.now()
   try {
     if (command === 'gate') await gate()
     else if (command === 'guard') await guard()
@@ -161,11 +168,17 @@ if (command === 'statusline') {
     else await hook(args[0] === 'codex' ? 'codex' : 'claude')
   } catch (err) {
     log(`error (${command}): ${err?.stack ?? err}`)
+    if (!isNetworkError(err)) recordFailure(command, 'crash', err)
   }
+  const ms = Date.now() - startedAt
+  if (ms > SLOW_HOOK_MS) recordFailure(command, 'slow', null, ms)
   // Sair sozinho, sem process.exit: no Node 24 do Windows, process.exit depois de duas requisições
   // derruba o processo ("Assertion failed … UV_HANDLE_CLOSING", código 127). A trava abaixo não segura o processo.
   process.exitCode = 0
-  setTimeout(() => process.exit(0), 3000).unref()
+  setTimeout(() => {
+    recordFailure(command, 'stuck', null, Date.now() - startedAt)
+    process.exit(0)
+  }, 3000).unref()
 } else await cli()
 
 async function cli() {
@@ -191,15 +204,24 @@ async function cli() {
     if (Object.hasOwn(commands, command)) await commands[command](args)
     else printCommands()
   } catch (err) {
-    if (['skills', 'graph', 'design-lint', 'security-scan', 'quality-scan', 'tests-scan', 'stack-scan', 'env-check', 'usage-sync', 'checkpoints-sync', 'architecture-check'].includes(command) && args.includes('--quiet')) log(`${command}: ${err.message}`)
+    const quiet = QUIET_CHECKS.includes(command) && args.includes('--quiet')
+    if (quiet) log(`${command}: ${err.message}`)
     else console.log(err.message)
+    // Checagem em segundo plano que quebrou, ou um bug (TypeError…) em qualquer comando. Os erros de uso
+    // ("faltou o --verified") são `Error` comum e não contam; sem rede também não.
+    if (!isNetworkError(err) && (quiet || err?.constructor !== Error || err?.code)) recordFailure(command, 'crash', err)
     process.exit(1)
   }
 }
 
+function isNetworkError(err) {
+  const code = err?.cause?.code ?? err?.code
+  return err?.name === 'TimeoutError' || err?.name === 'AbortError' || err?.message === 'fetch failed' || ['ECONNREFUSED', 'ENOTFOUND', 'ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN'].includes(code)
+}
+
 function printCommands() {
   console.log(
-    'commands: setup | login | link | status | config | browse | browse-key | checkpoint | checkpoints | restore | team | inbox | msg | map | graph | graph-query | graph-path | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | memory-edit | workflow | skills | concern | resolve | start | done | focus | board | feature-discard | feature-restore | criteria | criteria-check | handoff | handover | weekly | resume | diagram-save | architecture-check | stack-scan | env-check | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | skill-report | security-import | security-supabase | db-test | launch-check | privacy | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-recipe | error-archive | parallel | error-reopen | errors-dsn | errors-sdk | errors-uptime | errors-import-sentry | hook',
+    'commands: setup | login | logout | link | status | config | browse | browse-key | checkpoint | checkpoints | restore | team | inbox | msg | map | graph | graph-query | graph-path | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | memory-edit | workflow | skills | concern | resolve | start | done | focus | board | feature-discard | feature-restore | criteria | criteria-check | handoff | handover | weekly | resume | diagram-save | architecture-check | stack-scan | env-check | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | skill-report | security-import | security-supabase | db-test | launch-check | privacy | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-recipe | error-archive | parallel | error-reopen | errors-dsn | errors-sdk | errors-uptime | errors-import-sentry | hook',
   )
 }
 
@@ -209,6 +231,7 @@ function cliCommands() {
   const workCommands = ['feature', 'task', 'decision', 'rule', 'concern', 'resolve', 'done', 'start', 'claim', 'release', 'own', 'disown', 'focus', 'board', 'criteria', 'criteria-check', 'feature-discard', 'feature-restore']
   return {
     login: (a) => login(a),
+    logout: () => logout(),
     link: (a) => link(a.join(' ').trim()),
     status: () => status(),
     'status-refresh': () => refreshStatus(),

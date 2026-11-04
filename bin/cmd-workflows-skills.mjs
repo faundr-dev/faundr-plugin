@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import { readSkillIndex, scanSkills, writeSkillIndex } from './skills.mjs'
 import { parseItem } from './workflows.mjs'
 import { AGENT_SESSION_ID, flag, flags, linkedProject, readState, textArg, writeState } from './cli-core.mjs'
+import { ownerSaid, runOf, saveRun } from './workflow-run.mjs'
 
 // Workflows do projeto: o Claude lista, lê os passos e cria rascunho; aprovar e editar ficam com o dono no painel.
 async function workflowApi(body) {
@@ -24,7 +25,9 @@ const WORKFLOW_USAGE = `usage:
   faundr workflow show <W-n or name>
   faundr workflow draft "<name>" --when "<when to use>" --topic "<subject>"... [--file "<path or pattern>"]... --step "<step>"...
   faundr workflow run <W-n> --why "<request in one line>"      (starts following it; step 1 in progress)
-  faundr workflow step <W-n> <step> [--wait | --skip | --done] [--note "<note>"]
+  faundr workflow step <W-n> <step> [--wait | --skip | --done] [--note "<note>"] [--answer "<the owner's words>"]
+     (a question step only closes with --answer: the owner's reply after you asked, or the words of the request that
+      already answered it; skipping any step needs --answer with the owner's OK. The words must be in their messages.)
   faundr workflow done <W-n> [--note "<result>"]   |   faundr workflow stop <W-n>
 Step: free text (a task) or with a type in front: "skill: faundr:design", "agents 3: read the code", "command: npm test", "ask: which repository?", "wait: the tests pass". At the same time: "parallel: skill: faundr:design | command: npm test". Detail after " — ".`
 
@@ -52,7 +55,7 @@ async function workflowShow(rest) {
   console.log(w.text)
   if (w.status === 'active')
     console.log(
-      `\nMark the progress so the team sees it on the canvas: start with faundr workflow run ${w.ref} --why "<request>", move on with faundr workflow step ${w.ref} <n> (--wait on the step that asks the owner, --skip if it does not apply, with --note "<why>") and close with faundr workflow done ${w.ref}.`,
+      `\nFollow the steps in order, one at a time, and mark each one when you really do it (the team sees it on the canvas): start with faundr workflow run ${w.ref} --why "<request>", move on with faundr workflow step ${w.ref} <n> --done, and close with faundr workflow done ${w.ref}. A question step: ask it, mark it --wait, end your response and, when the owner answers, mark it --done --answer "<their words>" (if the request already answered it, quote those words). Skipping a step needs the owner's OK: --skip --answer "<their words>". Never mark a step you did not do.`,
     )
   if (w.status === 'draft') console.log('\n(Draft: not in effect yet. The owner approves it on the dashboard, in Workflows.)')
   if (w.status === 'off') console.log('\n(Turned off by the owner: do not follow it unless they ask.)')
@@ -83,17 +86,35 @@ function stepMark(rest) {
 
 // run, step, done e stop: o progresso do workflow que o time vê no canvas.
 async function workflowMark(sub, rest) {
-  const [query, n] = rest.filter((a, i) => !a.startsWith('--') && !(i > 0 && ['--why', '--note'].includes(rest[i - 1])))
+  const [query, n] = rest.filter((a, i) => !a.startsWith('--') && !(i > 0 && ['--why', '--note', '--answer'].includes(rest[i - 1])))
   if (!query || (sub === 'step' && !Number(n))) throw new Error(WORKFLOW_USAGE)
   const mark = stepMark(rest)
+  const answer = flag(rest, '--answer') ?? ''
+  if (sub === 'step' && answer) {
+    // A frase precisa estar numa mensagem da pessoa nesta sessão (desde o pedido que fez o workflow começar).
+    const { root } = linkedProject()
+    const run = runOf(root, AGENT_SESSION_ID, query.toUpperCase())
+    if (!ownerSaid(root, AGENT_SESSION_ID, answer, run?.startedAt ?? 0))
+      throw new Error(
+        `"${answer}" is not in the owner's messages in this session. Use their exact words (a question is answered by them, after you ask; skipping needs their OK). If they have not answered yet, mark the step --wait and ask.`,
+      )
+  }
   const r = await workflowApi({
     action: sub,
     query,
     ...(sub === 'run' && { reason: flag(rest, '--why') ?? '' }),
     ...(sub === 'step' && { step: Number(n), mark }),
     note: flag(rest, '--note') ?? '',
+    ...(answer && { answer }),
     agentSessionId: AGENT_SESSION_ID ?? null,
   })
+  // Os passos ficam no computador: o hook dos comandos avisa quando um comando passa na frente deles (sem rede).
+  try {
+    const { root } = linkedProject()
+    saveRun(root, AGENT_SESSION_ID, r.ref, r.outline, { ...(sub === 'run' && { startedAt: Date.now() }), closed: sub === 'done' || sub === 'stop' })
+  } catch {
+    // Sem guardar, só o aviso antes do comando deixa de sair; o resto segue.
+  }
   const STATUS = { running: 'in progress', waiting: 'waiting for the owner', done: 'done', stopped: 'stopped' }
   console.log(`${r.ref} ${STATUS[r.status] ?? r.status}: ${r.progress}.${r.status === 'waiting' ? " The canvas shows it is the owner's turn." : ''}`)
   // Avisos do time: outra pessoa seguindo o mesmo workflow agora, ou o workflow mudou no painel depois que começou.

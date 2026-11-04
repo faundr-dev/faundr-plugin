@@ -5,13 +5,14 @@ import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { classify, commandCwd, isPartial, maskCommand, outputSaysFailed, parseErrors, toolOutput } from './errors.mjs'
+import { classify, commandCwd, isPartial, maskCommand, outputSaysFailed, parseErrors, summarySaysPassed, toolOutput } from './errors.mjs'
 import { contextLines, findMap, resolvePosition } from './sourcemap.mjs'
 import { recordCheck } from './loop.mjs'
 import { t } from './i18n.mjs'
 import { codexExitCodeWait, isCodexRollout } from './codex-transcript.mjs'
 import { AGENT, AGENT_SESSION_ID, CONFIG_DIR, firstOf, flag, linkedProject, log, projectRoot, readState, textArg, writeState } from './cli-core.mjs'
 import { pushEvent } from './hook-events.mjs'
+import { patternLines } from './patterns.mjs'
 
 // ---- Erros no desenvolvimento -----------------------------------------------------------------
 
@@ -57,7 +58,8 @@ export async function captureErrors(payload, root, projectId, config) {
   const text = output.trim() || !failed || exitCode === null ? output : `Exit code ${exitCode}`
   const issues = parseErrors(text, { kind: c.kind, root, failed, cwd: commandCwd(command, payload.cwd ?? root) })
   const passed = !failed && !issues.length
-  if (passed && filtered) return // saída filtrada vazia não prova nada
+  // Saída filtrada só prova que passou quando o resumo do executor de testes ficou nela ("ℹ fail 0", "3 passed").
+  if (passed && filtered && !summarySaysPassed(output)) return
   if (!passed && !issues.length) return
   // Detector de loop: o mesmo erro voltando seguidas vezes vira aviso ao agente no próximo PreToolUse.
   try {
@@ -125,6 +127,9 @@ export async function errorShow(args) {
   if (e.source === 'prod') lines.push(...(await prodErrorLines(e)))
   else lines.push('', `Closes by itself when \`${e.check_key}\` passes.`)
   lines.push(...recipeLines(e.recipes ?? []))
+  // O mesmo erro corrigido em outros projetos (biblioteca de padrões), pela checagem que o pegou.
+  const seen = await patternLines('errors', e.source === 'prod' ? 'app' : `${e.kind}:${e.tool}`)
+  if (seen.length) lines.push('', ...seen)
   console.log(lines.join('\n'))
 }
 
@@ -381,8 +386,9 @@ export async function errorArchive(args) {
   const days = flag(args, '--days')
   const count = flag(args, '--count')
   const users = flag(args, '--users')
-  const r = await errorsApi({ action: 'archive', query, days: days ? Number(days) : null, count: count ? Number(count) : null, users: users ? Number(users) : null })
-  console.log(`Archived: E-${r.ref} ${r.title}${archivedUntil(r, count, users)}`)
+  const notAnError = args.includes('--not-an-error')
+  const r = await errorsApi({ action: 'archive', query, days: days ? Number(days) : null, count: count ? Number(count) : null, users: users ? Number(users) : null, notAnError })
+  console.log(notAnError ? `Not an error: E-${r.ref} ${r.title} (archived for good)` : `Archived: E-${r.ref} ${r.title}${archivedUntil(r, count, users)}`)
 }
 
 // Até quando o erro arquivado fica quieto: data, número de ocorrências ou de pessoas.

@@ -12,6 +12,7 @@ import { AGENT, AGENT_SESSION_ID, firstOf, flag, linkedProject, log, readState, 
 import { editedFile, editedLineCount, sessionEditedFiles } from './hook-stop.mjs'
 import { contentLangNote } from './hook-events.mjs'
 import { editedSinceCheck, printGaps } from './cmd-security.mjs'
+import { patternLines } from './patterns.mjs'
 
 // ---- Qualidade do código ------------------------------------------------------------------------
 
@@ -181,6 +182,7 @@ export async function qualityContext(args) {
   } catch (err) {
     out.push(`(could not read the findings already recorded: ${err.message})`)
   }
+  out.push(...(await patternLines('quality')))
   console.log(out.join('\n'))
 }
 

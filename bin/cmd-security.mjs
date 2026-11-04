@@ -13,15 +13,20 @@ import { gapLines } from './language-support.mjs'
 import { AGENT, AGENT_SESSION_ID, CONFIG_DIR, firstOf, flag, linkedProject, log, readJson, readState, textArg, writeState } from './cli-core.mjs'
 import { editedFile, editedLineCount, sessionEditedFiles } from './hook-stop.mjs'
 import { contentLangNote } from './hook-events.mjs'
+import { patternLines } from './patterns.mjs'
 
 // ---- Segurança -------------------------------------------------------------------------------
 
+// O trecho do código de cada achado (snippet) não sai do computador: o painel mostra arquivo e linha.
+export const withoutSnippets = (findings) => findings.map(({ snippet: _snippet, ...f }) => f)
+
 export async function securityApi(body) {
   const { projectId, config } = linkedProject()
+  const sent = Array.isArray(body.findings) ? { ...body, findings: withoutSnippets(body.findings) } : body
   const res = await fetch(`${config.apiUrl}/api/cli/security`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${config.token}` },
-    body: JSON.stringify({ projectId, ...body }),
+    body: JSON.stringify({ projectId, ...sent }),
     signal: AbortSignal.timeout(30_000),
   })
   const data = await res.json().catch(() => ({}))
@@ -41,8 +46,20 @@ export async function skillReport(args) {
   if (!skill || (!file && !args.includes('--none')) || areas.some((a) => !SKILL_AREAS.includes(a))) throw new Error(SKILL_REPORT_USAGE)
   const raw = file ? JSON.parse(fs.readFileSync(path.resolve(file), 'utf8')) : []
   const list = Array.isArray(raw) ? raw : (raw.findings ?? [])
-  // Nunca manda chave inteira: o mesmo mascaramento da revisão de segurança.
-  const findings = list.map((f) => ({ ...f, detail: f.detail && maskSecretsIn(String(f.detail)), fix: f.fix && maskSecretsIn(String(f.fix)) }))
+  // Só os campos que o painel usa (um trecho de código que a skill tenha posto no JSON fica aqui) e nunca a chave
+  // inteira: o mesmo mascaramento da revisão de segurança.
+  const findings = list.map((f) => ({
+    area: f.area,
+    status: f.status,
+    title: f.title,
+    severity: f.severity,
+    file: f.file,
+    line: f.line,
+    fingerprint: f.fingerprint,
+    detail: f.detail && maskSecretsIn(String(f.detail)),
+    impact: f.impact && maskSecretsIn(String(f.impact)),
+    fix: f.fix && maskSecretsIn(String(f.fix)),
+  }))
   const scope = flag(args, '--scope')?.split(',').map((f) => f.trim()).filter(Boolean) ?? null
   const { projectId, config } = linkedProject()
   const res = await fetch(`${config.apiUrl}/api/cli/skill-report`, {
@@ -262,6 +279,7 @@ export async function securityContext(args) {
   } catch (err) {
     out.push(`(could not read the problems already recorded: ${err.message})`)
   }
+  out.push(...(await patternLines('security')))
   console.log(out.join('\n'))
 }
 
@@ -328,7 +346,6 @@ export async function securityFinding(args) {
       fix: flag(args, '--fix'),
       file: flag(args, '--file'),
       line: Number.isInteger(line) && line > 0 ? line : null,
-      snippet: flag(args, '--snippet') ? maskSecretsIn(flag(args, '--snippet')) : null,
       cwe: flag(args, '--cwe')?.split(',').map((c) => c.trim()) ?? [],
       ...(blocker ? { verdict: 'needs_check', blocker, check_plan: flag(args, '--how-to-check') } : {}),
     },

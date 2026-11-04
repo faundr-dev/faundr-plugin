@@ -27,12 +27,13 @@ Confirm in one sentence: draft W-n was saved and takes effect when the owner app
 
 ## Following a workflow
 
-When an active workflow arrives in your context ("Este pedido bate com um workflow"), read the steps with `faundr workflow show <W-n>` and follow them in order. The team watches on the dashboard canvas, live, so mark the progress:
+When an active workflow arrives in your context ("This request matches a project workflow"), read the steps with `faundr workflow show <W-n>` and follow them in order, one at a time. The team designed it this way on purpose: doing it "your way", even if faster, is not following it. The team watches on the dashboard canvas, live, so mark each step when you really do it:
 
 - When starting: `faundr workflow run <W-n> --why "<the request in one line>"` (step 1 goes in progress).
-- When entering each step: `faundr workflow step <W-n> <number>` (the previous ones are marked done).
-- "Ask the owner" step: `faundr workflow step <W-n> <number> --wait --note "<the question>"`, ask the question and wait. The canvas shows it is the owner's turn.
-- Step that does not apply to the request: `faundr workflow step <W-n> <number> --skip --note "<why>"`. Never skip silently.
-- At the end: `faundr workflow done <W-n> --note "<the result in one line>"`. If the owner says to stop: `faundr workflow stop <W-n>`.
+- When entering a step: `faundr workflow step <W-n> <number>`; when it is done: `--done`. Marking a step does not mark the ones before it: a step done while earlier ones are open shows as "out of order" on the canvas and you get a warning.
+- "Ask the owner" step: `faundr workflow step <W-n> <number> --wait --note "<the question>"`, ask the question and **end your response**. When the owner answers: `faundr workflow step <W-n> <number> --done --answer "<their exact words>"`. If the request itself already answered that exact question (e.g. "commit and push" for "can I push?"), quote those words of the request. The plugin checks the words are in the owner's messages; a question never closes without them.
+- Step that does not apply to the request: ask the owner whether to skip it, then `faundr workflow step <W-n> <number> --skip --answer "<their OK>" --note "<why>"`. You cannot skip on your own.
+- At the end: `faundr workflow done <W-n> --note "<the result in one line>"` (it refuses while a step is still open). If the owner says to stop: `faundr workflow stop <W-n>`.
+- A "may be a case for a workflow" note is lighter: compare the request with the workflow's "when" and follow it only if it fits.
 
-Skill, command and agent steps mark themselves when you call the skill, the command finishes successfully or you open the agents; even so, mark the others (task, ask, wait, decision). One command per step is enough; do not mark steps you did not do.
+Skill, command and agent steps mark themselves when you call the skill, the command finishes successfully or you open the agents; even so, mark the others (task, ask, wait, decision). Never mark several steps at once at the end, and never mark a step you did not do.

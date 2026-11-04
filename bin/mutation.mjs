@@ -4,6 +4,7 @@
 // tempo e com a suíte verde. Conceitos e formato em docs/research/testes-mutacao-cobertura.md (Stryker, Apache-2.0).
 
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { t } from './i18n.mjs'
@@ -168,20 +169,48 @@ const PHRASE = {
   CallExpression: () => t('the function call can be removed and no test notices', 'a chamada de função pode ser anulada e nenhum teste percebe'),
 }
 
+// Do código não sai nada: nem a linha original nem o trecho estragado. Da troca sai só o operador (">="), o nome do
+// método ou um valor fixo do Stryker (true, "", {}); sem isso, a frase fica sem a troca.
+const OPERATOR_MUTATORS = new Set(['EqualityOperator', 'LogicalOperator', 'ArithmeticOperator', 'AssignmentOperator', 'UpdateOperator', 'UnaryOperator'])
+const FIXED_VALUE = /^(true|false|""|''|``|\{\}|\[\]|null|undefined|"Stryker was here!")$/
+// Os de dois lados primeiro: em "!pronto && ok" o que mudou é o &&, não o !.
+const OPERATOR = /(===|!==|==|!=|<=|>=|\?\?=?|&&=?|\|\|=?|\+\+|--|[<>]|[-+*/%]=?)/
+const UNARY = /(!|=)/
+
+export function safeReplacement(mutator, replacement) {
+  const r = String(replacement ?? '').trim()
+  if (!r) return null
+  if (FIXED_VALUE.test(r)) return r
+  if (OPERATOR_MUTATORS.has(mutator)) return (r.match(OPERATOR) ?? r.match(UNARY))?.[1] ?? null
+  if (mutator === 'MethodExpression') return r.match(/\.(\w+)\s*\([^()]*\)\s*$/)?.[1] ?? null
+  return null
+}
+
+const hash = (text) => createHash('sha256').update(text).digest('hex').slice(0, 16)
+
 /** Achados T-n no formato da API (um por defeito; identidade estável sem depender do número da linha mudar pouco). */
 export function mutationFindings(escaped) {
   return escaped.map((e) => {
-    const phrase = (PHRASE[e.mutator] ?? ((x) => t(`the change "${x.replacement}" (${x.mutator}) didn't make any test fail`, `a troca "${x.replacement}" (${x.mutator}) não fez nenhum teste falhar`)))(e)
+    const replacement = safeReplacement(e.mutator, e.replacement)
+    // A frase do tipo de defeito cita a troca: sem uma troca que possa sair, vale a frase geral.
+    const quotes = PHRASE[e.mutator]?.length > 0
+    const general = (x) =>
+      t(
+        `the change ${x.replacement ? `"${x.replacement}" ` : ''}(${x.mutator}) didn't make any test fail`,
+        `a troca ${x.replacement ? `"${x.replacement}" ` : ''}(${x.mutator}) não fez nenhum teste falhar`,
+      )
+    const phrase = (replacement === null && quotes ? general : (PHRASE[e.mutator] ?? general))({ ...e, replacement })
     return {
       kind: e.noCoverage ? 'no_coverage' : 'survived',
       file: e.file,
       line: e.line,
       mutator: e.mutator,
-      replacement: e.replacement,
-      original: e.original,
+      replacement,
+      original: null,
       title: e.noCoverage ? t(`No test reaches this line (line ${e.line})`, `Nenhum teste passa por aqui (linha ${e.line})`) : t(`Defect that slipped through on line ${e.line}`, `Defeito que escapou na linha ${e.line}`),
       detail: e.noCoverage ? `${t('No test runs this line: it can break in any way without anyone knowing.', 'Nenhum teste executa esta linha: ela pode quebrar de qualquer jeito sem ninguém saber.')} ${capital(phrase)}.` : `${capital(phrase)}.`,
-      fingerprint: `mut|${e.file}|${e.mutator}|${e.original}|${e.replacement}`.slice(0, 600),
+      // A identidade usa um resumo do trecho (o trecho em si não sai).
+      fingerprint: `mut|${e.file}|${e.mutator}|${hash(`${e.original}\u0000${e.replacement}`)}`,
     }
   })
 }

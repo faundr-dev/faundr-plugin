@@ -48,6 +48,18 @@ const GIT_RULES = [
   { re: /\b(filter-branch|filter-repo)\b/i, what: 'rewrites the whole git history' },
 ]
 
+// Baixar e rodar na hora (curl … | sh, iex (iwr …), powershell -enc): o que roda não passa pela leitura de ninguém.
+// Pergunta (não barra): instaladores oficiais usam esse formato. Só vale quando o programa do trecho é mesmo o que
+// baixa ou o que roda, para não pegar o mesmo texto dentro de uma mensagem de commit ou de um echo.
+const DOWNLOADERS = new Set(['curl', 'wget', 'iwr', 'irm', 'invoke-webrequest', 'invoke-restmethod'])
+const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'python', 'python3', 'node', 'perl', 'ruby', 'iex', 'invoke-expression', 'pwsh', 'powershell'])
+const DOWNLOAD_EXEC = [
+  { re: /\b(curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)\b[^\n|;&]*\|\s*(sudo\s+)?(sh|bash|zsh|dash|ksh|fish|python3?|node|perl|ruby|iex|invoke-expression|pwsh|powershell)\b/i, programs: DOWNLOADERS },
+  { re: /\b(sh|bash|zsh|dash|ksh)\b[^\n|;&]*(<\(|\$\()\s*(curl|wget)\b/i, programs: SHELLS },
+  { re: /\b(iex|invoke-expression)\b\s*[(\s]\s*\(?\s*(iwr|irm|invoke-webrequest|invoke-restmethod|new-object\s+(system\.)?net\.webclient)\b/i, programs: SHELLS },
+  { re: /\b(powershell|pwsh)(\.exe)?\b[^\n]*\s-(e|ec|en|enc|encodedcommand)\s+["']?[a-z0-9+/=]{16,}/i, programs: SHELLS },
+]
+
 const HEREDOC = /(<<-?\s*(['"]?)(\w+)\2[^\n]*)\n[\s\S]*?\n\s*\3[ \t]*(?=\n|$)/g
 
 const strip = (t) => t.replace(/^["']|["']$/g, '')
@@ -162,6 +174,9 @@ export function classifyCommand(command, { cwd, sql = false } = {}) {
       if (hit) keep({ level: 'ask', what: hit.what, files: !!hit.files })
     }
   }
+  const fetched = DOWNLOAD_EXEC.find((r) => r.re.test(command) && segs.some((s) => r.programs.has(s.program.split('(')[0])))
+  if (fetched)
+    keep({ level: 'ask', what: 'downloads code from the internet and runs it right away, without anyone reading it first (it can do anything on this computer)', files: false })
   // Banco: comandos de CLI e SQL dentro do comando (psql -c, heredoc, node -e …), a menos que o comando só mexa
   // com texto (busca, echo, mensagem de commit, arquivo novo).
   const onlyText = segs.every((s) => TEXT_PROGRAMS.has(s.program))

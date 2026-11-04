@@ -145,10 +145,6 @@ function relFile(file, root, cwd = root) {
 
 const isOwnFrame = (f) => f && !/node_modules|node:internal|^node:|<anonymous>|internal\/|\/deps\/|site-packages|lib\/python/.test(f)
 
-function excerptAround(lines, index, before = 3, after = 12) {
-  return lines.slice(Math.max(0, index - before), index + after).join('\n').trim().slice(0, 4000)
-}
-
 // ---- Leitores: cada um devolve { tool, code, message, file, line, index } -----------------------
 
 function tsErrors(lines) {
@@ -293,6 +289,23 @@ export function outputSaysFailed(output) {
   return /\b(error|failed|fail)\b|✘|✖/i.test(withoutZeroCounts(stripAnsi(output)))
 }
 
+// Resumo do executor de testes dizendo quantos passaram e que nenhum falhou: node --test ("ℹ pass 3" e "ℹ fail 0"),
+// TAP ("# pass 3" e "# fail 0"), jest/vitest ("Tests: 3 passed") e pytest ("3 passed in 0.2s").
+const PASS_SUMMARY = [
+  (t) => /^\s*[ℹ#]\s*pass\s+[1-9]\d*\s*$/m.test(t) && /^\s*[ℹ#]\s*fail\s+0\s*$/m.test(t),
+  (t) => /^\s*Tests?:\s+.*\b[1-9]\d*\s+passed\b/m.test(t) && !/\b[1-9]\d*\s+failed\b/.test(t),
+  (t) => /\b[1-9]\d*\s+passed\b[^\n]*\bin\s+[\d.]+s\b/.test(t) && !/\b[1-9]\d*\s+(?:failed|errors?)\b/.test(t),
+]
+
+/**
+ * A saída filtrada (`npm test | grep pass`) ainda prova que passou quando o resumo do executor de testes ficou nela.
+ * Sem isso, a passada filtrada não conta e uma falha antiga do mesmo comando ficava "ainda falhando" para sempre.
+ */
+export function summarySaysPassed(output) {
+  const text = stripAnsi(output)
+  return !outputSaysFailed(text) && PASS_SUMMARY.some((test) => test(text))
+}
+
 function genericError(lines, kind) {
   const i = lines.findIndex((l) => /\b(error|erro|failed|falhou|fatal)\b/i.test(withoutZeroCounts(l)) && l.trim().length > 6)
   // Sem linha de erro, a última linha diz algo; menos um resumo de números ("ℹ duration_ms 29", "# pass 3").
@@ -303,7 +316,8 @@ function genericError(lines, kind) {
 
 /**
  * Separa os erros da saída de um comando.
- * @returns {{ tool, code, title, message, file, line, excerpt, fingerprint }[]}
+ * Da saída sai só a mensagem de cada erro (o trecho em volta, que pode ter código, fica no computador).
+ * @returns {{ tool, code, title, message, file, line, fingerprint }[]}
  */
 // Um comando pode misturar checagens (`npm run build` roda o tsc): o tipo do erro vem de quem o escreveu.
 const TOOL_KIND = { tsc: 'typecheck', eslint: 'lint', vitest: 'test', jest: 'test', pytest: 'test', esbuild: 'build', vite: 'build', ...LANG_TOOL_KIND }
@@ -355,7 +369,6 @@ export function parseErrors(output, { kind, root, failed = true, cwd = root } = 
       message,
       file,
       line: Number.isInteger(e.line) && e.line > 0 ? e.line : null,
-      excerpt: maskSecrets(excerptAround(lines, e.index)),
       fingerprint,
     })
     if (issues.length >= 50) break

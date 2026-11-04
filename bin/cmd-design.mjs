@@ -11,6 +11,7 @@ import { editedFile, sessionEditedFiles } from './hook-stop.mjs'
 import { contentLangNote } from './hook-events.mjs'
 import { walkFiles } from './cmd-overview.mjs'
 import { coverageLines } from './cmd-design-audit.mjs'
+import { patternLines } from './patterns.mjs'
 
 // ---- Design ----------------------------------------------------------------------------------
 
@@ -176,6 +177,7 @@ export async function designContext(args) {
   } catch (err) {
     out.push('', `(could not read the previous findings: ${err.message})`)
   }
+  out.push('', ...(await patternLines('design')))
   console.log(out.join('\n'))
 }
 

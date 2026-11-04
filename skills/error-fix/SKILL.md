@@ -43,6 +43,7 @@ then save the recipe (step 5 of "How to fix"), and tell the user the fix only ta
 4. If the command cannot be run (it needs something only the user has), close it by hand saying how you checked: `faundr error-resolve E-<n> --verified "<what changed and how you checked>"`.
 5. **Save the recipe** once the error is closed (by itself or by hand), so the next one is quick: `faundr error-recipe E-<n> --cause "<why it broke, in one sentence>" --fix "<what fixed it, general enough to apply to the same error in another file>"`. Skip it only when the fix is obvious from the message itself (a typo). Do not put keys, passwords or personal data in it.
 6. An error that is not to be fixed now (e.g. a test for something still to be built): **do not** archive it on your own; suggest the user archive it from the dashboard (Errors section) or with `faundr error-archive E-<n> --days 7`.
+7. If the E-n is not a real error (Faundr misread a success line, a test summary with 0 failures or its own command output): show the user why, and with their OK run `faundr error-archive E-<n> --not-an-error`. It stays archived for good and tells Faundr what not to capture.
 
 ## --all mode (all of them, without stopping)
 

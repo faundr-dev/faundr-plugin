@@ -1,4 +1,4 @@
-// Conta e ligação: faundr login, link, status, a barra de status (statusline), usage --debug e agents-md.
+// Conta e ligação: faundr login, logout, link, status, a barra de status (statusline), usage --debug e agents-md.
 
 import { spawn } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
@@ -21,14 +21,15 @@ export async function fetchProjects({ token, apiUrl }) {
     headers: { authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(8000),
   })
-  if (res.status === 401) throw new Error(t('Invalid token. Sign in again (/faundr:login).', 'Token inválido. Faça o login de novo (/faundr:login).'))
+  if (res.status === 401) throw new Error(t('Invalid token (deleted, or expired after 90 days without use). Sign in again (/faundr:login).', 'Token inválido (apagado, ou venceu depois de 90 dias sem uso). Faça o login de novo (/faundr:login).'))
   if (!res.ok) throw new Error(t(`API error (${res.status}): ${await res.text()}`, `Erro da API (${res.status}): ${await res.text()}`))
   return res.json()
 }
 
-// Login pelo navegador: o token nasce aqui e só o hash vai para o Faundr; o dono aprova o código no painel
-// (/autorizar) e o token passa a valer. Assim ele nunca aparece no chat. Enquanto espera, fica em
-// ~/.faundr/pending-login.json (só neste computador, como o config.json).
+// Login pelo navegador: o token nasce aqui e só o hash vai para o Faundr; o dono digita o código no painel
+// (/autorizar) e aprova, e o token passa a valer. Assim ele nunca aparece no chat. O link nunca leva o código:
+// com o código no link, quem rodou o login podia mandar o link para outra pessoa, que só clicava em Autorizar
+// e entregava a conta dela. Enquanto espera, fica em ~/.faundr/pending-login.json (só neste computador).
 const PENDING_LOGIN_FILE = path.join(CONFIG_DIR, 'pending-login.json')
 const LOGIN_WAIT_MS = 5 * 60_000
 
@@ -60,13 +61,13 @@ async function startLogin(apiUrl) {
   fs.mkdirSync(CONFIG_DIR, { recursive: true })
   const pending = { token, apiUrl, code, expiresAt: Date.now() + expiresInSeconds * 1000 }
   fs.writeFileSync(PENDING_LOGIN_FILE, JSON.stringify(pending), { mode: 0o600 })
-  const url = `${apiUrl}/autorizar?code=${code}`
+  const url = `${apiUrl}/autorizar`
   openBrowser(url)
   console.log(t(`Code: ${code}`, `Código: ${code}`))
   console.log(
     t(
-      `Opened the browser at ${url} (if it did not open, open the link). Check that the code is the same and click Authorize.`,
-      `Abri o navegador em ${url} (se não abriu, abra o link). Confira se o código é o mesmo e clique em Autorizar.`,
+      `Opened ${url} in the browser (if it didn't open, open the link). Type this code there and click Authorize. Only type a code shown in your own terminal, never one someone sent you.`,
+      `Abri ${url} no navegador (se não abriu, abra o link). Digite este código lá e clique em Autorizar. Só digite o código que aparece no seu próprio terminal, nunca um que alguém mandou.`,
     ),
   )
 }
@@ -90,10 +91,44 @@ async function waitLogin() {
   }
   console.log(
     t(
-      `Not authorized yet. Open ${pending.apiUrl}/autorizar?code=${pending.code}, click Authorize and run: faundr login --wait`,
-      `Ainda não autorizado. Abra ${pending.apiUrl}/autorizar?code=${pending.code}, clique em Autorizar e rode: faundr login --wait`,
+      `Not authorized yet. Open ${pending.apiUrl}/autorizar, type the code ${pending.code}, click Authorize and run: faundr login --wait`,
+      `Ainda não autorizado. Abra ${pending.apiUrl}/autorizar, digite o código ${pending.code}, clique em Autorizar e rode: faundr login --wait`,
     ),
   )
+}
+
+// faundr logout: apaga o token no Faundr (ele para de valer na hora) e neste computador (~/.faundr). Sem rede,
+// apaga só aqui e avisa que falta apagar no painel.
+export async function logout() {
+  const file = readJson(CONFIG_FILE) ?? {}
+  const { token, apiUrl } = loadConfig()
+  fs.rmSync(PENDING_LOGIN_FILE, { force: true })
+  if (!token) return console.log(t('This computer is not signed in to Faundr.', 'Este computador não está com login no Faundr.'))
+  let server
+  try {
+    const res = await fetch(`${apiUrl}/api/cli/login`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(8000),
+    })
+    server = res.ok ? 'deleted' : `error ${res.status}`
+  } catch (err) {
+    server = err.message
+  }
+  if (file.token) {
+    const { token: _, ...rest } = file
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(rest, null, 2), { mode: 0o600 })
+  }
+  console.log(
+    server === 'deleted'
+      ? t('Signed out: the token was deleted from Faundr and from this computer.', 'Logout feito: o token foi apagado do Faundr e deste computador.')
+      : t(
+          `Deleted the token from this computer, but could not delete it from Faundr (${server}). Delete it under Plugin token in the dashboard.`,
+          `Apaguei o token deste computador, mas não deu para apagar no Faundr (${server}). Apague em Token do plugin, no painel.`,
+        ),
+  )
+  if (process.env.FAUNDR_TOKEN)
+    console.log(t('The FAUNDR_TOKEN environment variable is still set: remove it too.', 'A variável de ambiente FAUNDR_TOKEN continua definida: tire ela também.'))
 }
 
 export function openBrowser(url) {

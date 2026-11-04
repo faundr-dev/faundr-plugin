@@ -11,6 +11,10 @@ import { globalRules, readMemoryIndex } from './rules.mjs'
 import { t } from './i18n.mjs'
 import { CONFIG_DIR, FAUNDR_FILE, findUp, flag, GRAPH_GUIDANCE, GRAPH_LOCK_MS, LINK_FILE, loadConfig, log, projectRoot, readJson, readStdin } from './cli-core.mjs'
 import { lockFile, markGraphDirty } from './hook-events.mjs'
+import { recordFailure } from './failures.mjs'
+
+// Uma checagem em segundo plano que passa disto já é lenta demais para o início da sessão.
+const SLOW_CHECK_MS = 120_000
 
 export async function runBackground(args) {
   const jobs = JSON.parse(args[0] ?? '[]')
@@ -18,8 +22,15 @@ export async function runBackground(args) {
     jobs.map(
       (job) =>
         new Promise((resolve) => {
+          const startedAt = Date.now()
           const child = spawn(process.execPath, [FAUNDR_FILE, ...job], { stdio: 'ignore', windowsHide: true })
-          child.on('exit', resolve)
+          child.on('exit', (code, signal) => {
+            const ms = Date.now() - startedAt
+            // Saída 1 é o erro que o próprio comando já anotou (faundr.mjs); outra saída ou sinal é queda fora dele.
+            if (signal || (code !== 0 && code !== 1)) recordFailure(job[0], 'crash', { name: signal ? 'Signal' : 'Exit', code: String(signal ?? `EXIT_${code}`) }, ms)
+            else if (ms > SLOW_CHECK_MS) recordFailure(job[0], 'slow', null, ms)
+            resolve()
+          })
           child.on('error', resolve)
         }),
     ),
@@ -75,6 +86,21 @@ export async function subagentStart() {
   if (additionalContext) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SubagentStart', additionalContext } }))
 }
 
+/**
+ * O mapa que vai para o painel: nomes, arquivos, linhas e ligações. O cabeçalho das funções (signature) e os
+ * comentários "NOTE:/WHY:/TODO:" (nós de racional) são texto do código: ficam só no mapa local.
+ */
+export function graphForUpload(graph, report) {
+  const rationale = graph.nodes.filter((n) => n.file_type === 'rationale')
+  const dropped = new Set(rationale.map((n) => n.id))
+  const nodes = graph.nodes.filter((n) => !dropped.has(n.id)).map(({ signature: _signature, ...n }) => n)
+  const links = graph.links.filter((l) => !dropped.has(l.source) && !dropped.has(l.target))
+  // O relatório cita nós pelo nome: o texto de um comentário vira só a marca.
+  let text = String(report ?? '')
+  for (const n of rationale) if (n.label) text = text.split(n.label).join('[comment]')
+  return { graph: { ...graph, nodes, links }, report: text }
+}
+
 // Gera o grafo na raiz do projeto ligado e envia graph.json + GRAPH_REPORT.md.
 export async function graph(args) {
   const quiet = args.includes('--quiet')
@@ -105,8 +131,7 @@ export async function graph(args) {
     const engine = await loadEngine()
     const result = await engine.buildProjectGraph(root)
     engine.writeOutputs(root, result)
-    const graphJson = result.graph
-    const report = result.report
+    const { graph: graphJson, report } = graphForUpload(result.graph, result.report)
 
     const res = await fetch(`${config.apiUrl}/api/cli/graph`, {
       method: 'POST',
