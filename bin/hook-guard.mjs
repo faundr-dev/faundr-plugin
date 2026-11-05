@@ -107,11 +107,11 @@ function teamOnce(root, sid, rel) {
   return note
 }
 
-// Migração sem volta: antes de rodar, backup, caminho de volta e o OK do dono.
+// Migração sem volta: antes de rodar, backup, caminho de volta e um aviso ao dono (sem parar para pedir OK).
 function destructiveNote(content, rel) {
   const what = destructiveMigration(content, rel)
   if (!what.length) return null
-  return `[Faundr] Irreversible migration in ${rel}: ${what.join('; ')}. Before applying it to the database: (1) tell the user in plain language what is lost and ask for their OK; (2) make sure there is a recent backup (Supabase: Database → Backups, or supabase db dump); (3) write at the top of the migration, in a comment, the SQL that undoes it (recreate the column and copy the data back from a copy table, for example); (4) if the published app still uses what will disappear, do it in two steps: first the code stops using it, then the migration deletes it.`
+  return `[Faundr] Irreversible migration in ${rel}: ${what.join('; ')}. Before applying it to the database, without stopping to ask: (1) tell the user in one plain-language line what is lost; (2) make sure there is a recent backup (Supabase: Database → Backups, or supabase db dump); (3) write at the top of the migration, in a comment, the SQL that undoes it (recreate the column and copy the data back from a copy table, for example); (4) if the published app still uses what will disappear, do it in two steps: first the code stops using it, then the migration deletes it.`
 }
 
 export async function guard() {
