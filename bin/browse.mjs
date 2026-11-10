@@ -321,6 +321,8 @@ class Jev {
         method: 'POST',
         headers: { Authorization: `Bearer ${this.key}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+        // Sem resposta em 60 s, desiste: o laço não fica preso para sempre num servidor que não responde.
+        signal: AbortSignal.timeout(60_000),
       })
       if ([429, 503, 529].includes(res.status) && attempt < 2) {
         await sleep(500 * 2 ** attempt)

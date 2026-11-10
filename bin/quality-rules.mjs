@@ -14,6 +14,7 @@ import { functionList, houseText, lineList, TEXT } from './quality-texts.mjs'
 import { TEST_PATH, GENERATED, read } from './quality-common.mjs'
 import { entryPoints, duplicates, projectTools, dockerfileRules, styleRules, projectRules, oldTodos, performanceRules } from './quality-project.mjs'
 import { memoryRules, houseRules, shortcutsIn } from './quality-house.mjs'
+import { bugFindings } from './bug-rules.mjs'
 export { memoryRules, houseRules, shortcutsIn } from './quality-house.mjs'
 
 // Linha só de comentário, por linguagem (não conta como linha de código).
@@ -70,6 +71,18 @@ export const RULES = {
   'desempenho/consulta-sem-limite': { kind: 'performance', severity: 'medium' },
   'desempenho/consulta-em-laco': { kind: 'performance', severity: 'medium' },
   'desempenho/fk-sem-indice': { kind: 'performance', severity: 'low' },
+  // Defeitos da varredura de 10/11/2026 (bug-rules.mjs).
+  'falha/limite-acima-de-1000': { kind: 'failure', severity: 'medium' },
+  'falha/lista-cortada-em-1000': { kind: 'failure', severity: 'medium' },
+  'falha/json-gravado-por-cima': { kind: 'failure', severity: 'medium' },
+  'falha/caminho-do-modulo': { kind: 'failure', severity: 'medium' },
+  'falha/rede-sem-prazo': { kind: 'failure', severity: 'low' },
+  'falha/promessa-solta': { kind: 'failure', severity: 'high' },
+  'falha/erro-vira-lista-vazia': { kind: 'failure', severity: 'low' },
+  'falha/tamanho-sem-conferir': { kind: 'failure', severity: 'high' },
+  'falha/randomuuid-sem-alternativa': { kind: 'failure', severity: 'medium' },
+  'desempenho/realtime-sem-espera': { kind: 'performance', severity: 'low' },
+  'desempenho/regex-de-email-lenta': { kind: 'performance', severity: 'medium' },
 }
 
 function makeCollector() {
@@ -147,6 +160,8 @@ async function analyzeFiles(root, files, c, errors) {
     }
     for (const h of result.hits) if (keepHit(h, rel)) add(h.rule, h.line, h.ctx)
     for (const r of house) if (r.files.test(rel)) for (const line of r.lines(text)) add(r.rule, line, r.ctx)
+    // Nos testes só o caminho do módulo (o teste quebra na pasta com acento); o resto é código que vai para o ar.
+    for (const { rule, line, ...ctx } of bugFindings(rel, text)) if (!test || rule === 'falha/caminho-do-modulo') add(rule, line, ctx)
     for (const s of shortcutsIn(text)) {
       out.shortcuts.push({ file: rel, ...s })
       if (!s.trigger) add('limpeza/atalho-sem-prazo', s.line, { text: s.text.slice(0, 80) })

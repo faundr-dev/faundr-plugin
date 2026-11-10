@@ -236,7 +236,145 @@ function paymentRules(rel, text, isRoute) {
 // Regras por arquivo: o que falta no arquivo inteiro (ex.: webhook que não confere a assinatura).
 function fileRules(rel, text) {
   const isRoute = SERVER_ROUTE.test(rel)
-  return [...webhookRules(rel, text, isRoute), ...paymentRules(rel, text, isRoute), ...dockerRules(rel, text)]
+  const js = /\.(m?[jt]sx?|c[jt]s)$/i.test(rel)
+  return [
+    ...webhookRules(rel, text, isRoute),
+    ...paymentRules(rel, text, isRoute),
+    ...dockerRules(rel, text),
+    ...(js && isRoute ? [...storagePathRules(text), ...dbErrorToClientRules(text)] : []),
+    ...(js ? secretMaskRules(text) : []),
+  ]
+}
+
+// Começo da função em que `index` está (para olhar só o que vem antes dentro dela).
+function functionStart(text, index) {
+  const re = /\n(?:export\s+)?(?:default\s+)?(?:async\s+)?function\b|\n(?:export\s+)?const\s+[\w$]+\s*=\s*(?:async\s*)?(?:\([^)]*\)|[\w$]+)\s*(?::[^=\n]+)?=>/g
+  let start = 0
+  for (const m of text.slice(0, index).matchAll(re)) start = m.index
+  return start
+}
+
+// Link assinado ou download do Storage com um caminho que vem de um campo (linha do banco, corpo do pedido), sem
+// conferir antes que ele é da pasta certa: no servidor, com a chave de serviço, o Storage assina qualquer caminho.
+function storagePathRules(text) {
+  const out = []
+  const re = /\.(createSignedUrls?|download)\(\s*(?:String\(\s*)?([A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*|\[\s*['"][\w$-]+['"]\s*\])+)/g
+  for (const m of text.matchAll(re)) {
+    if (!/\.storage\b|storage\s*\.\s*from\s*\(/.test(text.slice(Math.max(0, m.index - 300), m.index))) continue
+    const before = text.slice(functionStart(text, m.index), m.index)
+    // Conferiu o prefixo (pasta do projeto/usuário) ou passou por uma função de checagem.
+    if (/\.startsWith\(|\.match\(|\.test\(|allowedPath|assert\w*Path|check\w*Path|isOwn\w*/i.test(before)) continue
+    out.push({
+      rule_id: 'storage-path-from-data',
+      severity: 'medium',
+      cwe: 'CWE-639',
+      index: m.index,
+      title: t('File link signed for a path that comes from data, without checking the folder', 'Link de arquivo assinado para um caminho vindo de dado, sem conferir a pasta'),
+      detail: t(
+        `The server ${m[1] === 'download' ? 'downloads' : 'signs a link to'} a Storage file using the path in ${m[2]} (a database field or something the request sent) and does not check before that the path is inside the folder of this project or user.`,
+        `O servidor ${m[1] === 'download' ? 'baixa' : 'assina um link para'} um arquivo do Storage usando o caminho em ${m[2]} (um campo do banco ou algo que o pedido mandou) e não confere antes que o caminho fica na pasta deste projeto ou usuário.`,
+      ),
+      impact: t(
+        "If someone manages to put another path in that field (another team's folder, another user's file), the server, with the service key, hands over the file that person should not see.",
+        'Se alguém conseguir pôr outro caminho nesse campo (a pasta de outro time, o arquivo de outro usuário), o servidor, com a chave de serviço, entrega o arquivo que essa pessoa não devia ver.',
+      ),
+      fix: t(
+        'Before signing, accept only a path that starts with the folder of the owner (e.g. if (!path.startsWith(`${projectId}/`) || path.includes("..")) return 404), and do not let the browser write the column that keeps the path.',
+        'Antes de assinar, aceite só caminho que começa com a pasta do dono (ex.: if (!path.startsWith(`${projectId}/`) || path.includes("..")) devolva 404), e não deixe o navegador gravar a coluna que guarda o caminho.',
+      ),
+    })
+  }
+  return out
+}
+
+// Chamadas que viram resposta HTTP (corpo ou erro com status).
+const RESPONSE_CALL = /(?:\b(?:Http|Api|Response|Request|Client|Server)\w*Error|\bcreateError|\bjson|\bResponse|\.send|\.json|(?<![\w.])error(?=\s*\(\s*\d{3}))\s*\(/g
+
+// Mensagem de erro do banco (Supabase/Postgres) devolvida para o navegador: mostra nome de tabela, coluna e regra.
+function dbErrorToClientRules(text) {
+  const aliases = new Set()
+  // const { data, error } = await db.from(…) — e o par em Promise.all: const [{ error: a }, { error: b }] = await …
+  for (const m of text.matchAll(/(?:const|let)\s*(\{[^}]*\}|\[[^\]]*\])\s*=\s*await\s+([\s\S]{0,400})/g)) {
+    const call = m[2].split(/\n\s*\n|;/)[0]
+    if (/\.auth\./.test(call) || !/\.(from|rpc|storage)\b/.test(call)) continue
+    for (const err of m[1].matchAll(/(?<![\w$.])error\b(?!\s*\.)(?:\s*:\s*([\w$]+))?/g)) aliases.add(err[1] ?? 'error')
+  }
+  if (!aliases.size) return []
+  const names = [...aliases].map((a) => a.replace(/\$/g, '\\$')).join('|')
+  const access = new RegExp(`(?<![\\w.$])(?:${names})(?:\\s*\\?\\?\\s*[\\w$]+)?\\s*\\)?!?\\??\\.message\\b`, 'g')
+  const out = []
+  for (const m of text.matchAll(access)) {
+    // Dentro de uma chamada que vira resposta: a última aberta antes, ainda sem fechar.
+    const from = Math.max(0, m.index - 400)
+    let inside = false
+    for (const c of text.slice(from, m.index).matchAll(RESPONSE_CALL)) {
+      let depth = 0
+      let open = true
+      for (const ch of text.slice(from + c.index + c[0].length - 1, m.index)) {
+        if (ch === '(') depth++
+        else if (ch === ')' && --depth === 0) open = false
+      }
+      if (open) inside = true
+    }
+    if (!inside || /console\.\w+\(/.test(lineText(text, m.index))) continue
+    out.push({
+      rule_id: 'db-error-message-to-client',
+      severity: 'low',
+      cwe: 'CWE-209',
+      index: m.index,
+      title: t('Database error message sent to the browser', 'Mensagem de erro do banco enviada ao navegador'),
+      detail: t(
+        "The route answers with error.message from a database query (Supabase/Postgres). That text says the name of tables, columns, constraints and sometimes the value that failed.",
+        'A rota responde com o error.message de uma consulta ao banco (Supabase/Postgres). Esse texto diz o nome de tabelas, colunas, regras e às vezes o valor que falhou.',
+      ),
+      impact: t(
+        "Whoever is probing the app learns how the database is built and which rule blocked them, which makes it easier to find a hole; the person using it sees a technical message they do not understand.",
+        'Quem está sondando o app aprende como o banco é montado e qual regra barrou, o que facilita achar uma brecha; quem usa vê uma mensagem técnica que não entende.',
+      ),
+      fix: t(
+        'Write error.message only to the server log (console.error) and answer with a fixed message ("Could not save. Try again."); for known cases (duplicate, 23505) answer with your own text.',
+        'Grave o error.message só no log do servidor (console.error) e responda com uma mensagem fixa ("Não deu para salvar. Tente de novo."); para casos conhecidos (duplicado, 23505) responda com um texto seu.',
+      ),
+    })
+  }
+  return out
+}
+
+// Código que tenta esconder senhas e chaves com um padrão que começa em \b antes de "password", "secret", "token"…:
+// o \b não existe entre "_" (ou letra) e a palavra, então PGPASSWORD=, DB_PASSWORD=, STRIPE_SECRET_KEY= e
+// SUPABASE_ACCESS_TOKEN= passam sem máscara.
+function secretMaskRules(text) {
+  // Só padrão de máscara: procura "nome = valor" e troca por asteriscos ou "redacted".
+  const maskLine = (line) => /\[:=\]|\\s\*[:=]/.test(line) && /\*\*\*|redact|\[hidden\]|\bmask/i.test(line)
+  // Já tem um padrão de máscara que pega o nome no meio de outro (ex.: [A-Za-z0-9_]*(?:PASSWORD|…) ou \w*(?:password…).
+  const wide = /(?:\[A-Za-z0-9_\]|\[A-Z0-9_\]|\[\\w\]|\\w)\*\(\?:[^)]{0,60}(?:password|secret|token)/i
+  if (text.split('\n').some((line) => wide.test(line) && maskLine(line))) return []
+  const out = []
+  const re = /\\b\(*(?:\?:)?(?:[\w[\]?|-]*\|)?(?:password|passwd|pwd|secret|token|api\[?_)/gi
+  for (const m of text.matchAll(re)) {
+    if (!maskLine(lineText(text, m.index))) continue
+    out.push({
+      rule_id: 'secret-mask-word-boundary',
+      severity: 'medium',
+      cwe: 'CWE-532',
+      index: m.index,
+      title: t('Secret mask skips names like DB_PASSWORD= and PGPASSWORD=', 'Máscara de segredo deixa passar nomes como DB_PASSWORD= e PGPASSWORD='),
+      detail: t(
+        'The pattern that hides passwords and keys starts with \\b before the word (password, secret, token…). \\b does not match between "_" or a letter and the word, so variables like PGPASSWORD=, export DB_PASSWORD=, STRIPE_SECRET_KEY= and SUPABASE_ACCESS_TOKEN= are not masked.',
+        'O padrão que esconde senhas e chaves começa com \\b antes da palavra (password, secret, token…). O \\b não casa entre "_" ou letra e a palavra, então variáveis como PGPASSWORD=, export DB_PASSWORD=, STRIPE_SECRET_KEY= e SUPABASE_ACCESS_TOKEN= saem sem máscara.',
+      ),
+      impact: t(
+        'The secret that was supposed to be hidden goes in full to the log, the server or the report (for example, a command like "PGPASSWORD=… psql").',
+        'O segredo que devia ser escondido vai inteiro para o log, o servidor ou o relatório (por exemplo, um comando como "PGPASSWORD=… psql").',
+      ),
+      fix: t(
+        'Also accept the word in the middle of the name: (?<![A-Za-z0-9_])([A-Za-z0-9_]*(?:password|passwd|secret|token|_key|key_)[A-Za-z0-9_]*\\s*[:=]\\s*)\\S+ → "$1***", and test with PGPASSWORD=, DB_PASSWORD= and STRIPE_SECRET_KEY=.',
+        'Aceite também a palavra no meio do nome: (?<![A-Za-z0-9_])([A-Za-z0-9_]*(?:password|passwd|secret|token|_key|key_)[A-Za-z0-9_]*\\s*[:=]\\s*)\\S+ → "$1***", e teste com PGPASSWORD=, DB_PASSWORD= e STRIPE_SECRET_KEY=.',
+      ),
+    })
+    break
+  }
+  return out
 }
 
 /** Dockerfile: a imagem final (a do último FROM) roda como root quando nenhum USER troca o usuário depois dele. */

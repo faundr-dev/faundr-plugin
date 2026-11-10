@@ -147,6 +147,8 @@ function pythonDeps(root, files) {
 
 // Temas do catálogo (plugin/skills/security/catalog/<tema>.md) e quando cada um vale.
 const CI_FILE = /^\.github\/workflows\/.+\.ya?ml$|(^|\/)\.gitlab-ci\.ya?ml$|^\.circleci\/|(^|\/)bitbucket-pipelines\.yml$|(^|\/)azure-pipelines\.ya?ml$/
+// Plugin ou integração de agente: hooks, MCP, skills e plugins do Claude Code/Codex.
+const AGENT_FILE = /(^|\/)(hooks\/hooks\.json|\.mcp\.json|mcp\.json|\.claude-plugin\/plugin\.json|\.codex-plugin\/plugin\.json|SKILL\.md)$/
 const PACKAGE_MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt|pyproject\.toml|composer\.json|go\.mod|Cargo\.toml|Gemfile|pom\.xml|build\.gradle(\.kts)?|pubspec\.yaml)$/
 
 // Tema do catálogo e quando ler: pela stack detectada ou pelos arquivos do projeto.
@@ -160,12 +162,14 @@ const TOPICS = [
   ['data-lifecycle', () => true],
   ['least-privilege', () => true],
   ['logging-and-monitoring', () => true],
-  ['browser', (_, files) => files.some((f) => /\.(jsx|tsx|vue|svelte|astro|html)$/.test(f))],
-  ['ci-and-dependencies', (_, files) => files.some((f) => CI_FILE.test(f) || PACKAGE_MANIFEST.test(f))],
+  // Extensão de navegador (manifest.json) e SDK servido para sites também são "navegador", mesmo sem telas.
+  ['browser', (_, files) => files.some((f) => /\.(jsx|tsx|vue|svelte|astro|html)$/.test(f) || /(^|\/)manifest\.json$/.test(f))],
+  ['ci-and-dependencies', (_, files) => files.some((f) => CI_FILE.test(f) || PACKAGE_MANIFEST.test(f) || /(^|\/)scripts\/(publish|release|deploy)[^/]*$/.test(f))],
   ['supabase', (s) => s.includes('Supabase')],
   ['nextjs', (s) => s.includes('Next.js')],
   ['firebase', (s) => s.includes('Firebase')],
-  ['ai-and-llm', (s) => s.includes('AI / LLM')],
+  // Plugin de agente (hooks, MCP) põe texto no contexto de uma IA mesmo sem SDK de LLM: injeção de prompt vale.
+  ['ai-and-llm', (s, files) => s.includes('AI / LLM') || files.some((f) => AGENT_FILE.test(f))],
   ['php-laravel', (s) => s.includes('PHP') || s.includes('Laravel') || s.includes('Symfony')],
   ['python-web', (s) => s.includes('Django') || s.includes('Flask') || s.includes('FastAPI')],
   ['flutter', (s) => s.includes('Flutter') || s.includes('Dart')],

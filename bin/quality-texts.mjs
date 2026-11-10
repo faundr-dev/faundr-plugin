@@ -5,8 +5,9 @@
 import { t } from './i18n.mjs'
 import { lineWord, TEXT_CODE } from './quality-texts-code.mjs'
 import { TEXT_PROJECT } from './quality-texts-project.mjs'
+import { TEXT_BUGS } from './quality-texts-bugs.mjs'
 
-export const TEXT = { ...TEXT_CODE, ...TEXT_PROJECT }
+export const TEXT = { ...TEXT_CODE, ...TEXT_PROJECT, ...TEXT_BUGS }
 
 /** "Linhas: 3, 8, 12." no fim do detalhe (até 12 linhas). */
 export const lineList = (lines) => (lines.length ? ` ${t('Lines', 'Linhas')}: ${lines.slice(0, 12).join(', ')}${lines.length > 12 ? '…' : ''}.` : '')

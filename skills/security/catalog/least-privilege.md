@@ -1,7 +1,7 @@
 # Least privilege (each key, role and function with only the power it needs)
 When to read: always. Principle of least privilege: if a piece is compromised (a leaked key, a tricked function, a careless admin), the damage is limited to what it needed to do. Several cases already have their own check; here is the map, plus the ones that aren't anywhere else.
 
-Already covered in other topics (read them there): `service_role` on the client and without an owner filter (`supabase.md`), exposed `security definer` function (`supabase.md`), admin action available to a regular user (`access-and-idor.md` → `bfla-acao-admin`), AI tools with too much power (`ai-and-llm.md`), CI token with too much permission (`ci-and-dependencies.md`), container running as root (automatic check).
+Already covered in other topics (read them there): `service_role` on the client and without an owner filter (`supabase.md`), exposed `security definer` function and its role guard with NULL (`supabase.md` → `supabase-rpc-security-definer`, `supabase-guarda-com-null`), columns the client should not write on INSERT/UPDATE (`supabase.md` → `supabase-rls-sem-update`), server with service_role signing a file path it did not check (`access-and-idor.md` → `arquivo-e-url-assinada`), admin action available to a regular user (`access-and-idor.md` → `bfla-acao-admin`), AI tools with too much power (`ai-and-llm.md`), CI token with too much permission (`ci-and-dependencies.md`), container running as root (automatic check).
 
 Golden rule: for each credential and each role, write down what it **needs** to do; anything beyond that is risk with no gain.
 
@@ -9,9 +9,18 @@ Golden rule: for each credential and each role, write down what it **needs** to 
 - Typical severity: high when the function changes data or returns other people's data; medium when it only exposes structure.
 - Where to look: Supabase migrations. New functions in the `public` schema are executable by `anon` and `authenticated` by default (Postgres grants `EXECUTE` to `public`); tables in `public` are reachable through the API if RLS allows. Grep: `create function public.`, `grant .* to anon`, `grant all`, `revoke execute`.
 - How to confirm by reading the code: for each function in `public`, does the app call it as an RPC? If it is internal only (trigger, job, called by the server), is there a `revoke execute on function ... from public, anon, authenticated`? Do functions used only by logged-in users have `revoke ... from anon`?
-- Ruled out if: the `revoke` exists for the internal functions, or they live in a schema not exposed by the API (e.g., `private`), or the function checks the caller right at the start.
-- Not ruled out by: "the front end doesn't call this function" (the REST API calls any exposed function).
+- Ruled out if: the `revoke` exists for the internal functions, or they live in a schema not exposed by the API (e.g., `private`), or the function checks the caller right at the start (with a guard where NULL fails: see `supabase.md` → `supabase-guarda-com-null`).
+- Not ruled out by: "the front end doesn't call this function" (the REST API calls any exposed function); `revoke … from public, anon` on a function that acts on an organization (any free account is `authenticated`, members or not, so the function itself must check membership).
 - How to fix: `revoke execute on function public.f(...) from public, anon, authenticated;` for internal functions, or move them to a `private` schema outside the API.
+- CWE: CWE-269
+
+## banco-grant-de-tabela-inteira — The app's role can write every column of the table
+- Typical severity: medium on its own; high or critical when a column decides ownership, tenant, plan, a file path the server later trusts, or a flag that triggers work (see `supabase.md` → `supabase-rls-sem-update` for how to confirm).
+- Where to look: Supabase/Postgres default privileges (new tables in `public` come with `insert, update, delete` for `anon` and `authenticated`); `grant all on table`; migrations that never `revoke` table-wide privileges and grant per column.
+- How to confirm by reading the code: for each table the client writes directly, compare the columns the screen edits with the columns the role is allowed to write. RLS limits rows, never columns.
+- Ruled out if: `revoke insert, update on t from anon, authenticated` followed by `grant insert (…)`/`grant update (…)` with only the editable columns; or the table is written only by the server.
+- Not ruled out by: an RLS policy that restricts the row; a column `default` (the client can send its own value).
+- How to fix: `revoke insert, update on public.t from anon, authenticated; grant insert (title, body) on public.t to authenticated; grant update (title, body) on public.t to authenticated;`
 - CWE: CWE-269
 
 ## chave-de-terceiro-com-poder-total — External service API key with every permission

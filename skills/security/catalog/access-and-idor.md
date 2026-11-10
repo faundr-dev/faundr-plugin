@@ -119,9 +119,35 @@ Golden rule: every ID that comes from the client (path, query, body, header, uns
 
 ## arquivo-e-url-assinada — File download by key/URL without a check
 - Typical severity: high (personal documents, invoices, medical exams).
-- Where to look: routes `download`, `file`, `attachment`, signed URL generation (`createSignedUrl`, S3's `getSignedUrl`, Firebase's `getDownloadURL`) from a `path` or `key` coming from the client.
-- How to confirm by reading the code: before signing/serving, does the code check that the file belongs to the user (a database record with an owner, or a path prefix equal to the validated `user.id`)?
-- Ruled out if: the path is built by the server from the user's record, or there is an owner check on the associated record, or the bucket policy restricts by `auth.uid()` (see `supabase.md`).
-- Does not rule out: a signed URL with long validity sent to public places; a `${userId}/${file}` path with `userId` coming from the client.
-- How to fix: fetch the file's record with an owner filter and only then generate a short signed URL (minutes).
+- Where to look: routes `download`, `file`, `attachment`, signed URL generation (`createSignedUrl`, S3's `getSignedUrl`, Firebase's `getDownloadURL`), `storage.download(`, `GetObjectCommand` from a `path` or `key` coming from the client, **or read from a database column the client can write** (`row.image_path`, `attachment_key`, `avatar_url`), with a full-power client (service_role, admin SDK, bucket credentials).
+- How to confirm by reading the code: before signing/serving, does the code check that the file belongs to the user (a database record with an owner, or a path prefix equal to the validated `user.id`/tenant id)? When the path comes from a row, find who writes that column: if a member can INSERT/UPDATE it (no per-column grant, see `supabase.md` → `supabase-rls-sem-update`), they store `<other-tenant>/secret.png` in their own row and the server, which bypasses the bucket policies, signs it for them. That is second-order: the row is theirs, the file is not.
+- Ruled out if: the path is built by the server from validated ids (`${projectId}/${uuid}.png`) and never stored by the client; or the server checks, right before signing, that the path starts with the tenant of the row it came from and has no `..`; or the signing uses the user's client so the bucket policy applies (see `supabase.md`).
+- Does not rule out: a signed URL with long validity sent to public places; a `${userId}/${file}` path with `userId` coming from the client; "the row belongs to the caller" (the path inside it may not); correct Storage policies when the signing client is service_role.
+- How to fix: fetch the file's record with an owner filter, check the prefix, and only then generate a short signed URL (minutes).
+  ```ts
+  // bad: trusts whatever path the member saved in their own row
+  const { data } = await admin.storage.from('shots').createSignedUrl(row.image_path, 3600)
+  // good: the path must live under the row's own tenant
+  const p = row.image_path
+  if (!p || !p.startsWith(`${row.project_id}/`) || p.includes('..')) return null
+  const { data } = await admin.storage.from('shots').createSignedUrl(p, 300)
+  ```
 - CWE: CWE-639
+
+## acao-sobre-item-de-colega — Any member closes, consumes or deletes a colleague's item
+- Typical severity: medium; high when the item is an approval, a request addressed to someone, a payment, an invite or evidence (a member cancels what was addressed to the owner, or deletes the screenshot a colleague attached).
+- Where to look: actions inside a team where the item has an author and/or a recipient: `close`, `cancel`, `resolve`, `dismiss`, `accept`, `consume`, `markDone`, `delete` on requests, tasks, comments, invites, approvals, attachments; the matching RLS UPDATE/DELETE policies and RPCs.
+- How to confirm by reading the code: the check is often only "is a member of the project" (`can_edit(project_id)`), the same one used for reading. For each action that ends or removes an item someone else created or that was addressed to someone, see whether the code also asks who the caller is in relation to the item: author, recipient, or admin/owner. Check the server route, the RLS policy and the RPC: all paths to the same effect.
+- Ruled out if: the condition is `created_by = auth.uid() or assignee_id = auth.uid() or is_admin(org)` (in the policy/RPC or in the server handler before the write), on every path; or the product explicitly wants any member to close any item (record it as clean with that decision).
+- Does not rule out: the button only appears for the author; the check in the route while the table's UPDATE policy lets any member set `status = 'closed'` directly.
+- How to fix:
+  ```sql
+  -- bad: any member closes anyone's request
+  create policy "close" on public.requests for update to authenticated
+    using (public.is_member(project_id));
+  -- good: author, recipient, or admin
+  create policy "close" on public.requests for update to authenticated
+    using (created_by = (select auth.uid()) or assignee_id = (select auth.uid())
+           or public.is_admin(project_id));
+  ```
+- CWE: CWE-285

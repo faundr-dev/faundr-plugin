@@ -5,6 +5,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { faundrPath } from './paths.mjs'
+import { readJsonObject, writeJsonAtomic } from './json-file.mjs'
 import { matchesPath, stemsOf } from './rules.mjs'
 
 const file = (root) => faundrPath(root, 'workflows')
@@ -119,13 +120,10 @@ export function workflowsForRequest(root, sid, prompt) {
   const again = hits.filter((w) => seen.ids.includes(w.id))
   const maybe = workflowsMaybe(list, prompt, [...hits.map((w) => w.id), ...(seen.maybe ?? [])])
   if (!hits.length && !maybe.length) return null
-  fs.writeFileSync(
+  writeJsonAtomic(
     faundrPath(root, 'state'),
-    JSON.stringify(
-      { ...readState(root), workflowsShown: { session: sid, ids: [...new Set([...seen.ids, ...fresh.map((w) => w.id)])], maybe: [...(seen.maybe ?? []), ...maybe.map((w) => w.id)] } },
-      null,
-      2,
-    ),
+    { ...readJsonObject(faundrPath(root, 'state')), workflowsShown: { session: sid, ids: [...new Set([...seen.ids, ...fresh.map((w) => w.id)])], maybe: [...(seen.maybe ?? []), ...maybe.map((w) => w.id)] } },
+    2,
   )
   return [workflowNote(fresh, 'This request'), againNote(again), maybeNote(maybe)].filter(Boolean).join('\n\n')
 }
@@ -156,9 +154,10 @@ export function workflowsOnce(root, sid, pick, where) {
   const shown = state.workflowsShown?.session === sid ? state.workflowsShown : { ids: [] }
   const items = pick(readWorkflows(root), shown.ids)
   if (!items.length) return null
-  fs.writeFileSync(
+  writeJsonAtomic(
     faundrPath(root, 'state'),
-    JSON.stringify({ ...readState(root), workflowsShown: { ...shown, session: sid, ids: [...shown.ids, ...items.map((w) => w.id)] } }, null, 2),
+    { ...readJsonObject(faundrPath(root, 'state')), workflowsShown: { ...shown, session: sid, ids: [...shown.ids, ...items.map((w) => w.id)] } },
+    2,
   )
   return workflowNote(items, where)
 }

@@ -119,7 +119,7 @@ export function normalizeMessage(message) {
     .toLowerCase()
     .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '<uuid>')
     .replace(/\b[0-9a-f]{12,}\b/g, '<hex>')
-    .replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '<email>')
+    .replace(/(?<![\w.+-])[\w.+-]+@[\w-]+\.[\w.]+/g, '<email>')
     .replace(/https?:\/\/\S+/g, '<url>')
     .replace(/(?:[a-z]:)?[\\/][\w .@-]+(?:[\\/][\w .@-]+)+/gi, (p) => `<path:${p.split(/[\\/]/).pop()}>`)
     .replace(/\b\d+(\.\d+)?\s*(ms|s|kb|mb|b)\b/g, '<n>$2')

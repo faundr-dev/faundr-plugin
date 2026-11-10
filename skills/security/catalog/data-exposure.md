@@ -14,11 +14,17 @@ Calibration: missing headers, version in a header and source maps are, on their 
 
 ## erro-com-stack-trace — Internal details in the error returned to the client
 - Typical severity: low; medium if the error exposes SQL, paths, secrets in connection messages or other users' data.
-- Where to look: `catch (e) { return Response.json({ error: e }) }`, `res.status(500).json({ error: err.message, stack: err.stack })`, Supabase `return { error: error }` passed through raw, Express error handler with `err.stack`, `NODE_ENV` not set in production, Hono `app.onError((e, c) => c.text(e.stack))`.
-- How to confirm by reading the code: see what the global handler and the `catch` blocks return.
-- Ruled out if: generic message to the client and details only in the server log (without secrets); or only under `NODE_ENV === 'development'` with production configured.
-- Not ruled out by: "it's only in dev" with no environment check in the code.
+- Where to look: `catch (e) { return Response.json({ error: e }) }`, `res.status(500).json({ error: err.message, stack: err.stack })`, Supabase `return { error: error }` passed through raw, **`error.message` from the database or PostgREST returned to the browser** (`if (error) return json({ error: error.message }, 400)`), Express error handler with `err.stack`, `NODE_ENV` not set in production, Hono `app.onError((e, c) => c.text(e.stack))`.
+- How to confirm by reading the code: see what the global handler and the `catch` blocks return. Database messages are not neutral: they carry table, column, constraint, policy and function names, and sometimes values (`Key (email)=(ana@x.com) already exists`, `new row violates row-level security policy for table "invoices"`, the text of a `raise exception` that includes ids). That maps the schema for an attacker and can confirm other people's data exists.
+- Ruled out if: generic message to the client and details only in the server log (without secrets); or a mapping from known error codes (`23505` → "already exists") to fixed messages; or only under `NODE_ENV === 'development'` with production configured.
+- Not ruled out by: "it's only in dev" with no environment check in the code; "it's a 400, not a 500" (the message is the same).
 - How to fix: `console.error(e); return Response.json({ error: 'Internal error' }, { status: 500 })`.
+  ```ts
+  // bad
+  if (error) return json({ error: error.message }, { status: 400 })
+  // good
+  if (error) { log.error(error); return json({ error: error.code === '23505' ? 'Already exists' : 'Could not save' }, { status: 400 }) }
+  ```
 - CWE: CWE-209
 
 ## logs-com-segredo-ou-pii — Log with password, token, key or personal data
@@ -28,6 +34,24 @@ Calibration: missing headers, version in a header and source maps are, on their 
 - Ruled out if: structured logs with redaction (`pino` with `redact: ['req.headers.authorization', 'password']`) or only non-sensitive fields.
 - Not ruled out by: a "temporary debug" log already committed.
 - How to fix: remove the log or redact fields.
+- CWE: CWE-532
+
+## mascara-de-segredo-incompleta — Redaction exists, but secrets in commands and env assignments get through
+- Typical severity: high when the masked text leaves the machine (telemetry, a server that stores command history, error reports, AI prompts, shared logs) and the missed forms are common (database passwords, payment and cloud keys); medium when it stays local.
+- Where to look: functions named `mask*`, `redact*`, `scrub*`, `sanitize*`, `beforeSend` in Sentry; the regex inside them; tools that capture shell commands, prompts or process arguments (agent hooks, CLIs, CI log uploaders, shell history sync). Grep: `\\b(password|secret|token|api_key)`, `redact:`, `beforeSend`.
+- How to confirm by reading the code: run the regex in your head against the forms a real command uses: `PGPASSWORD=s3cr3t psql …`, `export DB_PASSWORD=…`, `STRIPE_SECRET_KEY=sk_live_… npm start`, `SUPABASE_ACCESS_TOKEN=… supabase db push`, `AWS_SECRET_ACCESS_KEY=…`, `mysql -u root -pS3nha`, `curl -H "Authorization: Bearer …"`, `postgres://user:pass@host/db`, `--password=…`, `-p S3nha`. The classic miss is `\b` before the keyword: `_` is a word character, so `\bpassword` does not match inside `PGPASSWORD` or `DB_PASSWORD`. Also check case sensitivity (`/i`), whether masking runs **before** truncation and sending (not only on display), and whether every path that sends text uses the same function.
+- Ruled out if: the pattern catches any variable name **containing** a secret word, case-insensitive, plus the URL, header and `-p` forms; there is a test with those cases; every outbound path calls it.
+- Not ruled out by: a test suite that only covers `password=x` and `api_key: x`; "the server is ours" (the stored copy is still a leak, readable by everyone with access to it).
+- How to fix:
+  ```js
+  // bad: \b does not match after "_" or inside PGPASSWORD
+  s.replace(/\b(password|secret|api_key|access_token)\s*[:=]\s*\S+/gi, '$1=***')
+  // good: any NAME containing the word, plus URL credentials, bearer and mysql -p
+  s.replace(/(?<![A-Za-z0-9])([A-Za-z0-9_]*(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN|API_?KEY|PRIVATE_?KEY)[A-Za-z0-9_]*)\s*[:=]\s*("[^"]*"|'[^']*'|\S+)/gi, '$1=***')
+   .replace(/(\w+:\/\/[^\s:/@]+:)[^\s@]+@/g, '$1***@')
+   .replace(/(Bearer\s+)[\w.~+/=-]+/gi, '$1***')
+   .replace(/(\s-p)(?!\s)\S+/g, '$1***')
+  ```
 - CWE: CWE-532
 
 ## endpoint-de-debug-ou-teste — Debug, seed, temporary admin or test route exposed

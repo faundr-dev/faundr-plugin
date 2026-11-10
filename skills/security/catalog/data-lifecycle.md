@@ -61,7 +61,41 @@ Golden rule: every copy of the data (cache, search index, exported file, signed 
 - Typical severity: medium (LGPD: the deletion request must be honored; see `/faundr:privacy`); high if the session or keys keep working.
 - Where to look: delete-account route, `auth.admin.deleteUser`, `on delete cascade`/`set null` in the migrations, files in storage, external services (Stripe, email marketing, analytics).
 - How to confirm by reading the code: see what happens to the tables that point to the user, their files, sessions and API keys and their records in external services.
-- Ruled out if: cascade or explicit cleanup in the tables, files deleted, sessions revoked, and what is kept by law is documented.
+- Ruled out if: cascade or explicit cleanup in the person's own tables, files deleted (see `arquivo-orfao-no-storage`), sessions revoked, and what is kept by law is documented.
 - Not ruled out by: deleting only the `auth.users`/`profiles` row and leaving the rest; hiding the account without deleting it.
+- The opposite mistake: a cascade from the user on rows that belong to the **team** (a project the person created inside an organization) deletes everyone's data when one person leaves. See `supabase.md` → `supabase-cascade-apaga-dado-do-time`.
 - How to fix: a deletion routine that walks through tables, storage and external services, and revokes sessions and keys.
+- CWE: CWE-459
+
+## retencao-prometida-nao-implementada — The plan, terms or privacy policy promise deletion after N days, and the cleanup does not do it
+- Typical severity: medium (the promise to customers and to the law is broken: data that should be gone leaks in the next incident or export); high when the data is personal or sensitive, or the promise is in a contract or privacy policy.
+- Where to look: what is promised (plan limits like `history_days`/`retention_days`, pricing page, privacy policy, terms, code comments) and what runs (cron jobs, `pg_cron.schedule`, scheduled functions, `prune_*`/`cleanup*`/`purge*` functions, TTL indexes, bucket lifecycle rules).
+- How to confirm by reading the code: write down the list of tables and files the promise covers (by its wording: "requests, answers and sessions", "logs", "uploads"). Then, for each, find the line in the cleanup that deletes it, with the right period per plan. Tables added after the job was written are the usual gap (sessions, usage, runs, snapshots, checkpoints, expired login codes), and so are files in storage (see `arquivo-orfao-no-storage`). Also check that the job is actually scheduled and that its errors are not swallowed.
+- Ruled out if: every category in the promise has a matching delete in a scheduled job (or a TTL), the period follows the plan, and storage files are included; or the promise was adjusted to what the job really does.
+- Not ruled out by: a job that cleans "the big tables"; a comment saying "retention handled elsewhere" without the place.
+- How to fix: a single cleanup function with one line per table (and a storage sweep), a test that lists the tables with `created_at` and fails when one is not covered, and the promise worded to match.
+  ```sql
+  -- bad: promises "requests, answers and sessions"; cleans only events
+  delete from public.events where created_at < now() - make_interval(days => p.history_days);
+  -- good: every category in the promise has its line
+  delete from public.events   where …; delete from public.sessions where …;
+  delete from public.requests where …; delete from public.answers  where …;
+  ```
+- CWE: CWE-459
+
+## arquivo-orfao-no-storage — The row is deleted and the file stays in storage
+- Typical severity: medium (personal files, screenshots and documents outlive the deletion the user or the retention asked for, and remain reachable through any signed or public URL still around); high if the bucket is public or the files are sensitive.
+- Where to look: tables with a file column (`image_path`, `file_key`, `avatar_url`, `attachment`); every way rows leave: the delete route, `on delete cascade` from a parent (project, account), the retention job, account deletion. Grep for the bucket's `.remove(`/`deleteObject`/`DeleteObjectCommand`: no call at all is a strong sign.
+- How to confirm by reading the code: for each way the row disappears, find where the file is deleted. Database cascades and SQL cleanup jobs never touch the bucket on their own (in Supabase, deleting from `storage.objects` with SQL does not remove the stored file, and recent versions refuse it; use the Storage API).
+- Ruled out if: each delete path removes the files through the Storage API (before or right after the row), or rows are moved to a queue of files to delete that a job processes, or a periodic sweep deletes objects whose path no longer exists in the table; or a bucket lifecycle rule expires them.
+- Not ruled out by: "the bucket is private" (the data still exists, and the deletion was promised); deleting only on the main route while cascades and the retention job leave files behind.
+- How to fix:
+  ```ts
+  // bad: the row goes, the screenshot stays forever
+  await admin.from('requests').delete().lt('created_at', cutoff)
+  // good: collect the paths, delete the files, then the rows
+  const { data } = await admin.from('requests').select('id, image_path').lt('created_at', cutoff).not('image_path', 'is', null)
+  if (data?.length) await admin.storage.from('shots').remove(data.map((r) => r.image_path))
+  await admin.from('requests').delete().lt('created_at', cutoff)
+  ```
 - CWE: CWE-459

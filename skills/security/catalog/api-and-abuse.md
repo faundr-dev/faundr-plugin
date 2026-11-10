@@ -1,5 +1,5 @@
 # API and abuse
-When to read: the app exposes API routes, public forms (login, sign-up, contact, reset), sends email/SMS, calls paid services (AI, maps, SMS), receives webhooks (Stripe, Mercado Pago, GitHub, Clerk, Supabase), accepts file uploads or fetches URLs provided by the user.
+When to read: the app exposes API routes, public forms (login, sign-up, contact, reset), sends email/SMS, calls paid services (AI, maps, SMS), receives webhooks (Stripe, Mercado Pago, GitHub, Clerk, Supabase), receives events from SDKs or agents (error/analytics ingestion), accepts file uploads, parses its own formats or fetches URLs provided by the user.
 
 Note on rate limiting in serverless (Vercel, Netlify, Cloudflare Workers, Supabase Edge Functions): an in-memory counter (`Map`, `express-rate-limit` with the default store) does not really work, because each instance has its own. A valid control uses shared storage (Upstash/Redis, KV/Durable Objects, a database table, Cloudflare's Rate Limiting binding, the host's WAF/firewall rules) or the built-in limit of a managed provider.
 
@@ -22,7 +22,7 @@ Note on rate limiting in serverless (Vercel, Netlify, Cloudflare Workers, Supaba
 - Where to look: calls to `resend.emails.send`, `sgMail.send`, `nodemailer` `sendMail`, `twilio.messages.create`, `openai.chat.completions.create`, `anthropic.messages.create`, `generateText`/`streamText` (Vercel AI SDK), image APIs; contact forms, "invite a friend", "send by email"; routes that generate PDF/CSV.
 - How to confirm by reading the code: for each route that triggers cost, check: does it require login? does it have a per-user limit (and per-IP if anonymous)? does it have a usage cap per plan/day? Is the email/SMS recipient controlled by the user?
 - Ruled out if: per-user limit with shared storage + login required; or a daily quota stored in the database and checked before the call, on every path that reaches the provider (for AI, see `llm-custo-sem-limite`, items 6 and 7).
-- Does not rule out: "only logged-in users use it" (open sign-up = anyone); spending limit configured at the provider (avoids bankruptcy, but one user still exhausts everyone's quota, taking the service down); a quota checked only on some branches, or skipped by a field the client controls; check and record in separate steps (parallel requests pass together).
+- Does not rule out: "only logged-in users use it" (open sign-up = anyone); spending limit configured at the provider (avoids bankruptcy, but one user still exhausts everyone's quota, taking the service down); a quota checked only on some branches, or skipped by a field the client controls; check and record in separate steps (parallel requests pass together); a spending lock that fails open (the error from recording the spend is ignored, or reading the budget fails and the call goes ahead; see `ai-and-llm.md` → `llm-custo-sem-limite`, item 8).
 - How to fix: require login, limit by `user.id`, record usage and check the quota before calling the provider; on public forms, Turnstile/hCaptcha verified on the server.
 - CWE: CWE-770
 
@@ -34,6 +34,66 @@ Note on rate limiting in serverless (Vercel, Netlify, Cloudflare Workers, Supaba
 - Does not rule out: limit in the front end (`maxLength` on the input).
 - How to fix: `const take = Math.min(Number(q.limit) || 20, 100)`; `z.string().max(5000)`; `app.use('/api/*', bodyLimit({ maxSize: 1024 * 1024 }))` in Hono.
 - CWE: CWE-770
+
+## trabalho-antes-de-autenticar — Public route reads and parses the body before checking who is calling
+- Typical severity: medium; high when the parse has a flaw of its own (see `parser-com-tamanho-da-entrada`) or the route sits outside the global rate limit, because then anyone without a key can trigger it.
+- Where to look: routes authenticated by a key, token or signature that is **not** a session: error/event ingestion (`/api/<id>/envelope`, `/ingest`, `/collect`, `/track`), webhooks, public SDK endpoints, CLI/agent endpoints with a bearer token; `await req.text()`/`req.json()`/`readBody()`/`decompress` at the top of the handler, followed later by `if (!validKey(...))`. Also check the route list of the global limiter (`limitApiRequest`, middleware matcher): ingestion routes are often left out "because the SDK sends many events".
+- How to confirm by reading the code: order the handler's steps. Everything before the identity/key check (read the body, decompress, parse, look up the project, write to an in-memory map) is reachable by anyone with the URL. For DSN-style keys, which are public by design, the key still must be checked against the project **before** the expensive work, and the route needs a limit per IP and per project.
+- Ruled out if: the key/signature/token (from the query string or header, which costs nothing to read) and the existence of the target are checked first, the body is read with a size cap only after that, and the route has a limit per IP + per key with shared storage. For webhooks that must read the raw body to verify the signature, a size cap before reading is enough.
+- Does not rule out: "the key is checked later in the same handler"; a platform body limit when the problem is CPU or a loop, not size.
+- How to fix:
+  ```ts
+  // bad: parse first, ask later
+  const items = parseEnvelope(await req.text())
+  if (!(await keyMatches(projectId, items.header.key))) return new Response(null, { status: 401 })
+  // good: cheap checks first, bounded read after
+  const key = url.searchParams.get('key') ?? authHeaderKey(req)
+  if (!(await keyMatches(projectId, key))) return new Response(null, { status: 401 })
+  if (!(await limiter.limit(`ingest:${projectId}:${ip}`)).success) return new Response(null, { status: 429 })
+  const body = await readCapped(req, 256 * 1024)
+  ```
+- CWE: CWE-696
+
+## parser-com-tamanho-da-entrada — Parser loop driven by a length or count that comes from the input
+- Typical severity: high on a route without login (one request pins the CPU forever or exhausts memory: denial of service); medium behind login.
+- Where to look: hand-written parsers of framed formats: envelopes/NDJSON with a `length` header, TLV/binary protocols, multipart, custom chunked formats, `Buffer.readUInt32*` followed by `slice(pos, pos + len)`; loops like `while (pos < body.length) { … pos += len }`; `new Array(n)`/`Buffer.alloc(n)`/`.repeat(n)` with `n` from the input; recursion depth from the input.
+- How to confirm by reading the code: for each number read from the input that moves a cursor, sizes an allocation or bounds a loop, try negative, zero, fractional, `NaN`, larger than what remains, and huge. `pos += -10` walks backwards and rereads the same item forever; `NaN` makes every comparison false; `len = 0` without another advance never moves; huge `n` allocates gigabytes. Also count items: is there a cap on how many items one body may contain, and does each item append to an array/map that grows without a limit?
+- Ruled out if: every length is validated as `Number.isInteger(len) && len >= 0 && pos + len <= body.length` before use, the cursor strictly advances on each iteration, and there is a maximum number of items (and maximum body size) checked in the loop; or the format is parsed by a maintained library with limits.
+- Does not rule out: "the official SDK never sends a negative length" (the attacker does not use the SDK); a body size limit alone (a 1 KB body with `length: -50` still loops forever).
+- How to fix:
+  ```ts
+  // bad
+  const len = header.length; item = body.slice(pos, pos + len); pos += len + 1
+  // good
+  if (!Number.isInteger(len) || len < 0 || pos + len > body.length) throw new BadRequest()
+  if (++count > 100) throw new BadRequest()
+  item = body.slice(pos, pos + len); pos += len + 1
+  ```
+- CWE: CWE-835
+
+## cache-em-memoria-sem-teto — In-memory Map or cache keyed by request data, with no size limit
+- Typical severity: medium (memory grows until the process/isolate is killed: every user loses the service); high on a route without login.
+- Where to look: module-level `new Map()`, `{}`, `new Set()`, arrays used as cache, dedup set, rate counter or "seen ids" list in server code (`const projects = new Map()` at the top of a route file), keyed by something from the request (project id, IP, URL, user agent, error fingerprint).
+- How to confirm by reading the code: who controls the key? Is there `map.size` checked before `set`, an LRU with `max`, a TTL that actually deletes, or a periodic clear? Random ids from the attacker create a new entry each request. In serverless, the cache also does not do what the author thinks (each instance has its own), so it is rarely worth keeping unbounded.
+- Ruled out if: bounded structure (`new LRUCache({ max: 1000, ttl })`, or `if (map.size >= MAX) map.delete(map.keys().next().value)`), or keys only from a closed set (config, enum), or the entry is only created after the key was validated against the database.
+- Does not rule out: "the Worker restarts often"; a TTL stored in the value but never used to delete.
+- How to fix: cap the size (LRU), insert only after validating the key, and cache negative results with a short TTL inside the same cap.
+- CWE: CWE-770
+
+## rota-publica-gasta-cota-externa — Public route that spends the app's quota on a third-party API
+- Typical severity: medium (whoever loops on the route burns the shared token's hourly quota, and every feature that uses that API stops for everyone); high if the external call costs money per request.
+- Where to look: routes without login that call GitHub, Google Maps, geocoding, npm/OSV registries, weather, scraping or any API with the app's token: badges and embeds (`/api/stars.svg`, `/api/repo`), link previews, "check this repository/package" tools, public status pages; `fetch(` to an external host without `signal`.
+- How to confirm by reading the code: for each public route that calls an external API, check (1) a limit specific to that route (per IP, stricter than the general one), (2) a cache of successful answers **and** of failures/404s (otherwise a non-existent name always reaches the API), (3) a timeout on the external call (`AbortSignal.timeout(5000)`), (4) whether the client can choose what is fetched (any repo name, any URL), multiplying distinct keys past the cache.
+- Ruled out if: the four points hold, or the route serves only precomputed data, or the external call uses no shared token and has no cost (and still has a timeout).
+- Does not rule out: "the general rate limit covers it" (it is sized for cheap routes); a cache only for hits; the provider's own rate limit (it is the app's quota that runs out).
+- How to fix:
+  ```ts
+  if (!(await strictLimiter.limit(`stars:${ip}`)).success) return new Response(null, { status: 429 })
+  const hit = await cache.get(key); if (hit) return hit           // includes cached 404s
+  const res = await fetch(api, { headers, signal: AbortSignal.timeout(5000) })
+  await cache.put(key, res.ok ? body : NOT_FOUND, { ttl: res.ok ? 3600 : 600 })
+  ```
+- CWE: CWE-400
 
 ## cors-permissivo — CORS with reflected origin or `*` with credentials
 - Typical severity: high when it reflects any origin with `Access-Control-Allow-Credentials: true` on cookie-authenticated routes (another site reads the logged-in user's data); low with `*` without credentials on a public API or one authenticated by the `Authorization` header.

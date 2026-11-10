@@ -192,7 +192,7 @@ export async function qualityFinding(args) {
   const confidence = Number(flag(args, '--confidence'))
   if (!title || !['high', 'medium', 'low'].includes(severity) || !flag(args, '--theme') || !Number.isFinite(confidence))
     throw new Error(
-      'usage: faundr quality-finding "<title>" --theme demais|falha|tipos|complexidade|comentarios|testes|arquitetura|instrucoes [--label apagar|stdlib|nativo|yagni|encurtar] --severity high|medium|low --confidence 80-100 --file <path> [--line n] --detail "..." --impact "..." --fix "<concrete replacement>" [--saves <lines removed>]',
+      'usage: faundr quality-finding "<title>" --theme demais|falha|desempenho|tipos|complexidade|comentarios|testes|arquitetura|instrucoes [--label apagar|stdlib|nativo|yagni|encurtar] --severity high|medium|low --confidence 80-100 --file <path> [--line n] --detail "..." --impact "..." --fix "<concrete replacement>" [--saves <lines removed>]',
     )
   const line = Number(flag(args, '--line'))
   const saves = Number(flag(args, '--saves'))

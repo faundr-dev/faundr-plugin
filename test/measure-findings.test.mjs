@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 import { measureFindings } from '../bin/measure-findings.mjs'
 
-const here = path.dirname(new URL(import.meta.url).pathname.replace(/^\/(\w:)/, '$1'))
+const here = path.dirname(fileURLToPath(import.meta.url))
 const extension = path.join(here, '..', '..', 'extension')
 
 test('medição vira um achado por regra, com a tela e a largura no título', () => {

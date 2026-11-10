@@ -1,5 +1,5 @@
 # CI and dependencies (GitHub Actions, install scripts, packages)
-When to read: the project has `.github/workflows/`, another CI (`.gitlab-ci.yml`, `.circleci/`) or a package manifest (`package.json`, `requirements.txt`, `pyproject.toml`, `composer.json`, `go.mod`…). Packages with known flaws are already caught by the automatic check; this file covers problems with **how** the code is built and published: who can run code with the project's keys.
+When to read: the project has `.github/workflows/`, another CI (`.gitlab-ci.yml`, `.circleci/`), a release or publish script, or a package manifest (`package.json`, `requirements.txt`, `pyproject.toml`, `composer.json`, `go.mod`…). Packages with known flaws are already caught by the automatic check; this file covers problems with **how** the code is built and published: who can run code with the project's keys.
 
 Golden rule: CI runs with the deploy, database and publishing keys. Code or text coming from an outside pull request, a branch name, an issue title or a new package is untrusted input, and must not run where those keys are.
 
@@ -41,7 +41,7 @@ Golden rule: CI runs with the deploy, database and publishing keys. Code or text
 
 ## pacote-script-de-instalacao — New or unknown package that runs code on install
 - Typical severity: high when the name looks like a typo of a famous package, was published a few days ago or has no repository; low for well-known packages.
-- Where to look: dependencies in `package.json` you don't recognize; `postinstall`, `preinstall`, `prepare` in the project's own `package.json` that download and execute something; no committed lockfile (`package-lock.json`, `pnpm-lock.yaml`, `bun.lock`); `"*"`/`"latest"` as the version; dependency by git URL or tarball.
+- Where to look: dependencies in `package.json` you don't recognize; `postinstall`, `preinstall`, `prepare` in the project's own `package.json` that download and execute something; no committed lockfile (`package-lock.json`, `pnpm-lock.yaml`, `bun.lock`); dependency by git URL or tarball (floating versions like `"latest"`: see `dependencia-flutuante-ou-nao-declarada`).
 - How to confirm by reading the code: check the name carefully (`reqeusts`, `colors-js`, swapped `@scope`), the lockfile in the repository and whether CI uses a locked install (`npm ci`, `pnpm install --frozen-lockfile`). Don't install anything to test.
 - Ruled out if: committed lockfile, locked install in CI and all names checked; the project's own install scripts only run project tools.
 - Not ruled out by: "the package has lots of downloads" (look-alike names do too).
@@ -56,3 +56,44 @@ Golden rule: CI runs with the deploy, database and publishing keys. Code or text
 - Not ruled out by: "the name is unique".
 - How to fix: your own scope for internal packages and the scope's registry in `.npmrc`; in Python, a single index.
 - CWE: CWE-427
+
+## dependencia-flutuante-ou-nao-declarada — Dependency at `latest`/`*`, or used without being declared
+- Typical severity: medium (the next lockfile refresh pulls a new major or a hijacked release with nobody reviewing it; an undeclared package disappears or changes when a sibling dependency updates); high when it is a build or publishing tool, which runs with the release keys.
+- Where to look: `package.json` versions `"latest"`, `"*"`, `"x"`, `">=1"`, git branches (`github:org/repo#main`); `requirements.txt` without `==`; imports and build scripts (`build.mjs`, `scripts/*`, config files) that use a package missing from the manifest of that folder (it only works because another dependency pulled it in: a phantom dependency); workspaces where a sub-package relies on the root's `node_modules`.
+- How to confirm by reading the code: list the floating versions; for each `import`/`require` in scripts and configs, check that the package is declared in the nearest `package.json`. A committed lockfile with `npm ci` freezes the current resolution, but `latest` still moves silently the next time anyone runs `npm install`/`npm update` or Dependabot regenerates the lock, and an undeclared package can vanish from the tree at any update.
+- Ruled out if: every dependency has a range (`^1.2.3`) or exact version, the lockfile is committed, CI installs with `npm ci`/`--frozen-lockfile`, and every imported package is declared where it is used.
+- Not ruled out by: "the lockfile pins it" (until the next regeneration); "it works on my machine" (the phantom package is there by chance).
+- How to fix:
+  ```jsonc
+  // bad
+  "@tanstack/react-router": "latest"
+  // good: an explicit range, updated on purpose (Dependabot/Renovate opens the PR)
+  "@tanstack/react-router": "^1.120.3"
+  ```
+  And declare what scripts import: `npm i -D esbuild` in the folder whose script uses it.
+- CWE: CWE-1357
+
+## ci-nao-roda-o-build — CI checks types and tests, but not the build that goes to production
+- Typical severity: medium when deploy happens automatically on push (a build that only breaks in the production bundler or runtime takes the site down for everyone); low with a manual deploy that builds first.
+- Where to look: `.github/workflows/*.yml` steps (`npm test`, `tsc --noEmit`, `lint`) compared with the deploy command (`npm run build`, `next build`, `vite build`, `wrangler deploy`, the host's build settings); `on: push` to the main branch connected to the host's automatic deploy.
+- How to confirm by reading the code: is the same build command the host runs executed in CI before merge/push to the deployed branch? Errors that only the build catches: imports that only fail in the server bundle, environment-specific code, SSR evaluation of a module, size limits of the runtime.
+- Ruled out if: CI runs the production build (and, ideally, a smoke test of the built output) as a required check on the deployed branch; or the deploy pipeline itself builds and stops before publishing when the build fails.
+- Not ruled out by: "the typecheck is clean"; "tests pass" (they import the source, not the bundle).
+- How to fix: add `- run: npm run build` to the CI job, mark it as required for the deployed branch, and keep the host from publishing a failed build.
+- CWE: CWE-1127
+
+## publicacao-sem-conferir-estado — Release script publishes from a dirty tree, an unpushed HEAD or a stale build
+- Typical severity: medium (a package goes out with code nobody reviewed or committed: local experiments, debug flags, a secret in a scratch file, or an old `dist/` that does not match the source); high when the package is installed by many users or runs with their credentials (CLI, plugin, SDK, extension).
+- Where to look: `scripts/publish*.{js,mjs,sh}`, `release` scripts in `package.json`, `npm publish`, `vsce publish`, `web-ext sign`, `cargo publish`, `twine upload`, `gh release create` run from a laptop; `prepublishOnly`; `files`/`.npmignore` in the published package.
+- How to confirm by reading the code: before publishing, does the script (1) refuse a dirty working tree (`git status --porcelain` empty), (2) check that HEAD is on the release branch and already pushed (`git rev-parse HEAD` equals `@{u}`), (3) rebuild the artifact from that commit instead of shipping whatever is in `dist/`, (4) run the full test suite and the build, (5) publish only an allowlist of files? Publishing from CI on a tag, with provenance (`npm publish --provenance`), covers most of this.
+- Ruled out if: publishing happens only in CI from a tagged commit, or the local script checks the five points and aborts on any failure.
+- Not ruled out by: "only the owner publishes"; tests that run but whose failure does not stop the publish.
+- How to fix:
+  ```js
+  // good: abort unless the tree is clean and HEAD is pushed, then rebuild and publish
+  const sh = (c) => execSync(c, { encoding: 'utf8' }).trim()
+  if (sh('git status --porcelain')) throw new Error('uncommitted changes')
+  sh('git fetch -q'); if (sh('git rev-parse HEAD') !== sh('git rev-parse @{u}')) throw new Error('HEAD not pushed')
+  sh('npm test'); sh('npm run build'); sh('npm publish --provenance')
+  ```
+- CWE: CWE-693

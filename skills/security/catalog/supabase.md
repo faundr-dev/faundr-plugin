@@ -34,9 +34,9 @@ About `UPDATE ... WITH CHECK`: in Postgres, if the UPDATE (or `for all`) policy 
 - Typical severity: high to critical. If there is no UPDATE/DELETE policy, the operation is denied (safe, but the app may be using service_role because of that). The real problem is when a write policy is looser than the read one, or `for all` with a weak condition.
 - Where to look: group the policies by table and by operation (`for select|insert|update|delete|all`).
 - How to confirm by reading the code: build the table × operation matrix. For each allowed operation, confirm the owner condition. On INSERT, check that `with check` ties `user_id = auth.uid()` (otherwise the user creates rows on behalf of someone else). On UPDATE, check that the `with check` (if present) also ties the owner, otherwise the user transfers the row to another owner or moves it to another org.
-  Then, for every UPDATE policy, list the columns the server should own (plan, credits, limits and counters, `paused_at`, `created_by`/`owner_id`/`org_id`, `assignee_id`, flags that make something run, like `run_now`/`approved`) and look for what stops the client from writing them: a per-column GRANT (`revoke update on t from authenticated; grant update (name) on t to authenticated`) or a BEFORE UPDATE trigger. A policy that only checks the role or the membership lets every column change. Compare with the INSERT policy too: a lock that only exists on INSERT (`with check (created_by = auth.uid() and (not run_now or assignee_id = auth.uid()))`) is undone by an UPDATE right after.
-- Ruled out if: each allowed operation has `using`/`with check` with `auth.uid()` or tenant membership, operations the app does not use have no policy, and the server-owned columns have a per-column GRANT or a trigger.
-- Does not rule out: a correct SELECT (says nothing about UPDATE); `with check (true)` on INSERT into a table with `user_id`; an UPDATE policy that checks the role but not the columns ("admins edit org" also lets the admin change `plan`); a lock on INSERT with no matching lock on UPDATE; "the panel only sends `name`" (the attacker calls the REST API with the public key and their own login).
+  Then, for every INSERT **and** every UPDATE policy, list the columns the server should own (plan, credits, limits and counters, `paused_at`, `created_by`/`owner_id`/`org_id`/`project_id`, `assignee_id`, file paths like `image_path`/`avatar_path`, ingest keys and tokens, flags that make something run, like `run_now`/`approved`) and look for what stops the client from writing them: a per-column GRANT (`revoke insert, update on t from authenticated; grant insert (name, body) on t to authenticated; grant update (name) on t to authenticated`) or a BEFORE INSERT/UPDATE trigger. Supabase grants every privilege on new `public` tables to `anon` and `authenticated` by default, so without a `revoke` every column is writable wherever a policy lets the row through. A policy that only checks the role or the membership lets every column be set. Compare INSERT and UPDATE with each other: a lock that only exists on INSERT (`with check (created_by = auth.uid() and (not run_now or assignee_id = auth.uid()))`) is undone by an UPDATE right after, and a per-column GRANT only on UPDATE is undone by creating the row already with the forbidden value (a member inserts a request with `image_path` pointing to another tenant's file, or a project with `owner_id` of someone else and `paused_at` set).
+- Ruled out if: each allowed operation has `using`/`with check` with `auth.uid()` or tenant membership, operations the app does not use have no policy, and the server-owned columns have a per-column GRANT or a trigger on **both** INSERT and UPDATE (or a `default` the client cannot override plus no grant on that column).
+- Does not rule out: a correct SELECT (says nothing about UPDATE); `with check (true)` on INSERT into a table with `user_id`; an UPDATE policy that checks the role but not the columns ("admins edit org" also lets the admin change `plan`); a lock on INSERT with no matching lock on UPDATE, or the reverse; a column `default` (the client can send the column and override it); "the panel only sends `name`" (the attacker calls the REST API with the public key and their own login).
 - How to fix:
   ```sql
   create policy "dono cria" on public.notes for insert to authenticated
@@ -45,8 +45,106 @@ About `UPDATE ... WITH CHECK`: in Postgres, if the UPDATE (or `for all`) policy 
     using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
   create policy "dono apaga" on public.notes for delete to authenticated
     using ((select auth.uid()) = user_id);
+  -- columns: the client writes only what the screen edits; the rest comes from defaults or the server
+  revoke insert, update on public.notes from anon, authenticated;
+  grant insert (title, body) on public.notes to authenticated;
+  grant update (title, body) on public.notes to authenticated;
   ```
 - CWE: CWE-862
+
+## supabase-linha-muda-de-tenant — UPDATE moves a row to another owner, project or organization
+- Typical severity: high (data of tenant A ends up in tenant B, or a row is pulled out of a tenant where it was audited/limited and placed where the user has more power); critical if moving the row changes who can read a sensitive record or bypasses a plan limit.
+- Where to look: UPDATE policies on tables with a tenant key (`org_id`, `project_id`, `team_id`, `workspace_id`, `owner_id`) whose `using` and `with check` are the same membership function (`using (can_edit(project_id)) with check (can_edit(project_id))`); tables without a per-column UPDATE grant.
+- How to confirm by reading the code: `using` is evaluated on the **old** row and `with check` on the **new** row. A member of two projects passes both: `using` (member of the old one) and `with check` (member of the new one). Nothing compares old and new, so `update findings set project_id = '<other project>'` is allowed. Ask, for each tenant key: should it ever change after insert? Usually not.
+- Ruled out if: the tenant column is not in the UPDATE grant (`grant update (title, status) …` without `project_id`), or a BEFORE UPDATE trigger refuses `new.project_id is distinct from old.project_id`, or there is no UPDATE policy at all.
+- Does not rule out: `with check` repeating the membership check (it only proves the destination is also yours); "the screen has no way to change the project".
+- How to fix:
+  ```sql
+  -- bad: both sides pass for whoever is a member of the two projects
+  create policy "edit" on public.findings for update to authenticated
+    using (public.can_edit(project_id)) with check (public.can_edit(project_id));
+  -- good: the tenant key is not writable after insert
+  revoke update on public.findings from authenticated;
+  grant update (status, note) on public.findings to authenticated;
+  ```
+- CWE: CWE-639
+
+## supabase-guarda-com-null — Role guard that lets NULL through (non-member passes the check)
+- Typical severity: critical when the guarded action changes roles, owners or members (any registered account becomes owner of any organization); high for other actions.
+- Where to look: `security definer` functions and triggers in PL/pgSQL that read a role into a variable and test it with a negative comparison: `if my_role not in ('owner','admin') then raise`, `if my_role <> 'owner' then raise`, `if not is_admin then raise` where `is_admin` comes from a lookup; CHECK constraints with the same shape. Helpers like `org_role(org)`, `get_role(...)`, `select role into me from members where …`.
+- How to confirm by reading the code: simulate a caller who is **not a member** (and, if the function is not revoked from `anon`, a visitor with `auth.uid()` NULL). The lookup returns no row, so the variable is NULL. In SQL, `NULL not in (...)`, `NULL <> 'x'` and `not NULL` are all NULL, and `if NULL then` does **not** run the branch: the `raise` is skipped and the function goes on to change the data. (In an RLS `using`/`with check`, NULL counts as false and denies, which is safe; the trap is in `if` inside functions and triggers, and in CHECK constraints, where NULL passes.) Also simulate the member with the lowest role, and an admin trying to promote someone to owner, demote an owner or remove an owner: who may create or touch an owner should be decided explicitly.
+- Ruled out if: the guard is written so NULL fails (`if my_role is null or my_role not in (...)`, `if my_role is distinct from 'owner'`, `if not coalesce(is_admin, false)`, or a positive test `if my_role in ('owner','admin') then … else raise`); and `auth.uid() is null` is refused at the start (or execute is revoked from `anon`).
+- Does not rule out: `revoke execute … from public, anon` (any logged-in account, including a free second account, is still `authenticated`); "only members see the button"; a test suite that only calls the function as a member.
+- How to fix:
+  ```sql
+  -- bad: a non-member has me = NULL, the if is skipped and the role changes
+  me := public.org_role(p_org);
+  if me not in ('owner','admin') then raise exception 'forbidden'; end if;
+  -- good: NULL fails, and only an owner creates or touches an owner
+  if auth.uid() is null then raise exception 'login required'; end if;
+  me := public.org_role(p_org);
+  if me is null or me not in ('owner','admin') then raise exception 'forbidden'; end if;
+  if (current_role = 'owner' or p_new_role = 'owner') and me is distinct from 'owner' then
+    raise exception 'only an owner changes owners';
+  end if;
+  ```
+- CWE: CWE-863
+
+## supabase-gatilho-de-guarda-incompleto — Guard trigger that looks at the wrong row or does not fire
+- Typical severity: high (the guard looks like protection and is bypassed in two steps); critical if it guards roles, owners or money.
+- Where to look: `create trigger … before update of col_a, col_b on t` and their functions; guards like `if new.kind = 'feature' and new.assignee_id <> old.assignee_id and not is_owner() then raise`; triggers that exist only for UPDATE but not INSERT (or only `for each statement`); `when (…)` clauses on the trigger.
+- How to confirm by reading the code:
+  1. **Which row decides?** If the rule depends on the state of the record ("only the owner changes the assignee of a feature"), it must read `old` (what the row is) and also `new` (what it becomes). A guard that tests only `new.kind` is bypassed by changing `kind` to something unguarded, changing the protected column, and changing `kind` back, three UPDATEs, each one allowed.
+  2. **When does it fire?** `before update of a, b` only runs when `a` or `b` appear in the UPDATE's SET list; if the rule also depends on column `c`, an UPDATE that only sets `c` skips it. A `when (old.x is distinct from new.x)` clause has the same effect.
+  3. **Which operations?** A guard only on UPDATE is bypassed by an INSERT with the forbidden value (or a DELETE + INSERT).
+  4. Simulate a regular member changing each guarded column alone, together with another column, and in several steps.
+- Ruled out if: the guard reads `old` for the current state and `new` for the result, refuses any change to the protected columns by someone without the role regardless of other columns, fires on INSERT and UPDATE with no column list (or a list covering every column the rule reads); or per-column GRANTs make the columns unwritable.
+- Does not rule out: "the screen changes one column at a time"; a test that tries only the single-step change.
+- How to fix:
+  ```sql
+  -- bad: fires only when assignee_id is in the SET, and trusts new.kind
+  create trigger guard before update of assignee_id on public.items
+    for each row execute function guard_assignee();
+  -- inside: if new.kind = 'feature' and new.assignee_id is distinct from old.assignee_id ...
+  -- good: fires on every insert/update and judges by the old state too
+  create trigger guard before insert or update on public.items
+    for each row execute function guard_assignee();
+  -- inside: if (tg_op = 'UPDATE' and (old.kind = 'feature' or new.kind = 'feature')
+  --            and (new.assignee_id, new.kind) is distinct from (old.assignee_id, old.kind)
+  --            and not public.is_owner(new.org_id)) then raise exception 'forbidden'; end if;
+  ```
+- CWE: CWE-863
+
+## supabase-cascade-apaga-dado-do-time — Deleting one person's account deletes data that belongs to the team
+- Typical severity: high (one account deletion, by the person or by an admin, wipes projects, history and files the whole organization uses); medium if the data is personal anyway.
+- Where to look: foreign keys to `auth.users(id)` or `profiles(id)` with `on delete cascade` on shared tables: `projects.owner_id`, `documents.created_by`, `orgs.created_by`; the account deletion route (`auth.admin.deleteUser`). Read the latest migration that touches each FK: a later `alter table … drop constraint … add constraint` can change it.
+- How to confirm by reading the code: for each FK to the user, ask: is the row the person's own (their settings, their tokens) or the team's (a project in an organization, a document others edit)? Cascade on the team's rows means "whoever created it takes it away when leaving". Follow the chain: the deleted project cascades to its children too.
+- Ruled out if: shared rows reference the user with `on delete set null` (column nullable) or `on delete restrict` with a transfer step, and ownership is decided by membership in the organization, not by the creator column.
+- Does not rule out: "people do not delete their accounts"; a soft delete of the user while the FK still cascades on a hard delete by support or by a privacy request.
+- How to fix:
+  ```sql
+  -- bad
+  owner_id uuid not null references auth.users(id) on delete cascade
+  -- good: the project stays with the organization; the creator becomes NULL
+  alter table public.projects alter column owner_id drop not null;
+  alter table public.projects drop constraint projects_owner_id_fkey,
+    add constraint projects_owner_id_fkey foreign key (owner_id) references auth.users(id) on delete set null;
+  ```
+- CWE: CWE-404
+
+## supabase-invariante-sem-trava — "Last owner", quota or uniqueness checked and then changed without a lock
+- Typical severity: medium (an organization without an owner nobody can administer, a quota exceeded, a duplicate); high if the result leaves data with nobody able to manage or delete it.
+- Where to look: functions that count before changing: `select count(*) into n from members where role = 'owner'; if n <= 1 then raise; end if; delete …`; "leave organization", "demote", "remove member", "use credit", "reserve seat".
+- How to confirm by reading the code: two calls at the same time (two owners leaving together, two demotions) both read `n = 2`, both pass, both change: zero owners. Under the default `read committed`, a plain SELECT does not lock anything.
+- Ruled out if: the function takes a lock before counting (`perform pg_advisory_xact_lock(hashtext('org-owners:' || p_org::text))`, or `select … for update` on the organization row), or the transaction runs as `serializable` and the caller retries on conflict.
+- Does not rule out: "it is rare for two owners to leave at the same time" (a double click or a retry is enough); folding the count into the same statement (`delete … where (select count(*) …) > 1`), which is still racy under `read committed`.
+- How to fix:
+  ```sql
+  perform pg_advisory_xact_lock(hashtext('org-owners:' || p_org::text));
+  select count(*) into n from public.members where org_id = p_org and role = 'owner';
+  if n <= 1 and v_target_role = 'owner' then raise exception 'last owner'; end if;
+  ```
+- CWE: CWE-362
 
 ## supabase-rls-confia-no-payload — Policy, function or trigger that trusts user-controlled data
 - Typical severity: critical (includes the classic case of signing up as admin).
@@ -83,8 +181,9 @@ About `UPDATE ... WITH CHECK`: in Postgres, if the UPDATE (or `for all`) policy 
   2. `security definer` runs as the owner (usually `postgres`), bypassing RLS.
   3. Inside it, there must be a check with `auth.uid()` (and not trusting the user parameter), or EXECUTE was revoked from anon/authenticated.
   4. Check `set search_path = ''` (or fixed) and qualified names (`public.table`), otherwise an object with the same name in another schema may be resolved.
+  5. Simulate three callers and follow each `if`: a visitor (`auth.uid()` NULL, if `anon` still has execute), a logged-in account that is **not a member** of the org/project in the parameters (role lookups return NULL: see `supabase-guarda-com-null`), and a member with the lowest role. For functions that change roles or members, also an admin trying to create, demote or remove an owner.
 - Ruled out if: the function is `security invoker` (the default; respects RLS); or it has a check `if auth.uid() is distinct from p_user_id then raise exception` / uses `auth.uid()` instead of the parameter; or `revoke execute on function public.f from public, anon, authenticated` and only the server calls it; or the function is in a non-exposed schema.
-- Does not rule out: "only the app calls that function"; a check done in the front end before calling the RPC.
+- Does not rule out: "only the app calls that function"; a check done in the front end before calling the RPC; `revoke … from public, anon` alone (every free account is still `authenticated`); a role check written as `not in (...)`/`<>` on a value that is NULL for non-members.
 - How to fix:
   ```sql
   create or replace function public.transfer_credits(p_to uuid, p_amount int)
@@ -123,7 +222,7 @@ About `UPDATE ... WITH CHECK`: in Postgres, if the UPDATE (or `for all`) policy 
 - Where to look: `insert into storage.buckets (id, name, public) values (..., true)`; policies on `storage.objects`; uploads with `supabase.storage.from(bucket).upload(path, ...)` with `path` coming from the client; `getPublicUrl` for private files.
 - How to confirm by reading the code: a bucket with `public = true` serves any object through the public URL without a policy. In private ones, the `storage.objects` policies must tie `bucket_id` and the owner, typically through the first folder of the path.
 - Ruled out if: private bucket and policies like `bucket_id = 'docs' and (storage.foldername(name))[1] = (select auth.uid())::text` for select/insert/update/delete; or a public bucket with only public content.
-- Does not rule out: INSERT policy with an owner, but SELECT `using (bucket_id = 'docs')` (everyone reads everything); path built with the client's `userId`; file type not restricted (HTML/SVG uploaded and served; see `api-and-abuse.md`).
+- Does not rule out: INSERT policy with an owner, but SELECT `using (bucket_id = 'docs')` (everyone reads everything); path built with the client's `userId`; file type not restricted (HTML/SVG uploaded and served; see `api-and-abuse.md`); correct Storage policies when the **server** signs or downloads with service_role a path read from a table the client writes (the policies do not apply to service_role; see `access-and-idor.md` → `arquivo-e-url-assinada`).
 - How to fix:
   ```sql
   create policy "dono lê docs" on storage.objects for select to authenticated

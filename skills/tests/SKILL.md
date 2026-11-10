@@ -34,7 +34,7 @@ Write the note in the project's content language (Faundr shows it in the context
 
 ## 4. Write the missing tests
 
-Start with the critical feature that is `sem-testes` or `parcial`, then the context's "changed and untested" lines.
+Start with the critical feature that is `sem-testes` or `parcial`. Then, before the context's "changed and untested" lines, the guide's **missing tests by risk**: parsers of outside input with hostile input, secret masking with the real shapes, permission functions called by a non-member or removed member, hot-path modules with zero tests, code that must fail safely. Find them with Grep (`parse`, `mask`/`redact`, `security definer`/`rpc(`, hook and middleware entry points) and tell the owner in one line why each one came first.
 
 - Vertical slices: **one test, run, next**. Run only the file: `faundr tests-run --files <test file>` (or `--changed`).
 - Always through `faundr tests-run`, never directly through `npx vitest` or `pytest`: only that way does the run show up on the dashboard. It finds the runners in subfolders (e.g. `frontend/`) and runs pytest, flutter test, dart test, PHPUnit, Pest, go test, Maven and Gradle (JUnit), dotnet test, cargo test, CTest (which configures and builds the CMake project in the build/ folder before running), make test/check for C/C++ projects with only a Makefile, and Angular's ng test (Karma), without installing anything in the project. If it can't find Python, pass `--python <path to the venv's python>` once (it's remembered). A test that writes to the real database: leave it out with `--exclude <file>`.

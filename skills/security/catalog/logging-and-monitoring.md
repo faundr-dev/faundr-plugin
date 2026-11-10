@@ -32,7 +32,7 @@ Golden rule: every action that changes money, access or another person's data le
 
 ## falha-de-seguranca-silenciosa — Security control that fails without anyone knowing
 - Typical severity: medium; high if the failure lets things through (fails open, see `access-and-idor.md`).
-- Where to look: `try { verifySignature() } catch {}`, `catch (e) { return next() }`, a webhook that answers 200 even when the signature doesn't match, a permission check that returns `true` when the database errors.
+- Where to look: `try { verifySignature() } catch {}`, `catch (e) { return next() }`, a webhook that answers 200 even when the signature doesn't match, a permission check that returns `true` when the database errors, a spending or quota record whose error is ignored (`recordSpend(...).catch(() => {})`), a limiter that lets the request through when its store is down, a secret-masking step wrapped in `try { mask() } catch { send(raw) }`.
 - How to confirm by reading the code: when the control errors, is the request refused and the error recorded (Sentry/log)?
 - Ruled out if: the error refuses the request and is recorded.
 - Not ruled out by: "the error is rare".

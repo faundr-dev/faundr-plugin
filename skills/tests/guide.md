@@ -11,6 +11,32 @@ The owner doesn't code. Don't ask "which functions to test"; ask in product lang
 (e.g. "calculate the cart total", "sign in with email and password", "charge the subscription"). Effort goes first
 to what they choose. Record the answer with `faundr tests-map "<feature>" --critical`.
 
+## Missing tests by risk (after what the owner chose)
+
+A test protects most where a bug is silent, hits everyone or can't be undone. Before the "changed and untested" lines,
+look for these, and write the hostile case first:
+
+1. **Parser of outside input** (request body, uploaded file, envelope, webhook, CLI output): negative, fractional and
+   huge lengths or counts, truncated input, giant input, wrong type. Expect it to **finish**, fast, with a bounded
+   result or a clear error.
+   ```
+   bad:  expect(parse('{"len":5}\nhello')).toEqual(['hello'])               // only the happy path
+   good: expect(() => parse('{"len":-5}\nhello')).toThrow(); expect(parse(big)).toHaveLength(100)   // capped
+   ```
+2. **Secret masking or redaction**: each real shape, not just `password=`: `DB_PASSWORD=…`, `export STRIPE_SECRET_KEY=…`,
+   `X_TOKEN=… cmd`, `mysql -pS3cret`, `https://user:pass@host`, `Authorization: Bearer …`. Assert the secret is **gone**
+   from the output.
+3. **Permission in the database or API, called by the wrong person**: someone who isn't a member, a removed member, a
+   member with a lower role, someone logged out. Expect a refusal, not just "the owner can". A function that only
+   checks "is this role in the allowed list" often lets `NULL` (not a member) through.
+4. **Hot path with zero tests**: code that runs on every request, hook, event or cron tick (middleware, ingestion,
+   hooks, state file read/write). One bug there hits every user at once.
+5. **Code that must fail safely**: an SDK or wrapper inside someone else's app never throws into the host (make its
+   internals fail and assert the host's call still returns); a cron that hits a 429 retries the item next time;
+   a step that fails doesn't consume the queue it read.
+6. **Reads that must be complete**: more rows than one page (1001 with a 1000 cap) and the same key twice before a
+   write against a unique index.
+
 ## The rules
 
 1. **Test through the front door.** Call the function, route or screen the way someone using the app would. Don't test
