@@ -2,10 +2,14 @@
 // 127.0.0.1 e uma aba no Chrome apontando para ele, com uma senha aleatória no endereço. A extensão do Faundr
 // reconhece essa aba, conecta por WebSocket e repassa os comandos do protocolo do Chrome (CDP) só para ela,
 // pelo chrome.debugger. WebSocket mínimo, sem dependências: só texto, ping e fechar.
+// Antes de controlar a aba, a extensão pergunta "Permitir?" à pessoa com um código curto tirado da senha
+// (pairCode); a CLI mostra o mesmo código no terminal. Sem isso, qualquer programa local que abrisse uma aba
+// nesse formato ganharia o controle de uma aba do Chrome.
 import { spawn } from 'node:child_process'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { createServer } from 'node:http'
 import { findChrome } from './browse-cdp.mjs'
+import { pairCode } from './browse-pair-code.mjs'
 import { t } from './i18n.mjs'
 
 const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
@@ -69,8 +73,8 @@ export function decodeFrames(buffer) {
 const page = () => `<!doctype html><html lang="${t('en', 'pt-BR')}"><meta charset="utf-8"><title>${t('Faundr · quick browser', 'Faundr · navegador rápido')}</title>
 <body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#151515;color:#fff;font:15px/1.5 system-ui,sans-serif">
 <p style="max-width:28rem;padding:0 24px">${t(
-  'Faundr will use this tab for the quick browser. If nothing happens in a few seconds,\ncheck that the Faundr extension is installed and turned on.',
-  'O Faundr vai usar esta aba para o navegador rápido. Se nada acontecer em alguns segundos,\nconfira se a extensão do Faundr está instalada e ligada.',
+  'Faundr will use this tab for the quick browser. A small Faundr window will ask you to allow it:\nallow only if its code matches the one in your terminal. If nothing happens in a few seconds,\ncheck that the Faundr extension is installed and turned on.',
+  'O Faundr vai usar esta aba para o navegador rápido. Uma janelinha do Faundr vai pedir que você permita:\nsó permita se o código dela for igual ao do terminal. Se nada acontecer em alguns segundos,\nconfira se a extensão do Faundr está instalada e ligada.',
 )}</p></body></html>`
 
 function openInChrome(url) {
@@ -84,9 +88,22 @@ function openInChrome(url) {
 /**
  * Abre a ponte e espera a extensão conectar. Devolve { send(method, params), close() } no formato do cliente CDP.
  * FAUNDR_BROWSE_OPEN=print só mostra o endereço (testes): quem chama abre a aba.
+ * timeoutMs: até a extensão aparecer; askTimeoutMs: até a pessoa responder o "Permitir?" (a extensão desiste em 60 s).
  */
-export async function openBridge({ log = () => {}, timeoutMs = 20000, open = openInChrome } = {}) {
+export async function openBridge({
+  log = () => {},
+  timeoutMs = 20000,
+  askTimeoutMs = 75000,
+  open = openInChrome,
+} = {}) {
+  // Senha nova a cada ponte, só na memória: a confirmação na extensão vale para esta ponte e mais nenhuma.
   const token = randomBytes(24).toString('base64url')
+  const code = await pairCode(token)
+  let timer
+  const failIn = (ms, message) => {
+    clearTimeout(timer)
+    timer = setTimeout(() => connected.fail(new Error(message)), ms)
+  }
   let socket = null
   let next = 1
   const pending = new Map()
@@ -129,7 +146,39 @@ export async function openBridge({ log = () => {}, timeoutMs = 20000, open = ope
           if (!f.fin) continue
           const msg = JSON.parse(Buffer.concat(parts).toString())
           parts = []
-          if (msg.hello === true) connected.ok(msg)
+          if (msg.asking === true) {
+            log(
+              t(
+                `Allow it in the small Faundr window in Chrome; the code there must be ${code}.`,
+                `Permita na janelinha do Faundr no Chrome; o código lá tem que ser ${code}.`,
+              ),
+            )
+            failIn(
+              askTimeoutMs,
+              t(
+                'No answer in Chrome to the Faundr confirmation; the tab was not controlled. Run again.',
+                'Sem resposta no Chrome ao pedido do Faundr; a aba não foi controlada. Rode de novo.',
+              ),
+            )
+          } else if (msg.hello === true) connected.ok(msg)
+          else if (msg.hello === false && msg.refused === 'deny')
+            connected.fail(
+              new Error(
+                t(
+                  'The Faundr extension refused control of the tab (Deny was clicked or the window was closed).',
+                  'A extensão do Faundr recusou o controle da aba (clicaram em Negar ou fecharam a janelinha).',
+                ),
+              ),
+            )
+          else if (msg.hello === false && msg.refused === 'timeout')
+            connected.fail(
+              new Error(
+                t(
+                  'No answer in Chrome to the Faundr confirmation within 60 s; the tab was not controlled.',
+                  'Sem resposta no Chrome ao pedido do Faundr em 60 s; a aba não foi controlada.',
+                ),
+              ),
+            )
           else if (msg.hello === false) connected.fail(new Error(`The extension could not control the tab: ${msg.error}`))
           else if (pending.has(msg.id)) {
             const { ok, fail } = pending.get(msg.id)
@@ -150,15 +199,15 @@ export async function openBridge({ log = () => {}, timeoutMs = 20000, open = ope
 
   await new Promise((ok) => server.listen(0, '127.0.0.1', ok))
   const address = `http://127.0.0.1:${server.address().port}/faundr-browse#t=${token}`
+  log(
+    t(
+      `Bridge code: ${code}. Chrome shows the same code before Faundr controls the tab; if it differs, click Deny.`,
+      `Código da ponte: ${code}. O Chrome mostra o mesmo código antes de o Faundr controlar a aba; se for outro, clique em Negar.`,
+    ),
+  )
   if (process.env.FAUNDR_BROWSE_OPEN === 'print') log(`bridge: ${address}`)
   else open(address)
-  const timer = setTimeout(
-    () =>
-      connected.fail(
-        new Error('The Faundr extension did not respond. Install or reload the extension (chrome://extensions) and run again.'),
-      ),
-    timeoutMs,
-  )
+  failIn(timeoutMs, 'The Faundr extension did not respond. Install or reload the extension (chrome://extensions) and run again.')
   try {
     const hello = await ready
     log(`bridge connected to tab ${hello.tabId} of your Chrome`)
