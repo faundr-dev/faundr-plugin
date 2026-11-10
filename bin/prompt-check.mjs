@@ -13,6 +13,7 @@
 // Regra de ouro dos hooks: nunca quebrar o agente. Qualquer erro → sai em silêncio.
 import fs from 'node:fs'
 import { faundrPath, findDirWith, readStdin } from './paths.mjs'
+import { readJsonObject, writeJsonAtomic } from './json-file.mjs'
 import { featureIntent, featureNudge, ruleIntent, ruleNudge } from './intent.mjs'
 import { memoryNote, readMemoryIndex, relevantMemory } from './rules.mjs'
 import { readTeam, teamPromptNote } from './team.mjs'
@@ -43,10 +44,8 @@ function relevantOnce(root, sid, prompt) {
   const ids = state.rulesShown?.session === sid ? state.rulesShown.ids : []
   const items = relevantMemory(readMemoryIndex(root), prompt, ids)
   if (!items.length) return null
-  fs.writeFileSync(
-    faundrPath(root, 'state'),
-    JSON.stringify({ ...readState(root), rulesShown: { session: sid, ids: [...ids, ...items.map((m) => m.id)] } }, null, 2),
-  )
+  const file = faundrPath(root, 'state')
+  writeJsonAtomic(file, { ...readJsonObject(file), rulesShown: { session: sid, ids: [...ids, ...items.map((m) => m.id)] } }, 2)
   return memoryNote(items)
 }
 
@@ -56,7 +55,8 @@ function teamOnce(root, sid) {
   const state = readState(root)
   const last = state.teamSeen?.session === sid ? state.teamSeen.sig : null
   const { note, sig } = teamPromptNote(readTeam(root), sid, last)
-  if (sig !== (last ?? '')) fs.writeFileSync(faundrPath(root, 'state'), JSON.stringify({ ...readState(root), teamSeen: { session: sid, sig } }, null, 2))
+  const file = faundrPath(root, 'state')
+  if (sig !== (last ?? '')) writeJsonAtomic(file, { ...readJsonObject(file), teamSeen: { session: sid, sig } }, 2)
   return note
 }
 

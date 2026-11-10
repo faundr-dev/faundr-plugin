@@ -4,22 +4,27 @@
 /** Uma janela de uso como o Claude Code entrega ao mod (`five_hour`, `seven_day`). */
 export type Limit = { kind: string; percentUsed: number; resetsAt?: string }
 export type Measure = { context?: { percent?: number }; rateLimits?: Limit[] }
-/** Escolhas do painel (.faundr/painel/bar.json): os itens e se avisa. */
-export type Prefs = { items?: Record<string, boolean>; alerts?: boolean }
+/** Escolhas do painel (.faundr/painel/bar.json): os itens, se avisa e a língua da pessoa (o plugin grava a do i18n). */
+export type Prefs = { items?: Record<string, boolean>; alerts?: boolean; lang?: string }
 
 export const THRESHOLDS = [80, 95] as const
 
-const LABEL: Record<string, string> = { five_hour: 'Janela de 5 horas', seven_day: 'Limite da semana' }
+// Sem língua no bar.json (gravado por um plugin antigo): português, como antes.
+const en = (prefs: Prefs) => prefs.lang === 'en'
+const tr = (prefs: Prefs, enText: string, ptText: string) => (en(prefs) ? enText : ptText)
+
+const LABEL: Record<string, [string, string]> = { five_hour: ['5-hour window', 'Janela de 5 horas'], seven_day: ['Weekly limit', 'Limite da semana'] }
 const ITEM: Record<string, string> = { five_hour: 'cinco_horas', seven_day: 'semana' }
 
 const WEEKDAY = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb']
-/** "18:40" se zera hoje, "sáb 09:00" se não. */
-export function resetText(iso: string | undefined, now: number) {
+const WEEKDAY_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+/** "18:40" se zera hoje, "sáb 09:00" ("Sat 09:00") se não. */
+export function resetText(iso: string | undefined, now: number, lang?: string) {
   if (!iso) return null
   const d = new Date(iso)
   if (!Number.isFinite(d.getTime())) return null
   const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-  return new Date(now).toDateString() === d.toDateString() ? hm : `${WEEKDAY[d.getDay()]} ${hm}`
+  return new Date(now).toDateString() === d.toDateString() ? hm : `${(lang === 'en' ? WEEKDAY_EN : WEEKDAY)[d.getDay()]} ${hm}`
 }
 
 const on = (prefs: Prefs, item: string, fallback = true) => (typeof prefs.items?.[item] === 'boolean' ? prefs.items[item] : fallback)
@@ -51,20 +56,24 @@ function contextAlert(ctx: number, prefs: Prefs, next: Set<string>) {
   const hit = [...THRESHOLDS].reverse().find((t) => ctx >= t)
   if (!hit || !on(prefs, 'contexto') || next.has(`ctx:${hit}`)) return null
   for (const t of THRESHOLDS) if (t <= hit) next.add(`ctx:${t}`)
-  return hit >= 95 ? `Contexto em ${Math.round(ctx)}%: use /compact já, ou o Claude vai resumir a conversa sozinho` : `Contexto em ${Math.round(ctx)}%: hora de /compact`
+  const pct = Math.round(ctx)
+  if (hit >= 95) return tr(prefs, `Context at ${pct}%: run /compact now, or Claude will summarize the conversation on its own`, `Contexto em ${pct}%: use /compact já, ou o Claude vai resumir a conversa sozinho`)
+  return tr(prefs, `Context at ${pct}%: time to /compact`, `Contexto em ${pct}%: hora de /compact`)
 }
 
 // Aviso de uma janela de uso (ou null), marcando em `next` os níveis já avisados até ela zerar.
 function limitAlert(l: Limit, prefs: Prefs, next: Set<string>, now: number) {
-  const label = LABEL[l.kind]
+  const label = LABEL[l.kind]?.[en(prefs) ? 0 : 1]
   const item = ITEM[l.kind]
   if (!label || !item || !on(prefs, item)) return null
   const hit = [...THRESHOLDS].reverse().find((t) => l.percentUsed >= t)
   const key = (t: number) => `${l.kind}:${t}:${l.resetsAt ?? ''}`
   if (!hit || next.has(key(hit))) return null
-  const at = resetText(l.resetsAt, now)
+  const at = resetText(l.resetsAt, now, prefs.lang)
   for (const t of THRESHOLDS) if (t <= hit) next.add(key(t))
-  return `${label} em ${Math.round(l.percentUsed)}%${at ? `: zera ${at.includes(' ') ? at : `às ${at}`}` : ''}`
+  const pct = Math.round(l.percentUsed)
+  if (en(prefs)) return `${label} at ${pct}%${at ? `: resets ${at.includes(' ') ? at : `at ${at}`}` : ''}`
+  return `${label} em ${pct}%${at ? `: zera ${at.includes(' ') ? at : `às ${at}`}` : ''}`
 }
 
 /** Barra de 5 blocos (a mesma da linha de status). */
@@ -77,12 +86,12 @@ export const bar = (pct: number) => {
 export function bandRows(m: Measure, prefs: Prefs, now = Date.now()) {
   const rows: { label: string; bar: string; pct: string; note: string; high: boolean }[] = []
   const ctx = m.context?.percent
-  if (typeof ctx === 'number' && on(prefs, 'contexto')) rows.push({ label: 'ctx', bar: bar(ctx), pct: `${Math.round(ctx)}%`, note: ctx >= 80 ? 'hora de /compact' : '', high: ctx >= 80 })
-  for (const [kind, item, short] of [['five_hour', 'cinco_horas', '5h'], ['seven_day', 'semana', 'sem']] as const) {
+  if (typeof ctx === 'number' && on(prefs, 'contexto')) rows.push({ label: 'ctx', bar: bar(ctx), pct: `${Math.round(ctx)}%`, note: ctx >= 80 ? tr(prefs, 'time to /compact', 'hora de /compact') : '', high: ctx >= 80 })
+  for (const [kind, item, short] of [['five_hour', 'cinco_horas', '5h'], ['seven_day', 'semana', en(prefs) ? 'wk' : 'sem']] as const) {
     const l = m.rateLimits?.find((x) => x.kind === kind)
     if (!l || !on(prefs, item)) continue
-    const at = resetText(l.resetsAt, now)
-    rows.push({ label: short, bar: bar(l.percentUsed), pct: `${Math.round(l.percentUsed)}%`, note: at ? `zera ${at}` : '', high: l.percentUsed >= 80 })
+    const at = resetText(l.resetsAt, now, prefs.lang)
+    rows.push({ label: short, bar: bar(l.percentUsed), pct: `${Math.round(l.percentUsed)}%`, note: at ? tr(prefs, `resets ${at}`, `zera ${at}`) : '', high: l.percentUsed >= 80 })
   }
   return rows
 }

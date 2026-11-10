@@ -29,8 +29,9 @@ test('organizar: passa os arquivos soltos do plugin antigo para as subpastas e e
   assert.equal(fs.readFileSync(faundrPath(root, 'handover'), 'utf8'), 'PASSAGEM.md')
   assert.equal(fs.readFileSync(faundrPath(root, 'extractCache'), 'utf8'), 'extract-cache.json')
   assert.ok(fs.existsSync(path.join(faundrPath(root, 'tests'), 'coverage', 'lcov.info')))
-  // O estado continua na raiz da pasta; nada solto sobra além dele e do LEIA-ME.
-  assert.deepEqual(fs.readdirSync(dir).filter((f) => fs.statSync(path.join(dir, f)).isFile()).sort(), ['LEIA-ME.md', 'state.json'])
+  // O estado continua na raiz da pasta; nada solto sobra além dele, do LEIA-ME e do .gitignore que deixa a pasta fora do git.
+  assert.deepEqual(fs.readdirSync(dir).filter((f) => fs.statSync(path.join(dir, f)).isFile()).sort(), ['.gitignore', 'LEIA-ME.md', 'state.json'])
+  assert.match(fs.readFileSync(path.join(dir, '.gitignore'), 'utf8'), /^\*$/m)
   assert.match(fs.readFileSync(path.join(dir, 'LEIA-ME.md'), 'utf8'), /painel\//)
 
   // Já organizado: não mexe em nada.

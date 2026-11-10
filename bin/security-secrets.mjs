@@ -86,6 +86,12 @@ const COMMON_SECRETS = [
   [/\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, 'eyJ***'],
   [/\b([a-z][a-z0-9+.-]*:\/\/[^:\/\s@]+:)[^@\s\/]{3,}@/gi, '$1***@'],
   [/\b((?:password|passwd|senha|secret|api[_-]?key|access[_-]?token|auth[_-]?token|private[_-]?key|client[_-]?secret)["']?\s*[:=]\s*["']?)[^\s"',;&]{6,}/gi, '$1***'],
+  // Variável de ambiente com o nome no meio de outro (PGPASSWORD=, export DB_PASSWORD=, STRIPE_SECRET_KEY=,
+  // SUPABASE_ACCESS_TOKEN=): o `\b` da regra acima não casa depois de letra ou `_`.
+  [/(?<![A-Za-z0-9_])([A-Za-z0-9_]*(?:password|passwd|secret|token|_key|key_|_pwd|pwd_)[A-Za-z0-9_]*\s*=\s*["']?)[^\s"',;&]{4,}/gi, '$1***'],
+  [/(?<![A-Za-z0-9_])([A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|_KEY|KEY_|_PWD|PWD_)[A-Z0-9_]*\s*:\s*["']?)[^\s"',;&]{4,}/g, '$1***'],
+  // Senha colada no -p do mysql/mariadb (mysql -u root -pSenha).
+  [/(\b(?:mysql|mysqldump|mysqladmin|mariadb)\b[^\n|;&]*?\s-p)(?=[^\s-])\S+/g, '$1***'],
 ]
 export function maskPayload(value) {
   if (typeof value === 'string') {

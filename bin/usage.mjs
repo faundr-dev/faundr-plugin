@@ -2,9 +2,10 @@
 // Codex (traduzida para o mesmo formato em codex-transcript.mjs): tokens por modelo, ferramentas, quanto o Faundr pôs
 // no contexto, o que o aviso do fim da resposta custou e a economia estimada do grafo. Nada do texto da conversa sai
 // daqui: só números.
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { codexEntries, isCodexEntry } from './codex-transcript.mjs'
+import { codexEntries, isCodexEntry, isCodexRollout } from './codex-transcript.mjs'
 
 const EXPLORE_TOOLS = new Set(['Read', 'Grep', 'Glob'])
 // Bash usado para olhar o código (o mesmo papel de Read/Grep/Glob). No Codex o terminal costuma ser o PowerShell.
@@ -148,11 +149,11 @@ function countToolResults(content, usage, toolNames) {
   }
 }
 
-/** Soma o uso de uma lista de entradas da conversa. `main` = conversa principal (pedidos, hooks e aviso do fim). */
-export function summarizeEntries(entries, { main = true, usage = emptyUsage(), seen = new Map() } = {}) {
-  // toolNames: tool_use_id → { name, command }
-  const st = { toolNames: new Map(), toolSeen: new Set(), inGate: false, gateSeen: new Set() }
+// Estado da leitura de um arquivo da conversa. toolNames: tool_use_id → { name, command }.
+const newScanState = () => ({ toolNames: new Map(), toolSeen: new Set(), inGate: false, gateSeen: new Set() })
 
+/** Soma o uso de uma lista de entradas da conversa. `main` = conversa principal (pedidos, hooks e aviso do fim). */
+export function summarizeEntries(entries, { main = true, usage = emptyUsage(), seen = new Map(), st = newScanState() } = {}) {
   for (const e of entries) {
     if (main) st.inGate = countHook(e.attachment, usage, st.inGate)
     if (main && isPrompt(e)) {
@@ -165,10 +166,13 @@ export function summarizeEntries(entries, { main = true, usage = emptyUsage(), s
   return { usage, seen }
 }
 
-/** Uso da sessão inteira: a conversa e os subagentes (pasta <sessão>/subagents/), sem contar duas vezes a mesma resposta. */
-export function transcriptUsage(transcriptPath) {
+/**
+ * Uso da sessão inteira: a conversa e os subagentes (pasta <sessão>/subagents/), sem contar duas vezes a mesma resposta.
+ * Com `cacheDir`, guarda lá até onde já leu (só números e ids) e, na próxima vez, lê só o que a conversa ganhou desde
+ * então (ela passa de dezenas de MB e era relida a cada fim de resposta). A conversa do Codex é sempre relida inteira.
+ */
+export function transcriptUsage(transcriptPath, { cacheDir = null } = {}) {
   if (!transcriptPath || !fs.existsSync(transcriptPath)) return null
-  const { usage, seen } = summarizeEntries(readEntries(transcriptPath))
   const subDir = path.join(path.dirname(transcriptPath), path.basename(transcriptPath, '.jsonl'), 'subagents')
   let subFiles = []
   try {
@@ -176,9 +180,32 @@ export function transcriptUsage(transcriptPath) {
   } catch {
     // Sessão sem subagentes: a pasta não existe.
   }
-  for (const f of subFiles) summarizeEntries(readEntries(path.join(subDir, f)), { main: false, usage, seen })
-  usage.subagents = subFiles.length
+  const cacheFile = cacheDir && !isCodexRollout(transcriptPath) ? usageCacheFile(cacheDir, transcriptPath) : null
+  if (!cacheFile) {
+    const { usage, seen } = summarizeEntries(readEntries(transcriptPath))
+    for (const f of subFiles) summarizeEntries(readEntries(path.join(subDir, f)), { main: false, usage, seen })
+    return finishUsage(usage, seen, subFiles.length)
+  }
+  const cache = readUsageCache(cacheFile, transcriptPath)
+  const files = [[transcriptPath, true], ...subFiles.map((f) => [path.join(subDir, f), false])]
+  for (const [file, main] of files) {
+    const prev = cache.files[file] ?? { offset: 0, st: newScanState() }
+    const chunk = newLines(file, prev.offset)
+    // Arquivo menor do que a marca (reescrito): o cache não vale mais, lê tudo de novo.
+    if (!chunk) {
+      fs.rmSync(cacheFile, { force: true })
+      return transcriptUsage(transcriptPath)
+    }
+    summarizeEntries(chunk.entries, { main, usage: cache.usage, seen: cache.seen, st: prev.st })
+    cache.files[file] = { offset: chunk.offset, st: prev.st }
+  }
+  writeUsageCache(cacheFile, transcriptPath, cache)
+  return finishUsage(structuredClone(cache.usage), cache.seen, subFiles.length)
+}
 
+// Soma de cada resposta (vale a última linha de cada id) e o número de subagentes.
+function finishUsage(usage, seen, subagents) {
+  usage.subagents = subagents
   // Cada resposta aparece em várias linhas (uma por bloco); vale a última de cada id.
   for (const { model, usage: u } of seen.values()) {
     const t = (usage.models[model] ??= emptyTokens())
@@ -190,6 +217,105 @@ export function transcriptUsage(transcriptPath) {
     usage.api_calls += 1
   }
   return usage
+}
+
+// ---- Cache da leitura da conversa (transcriptUsage com cacheDir) ----------------------------------------------
+const CACHE_MAX_AGE = 14 * 24 * 3600 * 1000
+// Ferramentas sem resultado ainda e ids repetidos em linhas seguidas: só os recentes importam para o próximo trecho.
+const KEEP_RECENT = 500
+
+const usageCacheFile = (dir, transcriptPath) => path.join(dir, `usage-${createHash('sha1').update(path.resolve(transcriptPath)).digest('hex').slice(0, 16)}.json`)
+const recent = (iterable) => [...iterable].slice(-KEEP_RECENT)
+
+function readUsageCache(file, transcriptPath) {
+  try {
+    const c = JSON.parse(fs.readFileSync(file, 'utf8'))
+    if (c.v !== 1 || c.transcript !== transcriptPath) throw new Error('outro arquivo')
+    const files = {}
+    for (const [f, s] of Object.entries(c.files)) {
+      const st = { toolNames: new Map(s.toolNames), toolSeen: new Set(s.toolSeen), inGate: Boolean(s.inGate), gateSeen: new Set(s.gateSeen) }
+      files[f] = { offset: s.offset, st }
+    }
+    const seen = new Map(c.seen.map(([id, model, i, o, cc, cr]) => [id, { model, usage: { input_tokens: i, output_tokens: o, cache_creation_input_tokens: cc, cache_read_input_tokens: cr } }]))
+    return { usage: c.usage, seen, files }
+  } catch {
+    // Sem cache, de outra versão ou corrompido: começa do zero.
+    return { usage: emptyUsage(), seen: new Map(), files: {} }
+  }
+}
+
+function writeUsageCache(file, transcriptPath, { usage, seen, files }) {
+  const out = {
+    v: 1,
+    transcript: transcriptPath,
+    usage,
+    seen: [...seen].map(([id, { model, usage: u }]) => [id, model, u.input_tokens ?? 0, u.output_tokens ?? 0, u.cache_creation_input_tokens ?? 0, u.cache_read_input_tokens ?? 0]),
+    files: Object.fromEntries(
+      Object.entries(files).map(([f, { offset, st }]) => [f, { offset, toolNames: recent(st.toolNames), toolSeen: recent(st.toolSeen), inGate: st.inGate, gateSeen: recent(st.gateSeen) }]),
+    ),
+  }
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    const tmp = `${file}.${process.pid}.tmp`
+    fs.writeFileSync(tmp, JSON.stringify(out))
+    fs.renameSync(tmp, file)
+    pruneUsageCache(path.dirname(file))
+  } catch {
+    // Sem como gravar o cache: a próxima vez relê a conversa inteira.
+  }
+}
+
+// Caches de conversas paradas há mais de 14 dias saem.
+function pruneUsageCache(dir) {
+  const now = Date.now()
+  for (const f of fs.readdirSync(dir)) {
+    if (!/^usage-[0-9a-f]+\.json$/.test(f)) continue
+    try {
+      if (now - fs.statSync(path.join(dir, f)).mtimeMs > CACHE_MAX_AGE) fs.rmSync(path.join(dir, f), { force: true })
+    } catch {
+      // Outro processo apagou antes: nada a fazer.
+    }
+  }
+}
+
+/** As linhas completas da conversa depois de `offset` e onde parar da próxima vez; null se o arquivo encolheu. */
+function newLines(file, offset) {
+  let buf
+  try {
+    const fd = fs.openSync(file, 'r')
+    try {
+      const size = fs.fstatSync(fd).size
+      if (size < offset) return null
+      buf = Buffer.alloc(size - offset)
+      fs.readSync(fd, buf, 0, buf.length, offset)
+    } finally {
+      fs.closeSync(fd)
+    }
+  } catch {
+    // Arquivo sumiu ou ilegível: nada novo agora.
+    return { entries: [], offset }
+  }
+  // A última linha pode estar sendo escrita: fica para a próxima leitura (a não ser que já seja um JSON completo, como
+  // no fim de um arquivo sem a quebra de linha final).
+  let end = buf.lastIndexOf(0x0a) + 1
+  try {
+    if (end < buf.length) {
+      JSON.parse(buf.subarray(end).toString('utf8'))
+      end = buf.length
+    }
+  } catch {
+    // Linha pela metade: fica para a próxima.
+  }
+  const entries = []
+  for (const line of buf.subarray(0, end).toString('utf8').split('\n')) {
+    if (!line) continue
+    try {
+      entries.push(JSON.parse(line))
+    } catch {
+      // Linha inválida: pula só ela.
+    }
+  }
+  return { entries: normalize(entries), offset: offset + end }
 }
 
 // Arquivos citados: "src=<arquivo>" (graph-query), "Source: <arquivo>" (ou "Fonte:") e "<arquivo>:L<linha>" (graph-callers, graph-path).

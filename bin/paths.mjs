@@ -141,6 +141,14 @@ export function organizeFaundrDir(root) {
   } catch {
     // O LEIA-ME é só explicação: sem gravar, a pasta funciona igual.
   }
+  // A pasta fica fora do git mesmo sem o .faundr/ no .gitignore do projeto (o setup só mexe nele com o OK do dono):
+  // o state.json guarda os últimos pedidos da pessoa. Um .gitignore dentro da própria pasta, sem tocar no do projeto.
+  const ignore = path.join(dir, '.gitignore')
+  try {
+    if (!fs.existsSync(ignore)) fs.writeFileSync(ignore, '# Faundr: local folder, stays out of git\n*\n')
+  } catch {
+    // Sem gravar: o setup ainda oferece pôr .faundr/ no .gitignore do projeto.
+  }
   return moved
 }
 // ---------- entrada dos hooks ----------

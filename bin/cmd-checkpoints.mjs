@@ -79,9 +79,12 @@ async function downloadRequestShot(ref) {
   if (!res.ok) throw new Error(`Could not download the screenshot (${res.status}).`)
   const dir = path.join(root, FAUNDR_DIR, FILES.requestShots)
   fs.mkdirSync(dir, { recursive: true })
-  const file = path.join(dir, `${id.slice(0, 8)}.${/^(jpeg|png|webp)$/.test(ext) ? ext : 'jpeg'}`)
+  // O id vem do servidor e vira nome de arquivo: só letras, números e hífen (sem "../" nem barra).
+  const name = String(id ?? '').replace(/[^a-z0-9-]/gi, '').slice(0, 8)
+  if (!name) throw new Error('The server sent an invalid request id.')
+  const file = path.join(dir, `${name}.${/^(jpeg|png|webp)$/.test(ext) ? ext : 'jpeg'}`)
   fs.writeFileSync(file, Buffer.from(await res.arrayBuffer()))
-  console.log(`Screenshot of request ${id.slice(0, 8)} saved to ${file}. Open the image (Read tool) to see the element pointed at, with the white outline around it.`)
+  console.log(`Screenshot of request ${name} saved to ${file}. Open the image (Read tool) to see the element pointed at, with the white outline around it.`)
 }
 
 // Botão "Rodar agora" (opcional): ajudante que abre sessões de fundo do Claude Code com os pedidos da própria pessoa.

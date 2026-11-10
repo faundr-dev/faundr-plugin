@@ -20,8 +20,14 @@ export const CHECKPOINT_EVERY_MS = 30 * 60_000
 const IDENTITY = { GIT_AUTHOR_NAME: 'Faundr', GIT_AUTHOR_EMAIL: 'faundr@localhost', GIT_COMMITTER_NAME: 'Faundr', GIT_COMMITTER_EMAIL: 'faundr@localhost' }
 const OWN = (p) => p === '.faundr' || p.startsWith('.faundr/')
 
-function git(root, args, { env, input } = {}) {
-  const r = spawnSync('git', args, { cwd: root, env: env ?? process.env, input, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true })
+// Ponto tirado por um hook (o Claude Code derruba o hook aos 15 s): o git todo tem esse prazo, e passar dele só
+// deixa o comando seguir sem ponto.
+export const HOOK_CHECKPOINT_MS = 10_000
+
+// `deadline`: hora (ms) em que o git é parado; sem ela, sem prazo (comandos da pessoa, como faundr restore).
+function git(root, args, { env, input, deadline } = {}) {
+  const timeout = deadline ? Math.max(1, deadline - Date.now()) : undefined
+  const r = spawnSync('git', args, { cwd: root, env: env ?? process.env, input, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true, timeout })
   if (r.error) throw r.error
   if (r.status !== 0) throw new Error(`git ${args[0]}: ${(r.stderr || r.stdout).trim().split('\n').pop()}`)
   return r.stdout
@@ -41,13 +47,13 @@ export function gitRoot(dir) {
 // Árvore (tree) com os arquivos atuais, byte a byte: sem os filtros do git (fim de linha, LFS), para a volta
 // devolver exatamente o que estava no disco. Entra o que o git já acompanha mais os arquivos novos que não estão
 // no .gitignore. Montada num índice temporário: o índice do usuário não muda.
-export function currentTree(root) {
+export function currentTree(root, deadline) {
   const modes = new Map()
-  for (const entry of git(root, ['ls-files', '-z', '-s']).split('\0')) {
+  for (const entry of git(root, ['ls-files', '-z', '-s'], { deadline }).split('\0')) {
     const m = entry.match(/^(\d+) \S+ \d\t(.+)$/s)
     if (m) modes.set(m[2], m[1])
   }
-  const untracked = git(root, ['ls-files', '-z', '-o', '--exclude-standard']).split('\0')
+  const untracked = git(root, ['ls-files', '-z', '-o', '--exclude-standard'], { deadline }).split('\0')
   const files = [...new Set([...modes.keys(), ...untracked])].filter((f) => {
     if (!f || OWN(f) || /[\n\r]/.test(f)) return false
     try {
@@ -61,11 +67,11 @@ export function currentTree(root) {
   try {
     const env = { ...process.env, GIT_INDEX_FILE: tmp }
     if (files.length) {
-      const hashes = git(root, ['hash-object', '-w', '--no-filters', '--stdin-paths'], { input: `${files.join('\n')}\n` }).trim().split('\n')
+      const hashes = git(root, ['hash-object', '-w', '--no-filters', '--stdin-paths'], { input: `${files.join('\n')}\n`, deadline }).trim().split('\n')
       const info = files.map((f, i) => `${modes.get(f) === '100755' ? '100755' : '100644'} ${hashes[i]}\t${f}\0`).join('')
-      git(root, ['update-index', '-z', '--add', '--index-info'], { env, input: info })
+      git(root, ['update-index', '-z', '--add', '--index-info'], { env, input: info, deadline })
     }
-    return git(root, ['write-tree'], { env }).trim()
+    return git(root, ['write-tree'], { env, deadline }).trim()
   } finally {
     try {
       fs.unlinkSync(tmp)
@@ -102,8 +108,8 @@ function parseMessage(body) {
 }
 
 // Pontos de volta, do mais novo para o mais antigo (n = 1 é o mais novo).
-export function listCheckpoints(root) {
-  const out = git(root, ['for-each-ref', '--sort=-refname', '--format=%(refname)%1f%(objectname)%1f%(tree)%1f%(contents)%1e', CHECKPOINT_PREFIX])
+export function listCheckpoints(root, deadline) {
+  const out = git(root, ['for-each-ref', '--sort=-refname', '--format=%(refname)%1f%(objectname)%1f%(tree)%1f%(contents)%1e', CHECKPOINT_PREFIX], { deadline })
   return out
     .split('\x1e')
     .map((r) => r.replace(/^\n/, ''))
@@ -116,18 +122,20 @@ export function listCheckpoints(root) {
 }
 
 // Tira uma foto. Se nada mudou desde a última, não cria outra (devolve a última com created: false).
-export function createCheckpoint(root, { reason = t('restore point', 'ponto de volta'), session = null, now = Date.now() } = {}) {
-  const tree = currentTree(root)
-  const all = listCheckpoints(root)
+// `timeoutMs`: prazo de todo o git da foto (nos hooks, HOOK_CHECKPOINT_MS); passou dele, dá erro sem criar o ponto.
+export function createCheckpoint(root, { reason = t('restore point', 'ponto de volta'), session = null, now = Date.now(), timeoutMs } = {}) {
+  const deadline = timeoutMs ? Date.now() + timeoutMs : undefined
+  const tree = currentTree(root, deadline)
+  const all = listCheckpoints(root, deadline)
   if (all[0]?.tree === tree) return { ...all[0], created: false }
   let head = null
   try {
-    head = git(root, ['rev-parse', '--verify', '-q', 'HEAD']).trim() || null
+    head = git(root, ['rev-parse', '--verify', '-q', 'HEAD'], { deadline }).trim() || null
   } catch {
     // Repositório sem commit ainda: o ponto nasce sem pai.
   }
   const message = [`faundr: ${reason.replace(/\s+/g, ' ').slice(0, 200)}`, '', session && `session: ${session}`].filter((l) => l !== null && l !== undefined && l !== false).join('\n')
-  const commit = git(root, ['commit-tree', tree, ...(head ? ['-p', head] : []), '-F', '-'], { env: { ...process.env, ...IDENTITY }, input: message }).trim()
+  const commit = git(root, ['commit-tree', tree, ...(head ? ['-p', head] : []), '-F', '-'], { env: { ...process.env, ...IDENTITY }, input: message, deadline }).trim()
   let stamp = now
   while (all.some((c) => c.ref === `${CHECKPOINT_PREFIX}${stamp}`)) stamp++
   const ref = `${CHECKPOINT_PREFIX}${stamp}`
@@ -194,9 +202,12 @@ export function restoreCheckpoint(root, checkpoint, { session = null } = {}) {
   return { saved, restored: bring, removed: remove }
 }
 
+// Ponto que não saiu (git lento, prazo do hook): tenta de novo depois deste tempo, e não em todo comando.
+const RETRY_AFTER_FAIL_MS = 5 * 60_000
+
 // Uma foto antes da primeira mudança da sessão e, com edições seguidas, de novo a cada 30 min.
 // Devolve o ponto de volta criado (ou null quando não era hora, não há git ou nada mudou).
-export function ensureSessionCheckpoint(cwd, sessionId, { configDir, reason = t('before the first change of the session', 'antes da primeira mudança da sessão'), now = Date.now(), every = CHECKPOINT_EVERY_MS } = {}) {
+export function ensureSessionCheckpoint(cwd, sessionId, { configDir, reason = t('before the first change of the session', 'antes da primeira mudança da sessão'), now = Date.now(), every = CHECKPOINT_EVERY_MS, timeoutMs = HOOK_CHECKPOINT_MS } = {}) {
   if (!sessionId || !configDir) return null
   const root = gitRoot(cwd)
   if (!root) return null
@@ -209,9 +220,16 @@ export function ensureSessionCheckpoint(cwd, sessionId, { configDir, reason = t(
   }
   if (last && now - last < every) return null
   fs.mkdirSync(configDir, { recursive: true })
-  fs.writeFileSync(marker, String(now))
   cleanMarkers(configDir, now)
-  const c = createCheckpoint(root, { reason: last ? t('before continuing the changes (30 min after the last point)', 'antes de continuar as mudanças (30 min depois do último ponto)') : reason, session: sessionId, now })
+  let c
+  try {
+    c = createCheckpoint(root, { reason: last ? t('before continuing the changes (30 min after the last point)', 'antes de continuar as mudanças (30 min depois do último ponto)') : reason, session: sessionId, now, timeoutMs })
+  } catch (err) {
+    fs.writeFileSync(marker, String(now - every + RETRY_AFTER_FAIL_MS))
+    throw err
+  }
+  // O marcador só depois de o ponto existir: hook derrubado no meio não deixa a sessão 30 min sem ponto.
+  fs.writeFileSync(marker, String(now))
   return c.created ? c : null
 }
 

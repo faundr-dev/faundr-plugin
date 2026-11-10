@@ -6,6 +6,7 @@
 //   - com tema claro e escuro, cor da paleta escrita fixa (não troca com o tema).
 // O julgamento fino (a tela segue o design.md? faz sentido?) fica com a auditoria do agente.
 
+import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { t } from './i18n.mjs'
@@ -40,21 +41,52 @@ export function findDesignMd(root) {
   return null
 }
 
+const isScreenFile = (name, rel) => (UI_EXT.test(name) || isFlutterScreen(rel)) && !GENERATED.test(name)
+
 /** Arquivos de tela do projeto (componentes e páginas). */
 export function uiFiles(root) {
   const ignored = faundrIgnore(root)
+  // Com git: a lista dele (respeita o .gitignore e não varre node_modules nem pastas de saída); sem git, a varredura.
+  const listed = gitFiles(root)
+  if (listed) return listed.filter((rel) => !SKIP.test(rel) && !ignoredBy(ignored, rel) && isScreenFile(path.posix.basename(rel), rel) && !inClaudePlugin(root, rel) && fs.existsSync(path.join(root, rel)))
   const out = []
   const walk = (dir) => {
-    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    let entries
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    } catch {
+      // Pasta sem permissão de leitura (EACCES) ou que sumiu no meio: fica de fora.
+      return
+    }
+    for (const e of entries) {
       const abs = path.join(dir, e.name)
       const rel = path.relative(root, abs).split(path.sep).join('/')
       if (SKIP.test(rel) || (e.isDirectory() && isClaudePlugin(abs)) || ignoredBy(ignored, rel)) continue
       if (e.isDirectory()) walk(abs)
-      else if ((UI_EXT.test(e.name) || isFlutterScreen(rel)) && !GENERATED.test(e.name)) out.push(rel)
+      else if (isScreenFile(e.name, rel)) out.push(rel)
     }
   }
   walk(root)
   return out
+}
+
+// Arquivos do git (versionados e novos fora do .gitignore), relativos à raiz; null sem git ou fora de um repositório.
+function gitFiles(root) {
+  const r = spawnSync('git', ['ls-files', '-z', '-co', '--exclude-standard'], { cwd: root, encoding: 'utf8', windowsHide: true, maxBuffer: 64 << 20 })
+  if (r.error || r.status !== 0) return null
+  return [...new Set(r.stdout.split('\0').filter(Boolean))]
+}
+
+// Algum diretório acima do arquivo (dentro da raiz) é um plugin do Claude Code? Uma consulta por pasta.
+const pluginDirs = new Map()
+function inClaudePlugin(root, rel) {
+  const dirs = rel.split('/').slice(0, -1)
+  for (let i = 1; i <= dirs.length; i++) {
+    const abs = path.join(root, ...dirs.slice(0, i))
+    if (!pluginDirs.has(abs)) pluginDirs.set(abs, isClaudePlugin(abs))
+    if (pluginDirs.get(abs)) return true
+  }
+  return false
 }
 
 const HEX = /#(?:[0-9a-f]{3}|[0-9a-f]{6})\b/gi

@@ -24,3 +24,22 @@ test('texto sem segredo passa igual', () => {
   const payload = { prompt: 'arrume o botão de comprar no celular', tool_input: { command: 'npm test' } }
   assert.deepEqual(maskPayload(payload), payload)
 })
+
+test('senha em variável de ambiente e no -p do mysql sai mascarada', () => {
+  const cases = [
+    ['PGPASSWORD=Pg9xLr4Tn psql -h db -U app', 'Pg9xLr4Tn'],
+    ['export DB_PASSWORD=Db7Wm2Zx9', 'Db7Wm2Zx9'],
+    ['STRIPE_SECRET_KEY=whsec9Lr4Tn8 npm start', 'whsec9Lr4Tn8'],
+    ['SUPABASE_ACCESS_TOKEN=Sb3Kq8Vn2 supabase db push', 'Sb3Kq8Vn2'],
+    ['db_password=Lw5Tn8Vb1 node app.js', 'Lw5Tn8Vb1'],
+    ['mysql -u root -pMy5ql9Senha app', 'My5ql9Senha'],
+    ['DB_PASSWORD: Yaml8Senha', 'Yaml8Senha'],
+  ]
+  for (const [command, secret] of cases) {
+    const out = maskPayload({ tool_input: { command } }).tool_input.command
+    assert.ok(!out.includes(secret), out)
+  }
+  assert.match(maskPayload('PGPASSWORD=Pg9xLr4Tn psql -h db'), /^PGPASSWORD=\*\*\* psql -h db$/)
+  assert.equal(maskPayload('mysql -u root -p app'), 'mysql -u root -p app')
+  assert.equal(maskPayload('PORT=3000 npm start'), 'PORT=3000 npm start')
+})

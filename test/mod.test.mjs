@@ -41,6 +41,14 @@ test('avisos: respeitam o painel (aviso desligado, item desligado) e ignoram jan
   assert.deepEqual(alertsFor({ rateLimits: [{ kind: 'spend_limit', percentUsed: 99 }] }, {}, [], NOW).toasts, [])
 })
 
+test('avisos e faixa na língua do bar.json (lang: en)', () => {
+  const prefs = { lang: 'en' }
+  assert.deepEqual(alertsFor({ context: { percent: 82 } }, prefs, [], NOW).toasts, ['Context at 82%: time to /compact'])
+  assert.deepEqual(alertsFor({ rateLimits: [{ kind: 'seven_day', percentUsed: 95.4, resetsAt: at(17, 9, 0) }] }, prefs, [], NOW).toasts, ['Weekly limit at 95%: resets Sat 09:00'])
+  const rows = bandRows({ rateLimits: [{ kind: 'seven_day', percentUsed: 61, resetsAt: at(12, 18, 40) }] }, prefs, NOW)
+  assert.deepEqual(rows, [{ label: 'wk', bar: '████░', pct: '61%', note: 'resets 18:40', high: false }])
+})
+
 test('faixa: uma linha por medidor ligado, com barra, quando zera e destaque em 80%+', () => {
   const rows = bandRows({ context: { percent: 42 }, rateLimits: [{ kind: 'five_hour', percentUsed: 84, resetsAt: at(12, 18, 40) }, { kind: 'seven_day', percentUsed: 61 }] }, {}, NOW)
   assert.deepEqual(rows, [

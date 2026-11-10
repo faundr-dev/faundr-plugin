@@ -4,6 +4,7 @@
 // .faundr/painel/state.json, e some na próxima sessão.
 import fs from 'node:fs'
 import { faundrPath } from './paths.mjs'
+import { readJsonObject, writeJsonAtomic } from './json-file.mjs'
 
 const MAX_PROMPTS = 30
 
@@ -17,7 +18,8 @@ function read(root) {
 }
 
 function write(root, patch) {
-  fs.writeFileSync(faundrPath(root, 'state'), JSON.stringify({ ...read(root), ...patch }, null, 2))
+  const file = faundrPath(root, 'state')
+  writeJsonAtomic(file, { ...readJsonObject(file), ...patch }, 2)
 }
 
 const plain = (text) =>

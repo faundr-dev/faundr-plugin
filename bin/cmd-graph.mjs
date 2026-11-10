@@ -7,7 +7,7 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { faundrPath, organizeFaundrDir } from './paths.mjs'
 import { graphFooter } from './usage.mjs'
-import { globalRules, readMemoryIndex } from './rules.mjs'
+import { globalRules, globalRulesNote, readMemoryIndex } from './rules.mjs'
 import { t } from './i18n.mjs'
 import { CONFIG_DIR, FAUNDR_FILE, findUp, flag, GRAPH_GUIDANCE, GRAPH_LOCK_MS, LINK_FILE, loadConfig, log, projectRoot, readJson, readStdin } from './cli-core.mjs'
 import { lockFile, markGraphDirty } from './hook-events.mjs'
@@ -77,10 +77,8 @@ export async function subagentStart() {
   if (!linkFile) return
   const root = path.dirname(linkFile)
   // O subagente não recebe o início da sessão: leva as regras do time (as ligadas a arquivos chegam pelo guard).
-  const rules = globalRules(readMemoryIndex(root))
-  const teamRules = rules.length
-    ? `[Faundr] Team rules (always follow them):\n${rules.map((r) => `- ${r.title}${r.body ? ` — ${r.body}` : ''}`).join('\n')}`
-    : null
+  // Regra escrita por outra pessoa vai entre «», com o aviso de texto do time (como no início da sessão).
+  const teamRules = globalRulesNote(globalRules(readMemoryIndex(root)))
   const graphNote = fs.existsSync(faundrPath(root, 'graph')) ? GRAPH_GUIDANCE : null
   const additionalContext = [teamRules, graphNote].filter(Boolean).join('\n\n')
   if (additionalContext) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SubagentStart', additionalContext } }))

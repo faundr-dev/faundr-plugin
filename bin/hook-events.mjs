@@ -13,7 +13,7 @@ import { rememberTranscript, transcriptUsage, transcriptsToSync } from './usage.
 import { onlyUser, readSkillIndex, skillMoment, writeSkillIndex } from './skills.mjs'
 import { readWorkflows, workflowMoment, writeWorkflows } from './workflows.mjs'
 import { stepOff, writeFlows } from './flows.mjs'
-import { writeMemoryIndex, writeRules } from './rules.mjs'
+import { teamQuote, writeMemoryIndex, writeRules } from './rules.mjs'
 import { recordEdit } from './loop.mjs'
 import { machineName } from './live.mjs'
 import { writeTeam } from './team.mjs'
@@ -24,7 +24,7 @@ import { contentLangLine, ensureContentLang, languageGuidance, validContentLang 
 import { toolEdits } from './agent.mjs'
 import { codexLauncher, syncCodexRules } from './codex-rules.mjs'
 import { isCodexRollout, rolloutMeters } from './codex-transcript.mjs'
-import { AGENT, CONFIG_DIR, CONFIG_FILE, CONTEXT_EVENTS, currentFeature, DESIGN_GUIDANCE, EDIT_TOOLS, findUp, flag, gitBranch, gitHead, GRAPH_GUIDANCE, LINK_FILE, linkedProject, loadConfig, log, NO_DESIGN_GUIDANCE, pinSessionFeature, readJson, readState, readStdin, setCurrentFeature, spawnBackground, WORK_GUIDANCE, writeState } from './cli-core.mjs'
+import { AGENT, CONFIG_DIR, CONFIG_FILE, CONTEXT_EVENTS, currentFeature, DESIGN_GUIDANCE, EDIT_TOOLS, findUp, flag, gitBranch, gitHead, GRAPH_GUIDANCE, LINK_FILE, linkedProject, loadConfig, log, LOG_FILE, NO_DESIGN_GUIDANCE, pinSessionFeature, readJson, readState, readStdin, setCurrentFeature, spawnBackground, WORK_GUIDANCE, writeState } from './cli-core.mjs'
 import { editedFile, markSessionEdited } from './hook-stop.mjs'
 import { captureErrors } from './cmd-dev-errors.mjs'
 import { checkPending } from './cmd-security.mjs'
@@ -33,8 +33,9 @@ import { takeDesignDirty } from './cmd-design.mjs'
 // ---- Gatilhos por evento ----------------------------------------------------------------------------------------
 // O hook depois de cada comando (em segundo plano) guarda o evento; o fim da resposta pede as skills e os workflows
 // que o time ligou nele e esvazia a lista. Push ou deploy que falhou não chega aqui (é PostToolUseFailure).
+// `vercel` sozinho não conta (vercel env, vercel login, vercel link…): só `vercel deploy` e `vercel --prod`.
 
-const DEPLOY = /\b(git\s+push|(npm|pnpm|yarn|bun)\s+(run\s+)?deploy|vercel(\s+--prod|\s+deploy)?|wrangler\s+(pages\s+)?deploy|fly(ctl)?\s+deploy|supabase\s+functions\s+deploy|netlify\s+deploy)\b/
+const DEPLOY = /\b(git\s+push|(npm|pnpm|yarn|bun)\s+(run\s+)?deploy|vercel\s+(--prod|deploy)|wrangler\s+(pages\s+)?deploy|fly(ctl)?\s+deploy|supabase\s+functions\s+deploy|netlify\s+deploy)\b/
 
 /** Comando que vira evento quando dá certo: 'commit', 'push' (push ou deploy) ou null. */
 function commandEvent(command) {
@@ -58,20 +59,22 @@ export function eventTriggers(root, sid) {
   const pending = readState(root).eventsPending
   if (pending?.session !== sid || !pending.list?.length) return []
   writeState(root, { eventsPending: { session: sid, list: [] } })
+  // Nomes e descrições vêm do time: nome e código só com letras, números e _ : . -; o resto entre «».
+  const plain = (v) => String(v ?? '').replace(/[^\w:.-]/g, '')
   return pending.list.flatMap((ev) => [
     ...readSkillIndex(root)
       .filter((s) => skillMoment(s, ev))
       .map((s) =>
         onlyUser(s)
-          ? `the team asks for /${s.name} ${EVENT_TEXT[ev]}, but only the person calls it: ask in one line "worth running /${s.name} now?" (do not run it)`
-          : `run the ${s.name} skill${s.when ? ` (${s.when})` : ''}: the team asked for it ${EVENT_TEXT[ev]}`,
+          ? `the team asks for /${plain(s.name)} ${EVENT_TEXT[ev]}, but only the person calls it: ask in one line "worth running /${plain(s.name)} now?" (do not run it)`
+          : `run the ${plain(s.name)} skill${s.when ? ` (${teamQuote(s.when)})` : ''}: the team asked for it ${EVENT_TEXT[ev]}`,
       ),
     ...readWorkflows(root)
       .filter((w) => workflowMoment(w, ev))
       .map((w) =>
         w.call === 'user'
-          ? `the team has the workflow ${w.ref} ${w.name} ${EVENT_TEXT[ev]}, but only when the person asks: ask in one line whether they want to follow it`
-          : `follow the workflow ${w.ref} ${w.name} (faundr workflow show ${w.ref}): the team asked for it ${EVENT_TEXT[ev]}`,
+          ? `the team has the workflow ${plain(w.ref)} ${teamQuote(w.name)} ${EVENT_TEXT[ev]}, but only when the person asks: ask in one line whether they want to follow it`
+          : `follow the workflow ${plain(w.ref)} ${teamQuote(w.name)} (faundr workflow show ${plain(w.ref)}): the team asked for it ${EVENT_TEXT[ev]}`,
       ),
   ])
 }
@@ -103,6 +106,7 @@ export async function hook(agent) {
   const event = payload.hook_event_name
   const cwd = payload.cwd ?? process.cwd()
 
+  if (event === 'SessionStart') rotateLog()
   if (agent === 'codex' && event === 'SessionStart') syncCodexOnStart()
   const linkFile = findUp(cwd, LINK_FILE)
   // Pasta não ligada a nenhum projeto. No Codex, o setup e o link ainda precisam saber como rodar o Faundr.
@@ -152,6 +156,16 @@ export async function hook(agent) {
 
   const answer = await res.json()
   await deliverAnswer(answer, event, root, payload.session_id, { apiUrl, token, projectId })
+}
+
+// O hook.log só cresce (todo hook e checagem escrevem nele): passou de 1 MB, vira hook.log.1 (o anterior sai).
+const LOG_MAX_BYTES = 1 << 20
+function rotateLog() {
+  try {
+    if (fs.statSync(LOG_FILE).size > LOG_MAX_BYTES) fs.renameSync(LOG_FILE, `${LOG_FILE}.1`)
+  } catch {
+    // Sem log ainda, ou preso por outro processo: tenta no próximo início de sessão.
+  }
 }
 
 // Atalho do Codex para a versão atual do plugin (o caminho muda a cada versão; a regra libera só o atalho).
@@ -270,7 +284,8 @@ function sessionStartState(root, sid) {
 // Comandos do terminal: commit, push ou deploy que deram certo viram evento; build, tipos, testes ou lint que
 // falharam (ou voltaram a passar) viram erro no painel.
 async function bashEvents(event, payload, root, projectId, cfg) {
-  if (payload.tool_name !== 'Bash') return
+  // No Windows o Claude Code pode rodar os comandos pelo PowerShell (mesmo `tool_input.command`).
+  if (payload.tool_name !== 'Bash' && payload.tool_name !== 'PowerShell') return
   // Gatilhos por evento (o fim da resposta pede o que o time ligou neles).
   if (event === 'PostToolUse') {
     const done = commandEvent(payload.tool_input?.command)
@@ -289,11 +304,14 @@ function hookTimeout(event) {
   return CONTEXT_EVENTS.has(event) ? 8000 : 5000
 }
 
+// Até onde cada conversa já foi lida: o fim de cada resposta lê só o trecho novo (ver transcriptUsage).
+const USAGE_CACHE_DIR = path.join(CONFIG_DIR, 'usage-cache')
+
 // Impacto: tokens e uso da sessão, lidos da conversa no fim de cada resposta (só números).
 function sessionUsage(payload, root) {
   let usage = null
   try {
-    usage = transcriptUsage(payload.transcript_path)
+    usage = transcriptUsage(payload.transcript_path, { cacheDir: USAGE_CACHE_DIR })
   } catch (err) {
     log(`usage: ${err.message}`)
   }
@@ -312,7 +330,8 @@ function saveAnswer(answer, root, sid) {
   if (Array.isArray(answer.sessionNotes)) addSessionNotes(root, sid, answer.sessionNotes)
   // Escolhas da barra do terminal (o painel liga e desliga cada item): chegam no início, a cada pedido e no fim da
   // resposta, para uma mudança no painel valer sem reiniciar; a barra lê sem rede a cada atualização.
-  if (answer.bar !== undefined) fs.writeFileSync(ensureFaundrPath(root, 'bar'), JSON.stringify(answer.bar ?? {}))
+  // A língua da pessoa vai junto: o mod do Faundr (avisos e faixa) não tem o i18n do plugin.
+  if (answer.bar !== undefined) fs.writeFileSync(ensureFaundrPath(root, 'bar'), JSON.stringify({ ...(answer.bar ?? {}), lang: lang() }))
   // Passos dos workflows padrão desligados no painel: o pedido seguinte e o fim da resposta leem sem rede.
   if (Array.isArray(answer.flows)) writeFlows(root, answer.flows)
   // Workflows ativos e skills ligadas, com o gatilho: chegam no início, a cada pedido e no fim da resposta, para uma
@@ -429,7 +448,7 @@ export async function usageSync(args) {
   const current = flag(args, '--session') ?? null
   const sent = []
   for (const { sid, path: file } of transcriptsToSync(readState(root).usageTranscripts, current)) {
-    const usage = transcriptUsage(file)
+    const usage = transcriptUsage(file, { cacheDir: USAGE_CACHE_DIR })
     if (usage) {
       const res = await fetch(`${config.apiUrl}/api/hooks/event`, {
         method: 'POST',

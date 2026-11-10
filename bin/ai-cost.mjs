@@ -5,6 +5,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { faundrPath } from './paths.mjs'
+import { readJsonObject, writeJsonAtomic } from './json-file.mjs'
 import { transcriptMark, usageSince } from './usage.mjs'
 import { t } from './i18n.mjs'
 
@@ -140,7 +141,7 @@ export function markSkillStart(root, sid, name, transcriptPath, now = Date.now()
   if (open.some((o) => o.name === name)) return
   const entry = { name, at: now, transcript: transcriptPath, mark: transcriptMark(transcriptPath), window: currentWindow(root) }
   fs.mkdirSync(path.dirname(stateFile(root)), { recursive: true })
-  fs.writeFileSync(stateFile(root), JSON.stringify({ ...state, skillCosts: { session: sid, open: [...open, entry] } }, null, 2))
+  writeJsonAtomic(stateFile(root), { ...readJsonObject(stateFile(root)), skillCosts: { session: sid, open: [...open, entry] } }, 2)
 }
 
 /** Diferença da janela entre duas leituras (só quando a janela não virou no meio). */
@@ -153,7 +154,7 @@ export function windowDelta(before, after) {
 export function takeSkillCosts(root, sid) {
   const state = readJson(stateFile(root)) ?? {}
   if (state.skillCosts?.session !== sid || !state.skillCosts.open?.length) return []
-  fs.writeFileSync(stateFile(root), JSON.stringify({ ...state, skillCosts: { session: sid, open: [] } }, null, 2))
+  writeJsonAtomic(stateFile(root), { ...readJsonObject(stateFile(root)), skillCosts: { session: sid, open: [] } }, 2)
   const now = currentWindow(root)
   return state.skillCosts.open
     .map((o) => {

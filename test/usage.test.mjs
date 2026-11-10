@@ -87,6 +87,25 @@ test('consultas ao grafo: conta e lê o rodapé', () => {
   assert.equal(u.explore_chars, 0)
 })
 
+test('com cache: lê só o que a conversa ganhou e chega no mesmo total de quem relê tudo', () => {
+  const first = [
+    prompt('faça X'),
+    assistant('m1', usage(2, 100, 1000), [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'grep -rn foo src' } }]),
+  ]
+  const file = writeTranscript(first, [[assistant('s1', usage(5, 30), [], 'claude-haiku-4-5-20251001')]])
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-uc-'))
+  transcriptUsage(file, { cacheDir })
+  // A resposta continua (mesmo id), o resultado da ferramenta chega depois e uma linha ainda está pela metade.
+  fs.appendFileSync(file, [toolResult('t1', 'y'.repeat(100)), assistant('m1', usage(2, 120, 1000)), prompt('outro')].map((e) => JSON.stringify(e)).join('\n') + '\n{"type":"assis')
+  const cached = transcriptUsage(file, { cacheDir })
+  assert.deepEqual(cached, transcriptUsage(file))
+  assert.equal(cached.output_tokens, 150)
+  assert.equal(cached.explore_chars, 100)
+  assert.equal(cached.user_prompts, 2)
+  // Chamada de novo sem nada novo: o mesmo total (o cache não soma duas vezes).
+  assert.deepEqual(transcriptUsage(file, { cacheDir }), cached)
+})
+
 test('rodapé do grafo: soma os arquivos citados que existem (até 2000 linhas cada)', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-g-'))
   fs.mkdirSync(path.join(dir, 'src'))

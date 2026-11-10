@@ -86,6 +86,17 @@ test('um por sessão, de novo depois de 30 min, só com git', () => {
   assert.equal(ensureSessionCheckpoint(plain, 's2', { configDir }), null)
 })
 
+test('git que passa do prazo não deixa a sessão 30 min sem ponto: tenta de novo em 5 min', () => {
+  const root = repo()
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-cfg-'))
+  const t0 = Date.UTC(2026, 0, 15, 12)
+  fs.writeFileSync(path.join(root, 'a.txt'), 'x\n')
+  assert.throws(() => ensureSessionCheckpoint(root, 's1', { configDir, now: t0, timeoutMs: 1 }))
+  assert.equal(listCheckpoints(root).length, 0)
+  assert.equal(ensureSessionCheckpoint(root, 's1', { configDir, now: t0 + 60_000 }), null)
+  assert.ok(ensureSessionCheckpoint(root, 's1', { configDir, now: t0 + 6 * 60_000 }))
+})
+
 test('repositório sem nenhum commit também funciona', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-cp0-'))
   git(root, 'init', '-q')

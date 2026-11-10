@@ -13,7 +13,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { createCheckpoint, ensureSessionCheckpoint, gitRoot } from './checkpoints.mjs'
+import { createCheckpoint, ensureSessionCheckpoint, gitRoot, HOOK_CHECKPOINT_MS } from './checkpoints.mjs'
 import { classifyCommand, isReadOnly } from './command-guard.mjs'
 import { takeLoopAlerts } from './loop.mjs'
 import { t } from './i18n.mjs'
@@ -53,7 +53,7 @@ function checkpointBefore(command, { cwd, sql, sessionId }) {
   const verdict = classifyCommand(command, { cwd, sql })
   if (!verdict?.files || !gitRoot(cwd)) return null
   try {
-    const c = createCheckpoint(gitRoot(cwd), { reason: `${t('before', 'antes de')}: ${command.replace(/\s+/g, ' ').slice(0, 120)}`, session: sessionId })
+    const c = createCheckpoint(gitRoot(cwd), { reason: `${t('before', 'antes de')}: ${command.replace(/\s+/g, ' ').slice(0, 120)}`, session: sessionId, timeoutMs: HOOK_CHECKPOINT_MS })
     log(`ponto de volta antes de: ${verdict.what} :: ${command.slice(0, 200)}`)
     return c ? `[Faundr] Restore point saved before this command (${verdict.what}); to undo: /faundr:undo.` : null
   } catch (err) {

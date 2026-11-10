@@ -6,6 +6,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { faundrPath } from './paths.mjs'
+import { readJsonObject, writeJsonAtomic } from './json-file.mjs'
 import { topicHit } from './workflows.mjs'
 import { matchesPath } from './rules.mjs'
 
@@ -258,7 +259,7 @@ function skillsShownOnce(root, sid, pick, where, agent) {
   const ids = state.skillsShown?.session === sid ? state.skillsShown.ids : []
   const items = pick(readSkillIndex(root), ids)
   if (!items.length) return null
-  fs.writeFileSync(faundrPath(root, 'state'), JSON.stringify({ ...readState(root), skillsShown: { session: sid, ids: [...ids, ...items.map((s) => s.name)] } }, null, 2))
+  writeJsonAtomic(faundrPath(root, 'state'), { ...readJsonObject(faundrPath(root, 'state')), skillsShown: { session: sid, ids: [...ids, ...items.map((s) => s.name)] } }, 2)
   return skillNote(items, where, agent)
 }
 
@@ -302,7 +303,7 @@ export function noteSkillRan(root, sid, name) {
   const state = readJson(stateFile(root)) ?? {}
   const list = state.skillsRan?.session === sid ? state.skillsRan.list : []
   fs.mkdirSync(path.dirname(stateFile(root)), { recursive: true })
-  fs.writeFileSync(stateFile(root), JSON.stringify({ ...state, skillsRan: { session: sid, list: [...new Set([...list, s.name])] } }, null, 2))
+  writeJsonAtomic(stateFile(root), { ...readJsonObject(stateFile(root)), skillsRan: { session: sid, list: [...new Set([...list, s.name])] } }, 2)
   return s
 }
 
@@ -310,10 +311,12 @@ export function noteSkillRan(root, sid, name) {
 export function takeSkillsRan(root, sid) {
   const state = readJson(stateFile(root)) ?? {}
   if (state.skillsRan?.session !== sid || !state.skillsRan.list?.length) return []
-  fs.writeFileSync(stateFile(root), JSON.stringify({ ...state, skillsRan: { session: sid, list: [] } }, null, 2))
+  writeJsonAtomic(stateFile(root), { ...readJsonObject(stateFile(root)), skillsRan: { session: sid, list: [] } }, 2)
   return state.skillsRan.list.map((name) => connectedSkill(root, name)).filter(Boolean).map(skillReportStep)
 }
 
 export function skillReportStep(s) {
-  return `the /${s.name} skill (connected to Faundr: ${CONNECTED_KINDS[s.kind]}) ran in this response: record its result on the dashboard. Write a JSON list to a temporary file with each problem it found and each one fixed in this conversation: {"area":"seguranca|qualidade|testes|erros","status":"open|fixed","title":"<the problem, short>","severity":"critical|high|medium|low","file":"<path>","line":<n>,"detail":"<what it is, in plain language, in the user's language>","impact":"<what can happen>","fix":"<how to fix it>"} and run faundr skill-report "${s.name}" --areas ${s.kind} --file <file> (add --scope a,b if it looked at only some files). If it found nothing, run faundr skill-report "${s.name}" --areas ${s.kind} --none (closes what it had found before). Record only what is in its result, without making things up or repeating what Faundr already shows`
+  // O nome vem do arquivo da skill (pode ser de outra pessoa do time): só letras, números e _ : . - no aviso.
+  const name = String(s.name ?? '').replace(/[^\w:.-]/g, '')
+  return `the /${name} skill (connected to Faundr: ${CONNECTED_KINDS[s.kind]}) ran in this response: record its result on the dashboard. Write a JSON list to a temporary file with each problem it found and each one fixed in this conversation: {"area":"seguranca|qualidade|testes|erros","status":"open|fixed","title":"<the problem, short>","severity":"critical|high|medium|low","file":"<path>","line":<n>,"detail":"<what it is, in plain language, in the user's language>","impact":"<what can happen>","fix":"<how to fix it>"} and run faundr skill-report "${name}" --areas ${s.kind} --file <file> (add --scope a,b if it looked at only some files). If it found nothing, run faundr skill-report "${name}" --areas ${s.kind} --none (closes what it had found before). Record only what is in its result, without making things up or repeating what Faundr already shows`
 }

@@ -119,25 +119,111 @@
 import { t } from './i18n.mjs'
 import { log } from './cli-core.mjs'
 import { recordFailure } from './failures.mjs'
-import { gate } from './hook-stop.mjs'
-import { hook, usageSync } from './hook-events.mjs'
-import { guard } from './hook-guard.mjs'
-import { graph, graphCommand, mapCommand, runBackground, subagentStart } from './cmd-graph.mjs'
-import { memoryEdit, refreshStatus, work } from './cmd-features.mjs'
-import { skillsCommand, workflowCommand } from './cmd-workflows-skills.mjs'
-import { architectureCheck, diagramSave, diagramWait, overviewContext, overviewSave } from './cmd-overview.mjs'
-import { envCheck, handoffCommand, handover, resumeCommand, stackContext, stackSave, stackScan, weekly } from './cmd-stack.mjs'
-import { errorArchive, errorRecipe, errorReopen, errorResolve, errorsDsn, errorShow, errorsImportSentry, errorsList, errorsSdk, errorsUptime } from './cmd-dev-errors.mjs'
-import { parallelCommand } from './cmd-parallel.mjs'
-import { securityContext, securityFinding, securityIgnore, securityImport, securityReport, securityResolve, securityReviewDone, securityScan, securityShow, securitySupabase, skillReport } from './cmd-security.mjs'
-import { dbTest, launchCheck, privacyCommand } from './cmd-launch-check.mjs'
-import { qualityContext, qualityFinding, qualityIgnore, qualityLadder, qualityReopen, qualityResolve, qualityReviewDone, qualityRule, qualityScan, qualityShow } from './cmd-quality.mjs'
-import { testsContext, testsIgnore, testsMap, testsMutation, testsRun, testsScan, testsShow } from './cmd-tests.mjs'
-import { browseCommand, browseKeyCommand, checkpointCommand, checkpointsList, checkpointsSync, inboxCommand, listenCommand, msgCommand, restoreCommand, teamCommand } from './cmd-checkpoints.mjs'
-import { designArchive, designContext, designFinding, designLint, designReopen, showcaseContext, showcaseSave } from './cmd-design.mjs'
-import { designCoverage, designMeasureSave, designMeasureScript, designResolve, designScope, designShow } from './cmd-design-audit.mjs'
-import { agentsMd, link, login, logout, status, statusline, usageDebug } from './cmd-account.mjs'
-import { configCommand, setup, statuslineInstall } from './cmd-setup.mjs'
+// Cada comando carrega só o próprio módulo: a barra de status e os hooks rodam a toda hora e não pagam o import
+// de todos os cmd-* (cada um puxa os seus).
+const lazy = (file, name) => async (...a) => (await import(file))[name](...a)
+const gate = lazy('./hook-stop.mjs', 'gate')
+const hook = lazy('./hook-events.mjs', 'hook')
+const usageSync = lazy('./hook-events.mjs', 'usageSync')
+const guard = lazy('./hook-guard.mjs', 'guard')
+const graph = lazy('./cmd-graph.mjs', 'graph')
+const graphCommand = lazy('./cmd-graph.mjs', 'graphCommand')
+const mapCommand = lazy('./cmd-graph.mjs', 'mapCommand')
+const runBackground = lazy('./cmd-graph.mjs', 'runBackground')
+const subagentStart = lazy('./cmd-graph.mjs', 'subagentStart')
+const memoryEdit = lazy('./cmd-features.mjs', 'memoryEdit')
+const refreshStatus = lazy('./cmd-features.mjs', 'refreshStatus')
+const work = lazy('./cmd-features.mjs', 'work')
+const skillsCommand = lazy('./cmd-workflows-skills.mjs', 'skillsCommand')
+const workflowCommand = lazy('./cmd-workflows-skills.mjs', 'workflowCommand')
+const architectureCheck = lazy('./cmd-overview.mjs', 'architectureCheck')
+const diagramSave = lazy('./cmd-overview.mjs', 'diagramSave')
+const diagramWait = lazy('./cmd-overview.mjs', 'diagramWait')
+const overviewContext = lazy('./cmd-overview.mjs', 'overviewContext')
+const overviewSave = lazy('./cmd-overview.mjs', 'overviewSave')
+const envCheck = lazy('./cmd-stack.mjs', 'envCheck')
+const handoffCommand = lazy('./cmd-stack.mjs', 'handoffCommand')
+const handover = lazy('./cmd-stack.mjs', 'handover')
+const resumeCommand = lazy('./cmd-stack.mjs', 'resumeCommand')
+const stackContext = lazy('./cmd-stack.mjs', 'stackContext')
+const stackSave = lazy('./cmd-stack.mjs', 'stackSave')
+const stackScan = lazy('./cmd-stack.mjs', 'stackScan')
+const weekly = lazy('./cmd-stack.mjs', 'weekly')
+const errorArchive = lazy('./cmd-dev-errors.mjs', 'errorArchive')
+const errorRecipe = lazy('./cmd-dev-errors.mjs', 'errorRecipe')
+const errorReopen = lazy('./cmd-dev-errors.mjs', 'errorReopen')
+const errorResolve = lazy('./cmd-dev-errors.mjs', 'errorResolve')
+const errorsDsn = lazy('./cmd-dev-errors.mjs', 'errorsDsn')
+const errorShow = lazy('./cmd-dev-errors.mjs', 'errorShow')
+const errorsImportSentry = lazy('./cmd-dev-errors.mjs', 'errorsImportSentry')
+const errorsList = lazy('./cmd-dev-errors.mjs', 'errorsList')
+const errorsSdk = lazy('./cmd-dev-errors.mjs', 'errorsSdk')
+const errorsUptime = lazy('./cmd-dev-errors.mjs', 'errorsUptime')
+const parallelCommand = lazy('./cmd-parallel.mjs', 'parallelCommand')
+const securityContext = lazy('./cmd-security.mjs', 'securityContext')
+const securityFinding = lazy('./cmd-security.mjs', 'securityFinding')
+const securityIgnore = lazy('./cmd-security.mjs', 'securityIgnore')
+const securityImport = lazy('./cmd-security.mjs', 'securityImport')
+const securityReport = lazy('./cmd-security.mjs', 'securityReport')
+const securityResolve = lazy('./cmd-security.mjs', 'securityResolve')
+const securityReviewDone = lazy('./cmd-security.mjs', 'securityReviewDone')
+const securityScan = lazy('./cmd-security.mjs', 'securityScan')
+const securityShow = lazy('./cmd-security.mjs', 'securityShow')
+const securitySupabase = lazy('./cmd-security.mjs', 'securitySupabase')
+const skillReport = lazy('./cmd-security.mjs', 'skillReport')
+const dbTest = lazy('./cmd-launch-check.mjs', 'dbTest')
+const launchCheck = lazy('./cmd-launch-check.mjs', 'launchCheck')
+const privacyCommand = lazy('./cmd-launch-check.mjs', 'privacyCommand')
+const qualityContext = lazy('./cmd-quality.mjs', 'qualityContext')
+const qualityFinding = lazy('./cmd-quality.mjs', 'qualityFinding')
+const qualityIgnore = lazy('./cmd-quality.mjs', 'qualityIgnore')
+const qualityLadder = lazy('./cmd-quality.mjs', 'qualityLadder')
+const qualityReopen = lazy('./cmd-quality.mjs', 'qualityReopen')
+const qualityResolve = lazy('./cmd-quality.mjs', 'qualityResolve')
+const qualityReviewDone = lazy('./cmd-quality.mjs', 'qualityReviewDone')
+const qualityRule = lazy('./cmd-quality.mjs', 'qualityRule')
+const qualityScan = lazy('./cmd-quality.mjs', 'qualityScan')
+const qualityShow = lazy('./cmd-quality.mjs', 'qualityShow')
+const testsContext = lazy('./cmd-tests.mjs', 'testsContext')
+const testsIgnore = lazy('./cmd-tests.mjs', 'testsIgnore')
+const testsMap = lazy('./cmd-tests.mjs', 'testsMap')
+const testsMutation = lazy('./cmd-tests.mjs', 'testsMutation')
+const testsRun = lazy('./cmd-tests.mjs', 'testsRun')
+const testsScan = lazy('./cmd-tests.mjs', 'testsScan')
+const testsShow = lazy('./cmd-tests.mjs', 'testsShow')
+const browseCommand = lazy('./cmd-checkpoints.mjs', 'browseCommand')
+const browseKeyCommand = lazy('./cmd-checkpoints.mjs', 'browseKeyCommand')
+const checkpointCommand = lazy('./cmd-checkpoints.mjs', 'checkpointCommand')
+const checkpointsList = lazy('./cmd-checkpoints.mjs', 'checkpointsList')
+const checkpointsSync = lazy('./cmd-checkpoints.mjs', 'checkpointsSync')
+const inboxCommand = lazy('./cmd-checkpoints.mjs', 'inboxCommand')
+const listenCommand = lazy('./cmd-checkpoints.mjs', 'listenCommand')
+const msgCommand = lazy('./cmd-checkpoints.mjs', 'msgCommand')
+const restoreCommand = lazy('./cmd-checkpoints.mjs', 'restoreCommand')
+const teamCommand = lazy('./cmd-checkpoints.mjs', 'teamCommand')
+const designArchive = lazy('./cmd-design.mjs', 'designArchive')
+const designContext = lazy('./cmd-design.mjs', 'designContext')
+const designFinding = lazy('./cmd-design.mjs', 'designFinding')
+const designLint = lazy('./cmd-design.mjs', 'designLint')
+const designReopen = lazy('./cmd-design.mjs', 'designReopen')
+const showcaseContext = lazy('./cmd-design.mjs', 'showcaseContext')
+const showcaseSave = lazy('./cmd-design.mjs', 'showcaseSave')
+const designCoverage = lazy('./cmd-design-audit.mjs', 'designCoverage')
+const designMeasureSave = lazy('./cmd-design-audit.mjs', 'designMeasureSave')
+const designMeasureScript = lazy('./cmd-design-audit.mjs', 'designMeasureScript')
+const designResolve = lazy('./cmd-design-audit.mjs', 'designResolve')
+const designScope = lazy('./cmd-design-audit.mjs', 'designScope')
+const designShow = lazy('./cmd-design-audit.mjs', 'designShow')
+const agentsMd = lazy('./cmd-account.mjs', 'agentsMd')
+const link = lazy('./cmd-account.mjs', 'link')
+const login = lazy('./cmd-account.mjs', 'login')
+const logout = lazy('./cmd-account.mjs', 'logout')
+const status = lazy('./cmd-account.mjs', 'status')
+const statusline = lazy('./cmd-account.mjs', 'statusline')
+const usageDebug = lazy('./cmd-account.mjs', 'usageDebug')
+const configCommand = lazy('./cmd-setup.mjs', 'configCommand')
+const setup = lazy('./cmd-setup.mjs', 'setup')
+const statuslineInstall = lazy('./cmd-setup.mjs', 'statuslineInstall')
 
 // Nomes em português de antes da 0.99: continuam funcionando, com aviso, até saírem numa próxima versão.
 const RENAMED = { fila: 'inbox', recado: 'msg', escutar: 'listen', mapa: 'map', lgpd: 'privacy', pegar: 'claim', soltar: 'release', dono: 'own', 'soltar-dono': 'disown' }

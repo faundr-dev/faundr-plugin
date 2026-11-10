@@ -7,6 +7,8 @@
 //   - nunca pula as confirmações do Claude Code (sem --dangerously-skip-permissions);
 //   - o Faundr nunca vê nem guarda o login do Claude.
 import { spawnSync } from 'node:child_process'
+import fs from 'node:fs'
+import path from 'node:path'
 import readline from 'node:readline/promises'
 import { t } from './i18n.mjs'
 
@@ -52,8 +54,33 @@ export function bgArgs(id, body) {
   return ['--bg', '--worktree', `faundr-${code}`, '--name', `Faundr: ${title}`, runPrompt(id, body)]
 }
 
+// Windows com o Claude Code instalado pelo npm: só existe o claude.cmd, que o Node não abre sem shell (e o pedido
+// vai como argumento: com shell, o texto da pessoa viraria comando). Abre direto o programa que o .cmd chama.
+export function npmShimTarget(shimPath, shimText) {
+  const m = String(shimText).match(/"%dp0%\\([^"]+\.(exe|js))"/i)
+  if (!m) return null
+  const target = path.join(path.dirname(shimPath), m[1])
+  return m[2].toLowerCase() === 'js' ? { cmd: process.execPath, pre: [target] } : { cmd: target, pre: [] }
+}
+
+function claudeViaNpmShim() {
+  if (process.platform !== 'win32') return null
+  const where = spawnSync('where', ['claude.cmd'], { encoding: 'utf8', windowsHide: true })
+  const shim = where.status === 0 ? where.stdout.split(/\r?\n/)[0].trim() : ''
+  if (!shim) return null
+  try {
+    return npmShimTarget(shim, fs.readFileSync(shim, 'utf8'))
+  } catch {
+    // .cmd sumiu ou sem permissão de leitura: fica o erro de "não encontrado".
+    return null
+  }
+}
+
 function openSession(root, run, log) {
-  const r = spawnSync('claude', bgArgs(run.id, run.body), { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 60_000 })
+  const opts = { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 60_000 }
+  let r = spawnSync('claude', bgArgs(run.id, run.body), opts)
+  const shim = r.error?.code === 'ENOENT' ? claudeViaNpmShim() : null
+  if (shim) r = spawnSync(shim.cmd, [...shim.pre, ...bgArgs(run.id, run.body)], opts)
   if (r.error || r.status !== 0) {
     const why = (r.error?.code === 'ENOENT' ? t('the claude command was not found (is Claude Code installed?)', 'o comando claude não foi encontrado (o Claude Code está instalado?)') : (r.stderr || r.stdout || String(r.error ?? '')).trim()).slice(0, 400)
     log(t(`Could not open the session for request ${run.id.slice(0, 8)}: ${why}`, `Não consegui abrir a sessão para o pedido ${run.id.slice(0, 8)}: ${why}`))

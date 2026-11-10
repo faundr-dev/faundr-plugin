@@ -8,7 +8,7 @@ import { projectFiles } from './security.mjs'
 import { onlyUser, readSkillIndex, skillMoment, takeSkillsRan } from './skills.mjs'
 import { readWorkflows, workflowMoment } from './workflows.mjs'
 import { stepOff } from './flows.mjs'
-import { matchesPath } from './rules.mjs'
+import { matchesPath, TEAM_TEXT_GUARD, teamQuote } from './rules.mjs'
 import { proofNeeded } from './loop.mjs'
 import { projectSize, takeSkillCosts } from './ai-cost.mjs'
 import { takeInbox } from './inbox.mjs'
@@ -88,12 +88,12 @@ function untrackedWork(root, sid) {
   return files >= HANDOFF_MIN_FILES ? files : null
 }
 
-async function overviewStale(projectId, token, apiUrl, route = 'overview') {
+async function overviewStale(projectId, token, apiUrl, route, signal) {
   const res = await fetch(`${apiUrl}/api/cli/${route}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
     body: JSON.stringify({ projectId, action: 'status' }),
-    signal: AbortSignal.timeout(6000),
+    signal,
   })
   if (!res.ok) {
     log(`gate: HTTP ${res.status} ${await res.text()}`)
@@ -103,13 +103,13 @@ async function overviewStale(projectId, token, apiUrl, route = 'overview') {
 }
 
 // Funcionalidade atual com o checklist e as próximas etapas registradas (para o fim da resposta).
-async function currentStep(projectId, featureId, token, apiUrl) {
+async function currentStep(projectId, featureId, token, apiUrl, signal) {
   if (!featureId) return null
   const res = await fetch(`${apiUrl}/api/cli/memory`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
     body: JSON.stringify({ projectId, action: 'board' }),
-    signal: AbortSignal.timeout(6000),
+    signal,
   })
   if (!res.ok) return null
   const { allFeatures = [] } = await res.json()
@@ -129,33 +129,40 @@ function hasChecks(root) {
   return ['tsconfig.json', 'pyproject.toml', 'pytest.ini', 'setup.cfg', 'Cargo.toml', 'go.mod'].some((f) => fs.existsSync(path.join(root, f)))
 }
 
+// As chamadas ao painel no fim da resposta rodam juntas e dividem um só prazo, bem abaixo dos 15 s do hook: em série
+// passavam do limite, e o hook derrubado no meio perdia o que já tinha saído da caixa de entrada.
+const GATE_BUDGET_MS = 8_000
+
 export async function gate() {
   const payload = JSON.parse(await readStdin())
   if (payload.stop_hook_active) return // já estamos continuando por causa de um Stop: não repetir
   const sid = payload.session_id
   const linkFile = findUp(payload.cwd ?? process.cwd(), LINK_FILE)
-  const { inboxStep, eventSteps } = await earlyStopSteps(linkFile, sid)
-  if (!linkFile || !sid || !fs.existsSync(editedFile(sid))) {
-    const early = [inboxStep, ...eventSteps].filter(Boolean)
-    return early.length ? blockStop(early) : undefined // o resto só quando a sessão mexeu em arquivos
-  }
+  if (!linkFile || !sid) return // nada sem projeto ligado ou sem sessão
   const root = path.dirname(linkFile)
   const { projectId } = readJson(linkFile) ?? {}
   const { token, apiUrl } = loadConfig()
-  if (!projectId || !token) return
-  cleanEditedMarkers()
-  const s = await stopSignals(root, sid, projectId, token, apiUrl)
-  if (!inboxStep && !eventSteps.length && !hasStopWork(s)) return
-  rememberNudges(root, sid, s)
-  blockStop(stopSteps(root, sid, s, inboxStep, eventSteps))
+  // O resto (Visão, Stack, prova, passagem…) só quando a sessão mexeu em arquivos.
+  const edited = !!projectId && !!token && fs.existsSync(editedFile(sid))
+  if (edited) cleanEditedMarkers()
+  const budget = AbortSignal.timeout(GATE_BUDGET_MS)
+  // Primeiro a rede, em paralelo, sem consumir nada local.
+  const [, tasks, remote] = await Promise.all([
+    sendSkillCosts(root, sid, budget),
+    committedTasks(root, sid, budget),
+    edited ? stopFetches(root, sid, projectId, token, apiUrl, budget) : null,
+  ])
+  // Daqui em diante, sem rede: o que é consumido (caixa de entrada, eventos, skills que rodaram) sai nesta resposta.
+  const s = edited ? stopSignals(root, sid, remote) : null
+  const { inboxStep, eventSteps } = earlyStopSteps(root, sid, tasks)
+  const steps = s ? stopSteps(root, sid, s, inboxStep, eventSteps) : [inboxStep, ...eventSteps].filter(Boolean)
+  if (!steps.length) return
+  if (s) rememberNudges(root, sid, s)
+  blockStop(steps.some((t) => t.includes('«')) ? [...steps, TEAM_TEXT_GUARD.replace(/\.$/, '')] : steps)
 }
 
-// O que vale no fim da resposta mesmo sem arquivo mexido (nada sem projeto ligado ou sem sessão).
-async function earlyStopSteps(linkFile, sid) {
-  if (!linkFile || !sid) return { inboxStep: null, eventSteps: [] }
-  const root = path.dirname(linkFile)
-  // Custo da IA: quanto cada skill que rodou nesta resposta gastou (vira o histórico das estimativas do setup).
-  await sendSkillCosts(root, sid)
+// O que vale no fim da resposta mesmo sem arquivo mexido.
+function earlyStopSteps(root, sid, tasks) {
   // Pedido, recado ou nota que chegou enquanto o agente trabalhava: entrega agora, mesmo sem arquivo mudado.
   const inbox = takeInbox(root, sid)
   const inboxStep = inbox.length ? `this arrived from the dashboard while you were working; handle it before finishing: ${inbox.join(' ')}` : null
@@ -163,40 +170,41 @@ async function earlyStopSteps(linkFile, sid) {
   // Skill conectada (segurança, testes, qualidade, erros) que rodou: registrar o resultado dela. Uma auditoria
   // costuma só ler, então vale mesmo sem arquivo mexido.
   const eventSteps = [...takeSkillsRan(root, sid), ...eventTriggers(root, sid)]
-  const tasksStep = await committedTasksStep(root, sid)
-  if (tasksStep) eventSteps.unshift(tasksStep)
+  if (tasks) writeState(root, { committedTasks: null })
+  if (tasks?.text) eventSteps.unshift(tasks.text)
   return { inboxStep, eventSteps }
 }
 
 // Depois de um commit ou push: as tarefas ainda abertas da funcionalidade atual, para marcar as que ele terminou.
 // Sem isso o trabalho ia para o git e o quadro ficava parado (a tarefa só muda com faundr done).
-async function committedTasksStep(root, sid) {
+// Devolve { text } quando o pedido foi atendido (earlyStopSteps apaga o pedido) e null quando não há pedido ou o painel
+// não respondeu (fica para o próximo fim de resposta).
+async function committedTasks(root, sid, signal) {
   if (readState(root).committedTasks !== sid) return null
-  writeState(root, { committedTasks: null })
   const featureId = currentFeature(root, sid)
   const { projectId } = readJson(path.join(root, LINK_FILE)) ?? {}
   const { token, apiUrl } = loadConfig()
-  if (!featureId || !projectId || !token) return null
+  if (!featureId || !projectId || !token) return { text: null }
   try {
     const res = await fetch(`${apiUrl}/api/cli/memory`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
       body: JSON.stringify({ projectId, action: 'board', featureId }),
-      signal: AbortSignal.timeout(6000),
+      signal,
     })
-    if (!res.ok) return null
+    if (!res.ok) return { text: null }
     const f = (await res.json()).features?.[0]
     const open = (f?.tasks ?? []).map((t, i) => ({ ...t, n: i + 1 })).filter((t) => t.task_status !== 'completed')
-    return open.length ? committedTasksText(f.title, open) : null
+    return { text: open.length ? committedTasksText(f.title, open) : null }
   } catch (err) {
-    // Sem rede ou painel fora do ar: o lembrete fica para o próximo commit.
+    // Sem rede ou painel fora do ar: o lembrete fica para o próximo fim de resposta.
     log(`committed tasks: ${err?.message ?? err}`)
     return null
   }
 }
 
 function committedTasksText(title, open) {
-  return `you committed or pushed in this session and "${title}" still has open tasks: ${open.map((t) => `${t.n}. ${t.title}`).join('; ')}. Mark with faundr done <#> each one whose work is in that commit (only what is really done; if none is, mark nothing) and tell the user in one line what you marked`
+  return `you committed or pushed in this session and ${teamQuote(title)} still has open tasks: ${open.map((t) => `${t.n}. ${teamQuote(t.title)}`).join('; ')}. Mark with faundr done <#> each one whose work is in that commit (only what is really done; if none is, mark nothing) and tell the user in one line what you marked`
 }
 
 // Marca nesta sessão os avisos que já foram dados (não repetir na próxima resposta).
@@ -206,7 +214,7 @@ function rememberNudges(root, sid, s) {
   if (s.stackStale) writeState(root, { stackNudgedSession: sid })
 }
 
-async function sendSkillCosts(root, sid) {
+async function sendSkillCosts(root, sid, signal) {
   try {
     const runs = takeSkillCosts(root, sid)
     if (!runs.length) return
@@ -218,7 +226,7 @@ async function sendSkillCosts(root, sid) {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
       body: JSON.stringify({ projectId, action: 'runs', runs, codeTokens, agent: AGENT, agentSessionId: sid }),
-      signal: AbortSignal.timeout(5000),
+      signal,
     })
   } catch (err) {
     // Medição é extra: sem rede, esta rodada fica sem histórico.
@@ -226,46 +234,41 @@ async function sendSkillCosts(root, sid) {
   }
 }
 
+// O que o fim da resposta pergunta ao painel, tudo junto. Sem rede ou painel fora do ar, cada um volta null e fica
+// para o próximo fim de resposta.
+async function stopFetches(root, sid, projectId, token, apiUrl, signal) {
+  const on = (key) => !stepOff(root, key)
+  const state = readState(root)
+  const quiet = (promise) => promise.catch(() => null)
+  const featureId = currentFeature(root, sid)
+  const [step, stale, stackStale] = await Promise.all([
+    // Checklist da funcionalidade atual acabou de terminar: anunciar a próxima etapa (uma vez por funcionalidade).
+    featureId && state.stepAnnounced !== featureId ? quiet(currentStep(projectId, featureId, token, apiUrl, signal)) : null,
+    // Visão: uma vez por sessão.
+    on('stop.overview') && state.overviewNudgedSession !== sid ? quiet(overviewStale(projectId, token, apiUrl, 'overview', signal)) : null,
+    // Stack: só quando já foi revisada e a detecção mudou (pacote, deploy, serviço novo). Uma vez por sessão.
+    on('stop.stack') && state.stackNudgedSession !== sid ? quiet(overviewStale(projectId, token, apiUrl, 'stack', signal)) : null,
+  ])
+  return { featureId, step, stale, stackStale }
+}
+
 /** O que pede um passo no fim da resposta, já sem os passos que o projeto desligou no painel. */
-async function stopSignals(root, sid, projectId, token, apiUrl) {
+function stopSignals(root, sid, { featureId, step, stale, stackStale }) {
   // Passos do workflow padrão "Fim da resposta" que o projeto desligou no painel.
   const on = (key) => !stepOff(root, key)
 
   const handoff = on('stop.handoff') && needsHandoff(root, sid)
-  // Checklist da funcionalidade atual acabou de terminar: anunciar a próxima etapa (uma vez por funcionalidade).
-  const featureId = currentFeature(root, sid)
-  const step =
-    featureId && readState(root).stepAnnounced !== featureId
-      ? await currentStep(projectId, featureId, token, apiUrl).catch(() => {
-          // Sem rede ou painel fora do ar: a próxima etapa fica para o próximo fim de resposta.
-          return null
-        })
-      : null
   const finished = step?.feature.finished && (on('stop.criteria') || on('stop.next_step')) ? step : null
   if (finished) writeState(root, { stepAnnounced: featureId })
   const designFiles = on('stop.design') ? designAuditFiles(root, sid) : []
   if (designFiles.length || readState(root).designAudited?.session !== sid)
     writeState(root, { designAudited: { session: sid, lines: editedLineCount(sid) - 1 } })
-  // Visão: uma vez por sessão.
-  const stale = !on('stop.overview') || readState(root).overviewNudgedSession === sid ? null : await overviewStale(projectId, token, apiUrl)
-  // Stack: só quando já foi revisada e a detecção mudou (pacote, deploy, serviço novo). Uma vez por sessão.
-  const stackStale = !on('stop.stack') || readState(root).stackNudgedSession === sid ? null : await stackStaleness(projectId, token, apiUrl)
   // Prova: código mudou e nenhuma checagem passou depois (uma vez por leva de mudanças, só se há o que rodar).
   const proof = on('stop.proof') && hasChecks(root) ? proofNeeded(CONFIG_DIR, sid) : null
   const untracked = on('stop.untracked') ? untrackedWork(root, sid) : null
   const triggered = stopTriggers(root, sid)
   return { on, handoff, finished, designFiles, stale, stackStale, proof, untracked, triggered }
 }
-
-// A Stack está desatualizada? Sem rede ou painel fora do ar, não pede nada agora (tenta no próximo fim de resposta).
-function stackStaleness(projectId, token, apiUrl) {
-  return overviewStale(projectId, token, apiUrl, 'stack').catch(() => {
-    // Sem resposta: a Stack não entra neste fim de resposta.
-    return null
-  })
-}
-
-const hasStopWork = (s) => !!(s.handoff || s.stale || s.stackStale || s.designFiles.length || s.finished || s.proof || s.untracked || s.triggered.length)
 
 /** Os passos do fim da resposta, na ordem em que o agente deve fazer. */
 function stopSteps(root, sid, s, inboxStep, eventSteps) {
@@ -310,16 +313,19 @@ function finishedSteps(finished, on) {
   if (!finished) return []
   const steps = []
   // Critério de pronto ainda não conferido: confere antes de dar a etapa como terminada.
+  // Títulos e textos vêm do quadro do time: entre «» (teamQuote), sem nada que feche a citação.
+  const title = teamQuote(finished.feature.title)
   const unchecked = (finished.feature.criteria ?? []).map((c, i) => ({ ...c, n: i + 1 })).filter((c) => c.met !== true)
   if (on('stop.criteria') && unchecked.length)
     steps.push(
-      `before calling "${finished.feature.title}" done, check the Done when agreed with the user: ${unchecked.map((c) => `${c.n}. ${c.text}`).join(' ')}. For each one, really check it (run, open, test) and record it with faundr criteria-check <#> --met or --not-met --note "<how you checked>"; tell the user what was met and what was not`,
+      `before calling ${title} done, check the Done when agreed with the user: ${unchecked.map((c) => `${c.n}. ${teamQuote(c.text)}`).join(' ')}. For each one, really check it (run, open, test) and record it with faundr criteria-check <#> --met or --not-met --note "<how you checked>"; tell the user what was met and what was not`,
     )
+  const next = finished.next[0]
   if (on('stop.next_step'))
     steps.push(
-      finished.next.length
-        ? `the checklist of "${finished.feature.title}" is finished: tell the user, in 1 to 2 lines, that the next recorded stage is "${finished.next[0].title}"${finished.next[0].body ? ` (${finished.next[0].body})` : ''} and ask whether to go on with it (to start: faundr focus "${finished.next[0].title}")`
-        : `the checklist of "${finished.feature.title}" is finished and there is no next stage recorded: if this work continues (another phase, something left out on purpose), record each stage with faundr feature "<stage>" --after current --desc "<what goes in>" and tell the user which one is next; if not, say the feature is complete`,
+      next
+        ? `the checklist of ${title} is finished: tell the user, in 1 to 2 lines, that the next recorded stage is ${teamQuote(next.title)}${next.body ? ` (${teamQuote(next.body)})` : ''} and ask whether to go on with it (to start: faundr focus "<that stage's title>")`
+        : `the checklist of ${title} is finished and there is no next stage recorded: if this work continues (another phase, something left out on purpose), record each stage with faundr feature "<stage>" --after current --desc "<what goes in>" and tell the user which one is next; if not, say the feature is complete`,
     )
   return steps
 }
@@ -334,14 +340,16 @@ function stopTriggers(root, sid) {
   const lastEdit = fs.statSync(editedFile(sid)).mtimeMs
   const seen = readState(root).stopTriggered?.session === sid ? readState(root).stopTriggered.at : {}
   const hits = (paths) => !paths?.length || files.some((f) => paths.some((p) => matchesPath(p, f)))
+  // Nome de skill e código de workflow só com os caracteres de um nome; descrição e nome do workflow entre «».
+  const plainName = (name) => String(name ?? '').replace(/[^\w:.-]/g, '')
   const items = [
     ...readSkillIndex(root)
       .filter((s) => skillMoment(s, 'stop') && hits(s.paths))
       .map((s) => ({
         id: `skill:${s.name}`,
         text: onlyUser(s)
-          ? `the team asks for /${s.name} at the end of responses that touch these files, but only the person calls it: ask in one line "worth running /${s.name} now?" (do not run it)`
-          : `run the ${s.name} skill${s.when ? ` (${s.when})` : ''}: the team asked for it at the end of responses that touch these files`,
+          ? `the team asks for /${plainName(s.name)} at the end of responses that touch these files, but only the person calls it: ask in one line "worth running /${plainName(s.name)} now?" (do not run it)`
+          : `run the ${plainName(s.name)} skill${s.when ? ` (${teamQuote(s.when)})` : ''}: the team asked for it at the end of responses that touch these files`,
       })),
     ...readWorkflows(root)
       .filter((w) => workflowMoment(w, 'stop') && hits(w.paths))
@@ -349,8 +357,8 @@ function stopTriggers(root, sid) {
         id: `workflow:${w.id}`,
         text:
           w.call === 'user'
-            ? `the team has the workflow ${w.ref} ${w.name} for the end of these responses, but only when the person asks: ask in one line whether they want to follow it`
-            : `follow the workflow ${w.ref} ${w.name} (faundr workflow show ${w.ref}): the team asked for it at the end of responses that touch these files`,
+            ? `the team has the workflow ${plainName(w.ref)} ${teamQuote(w.name)} for the end of these responses, but only when the person asks: ask in one line whether they want to follow it`
+            : `follow the workflow ${plainName(w.ref)} ${teamQuote(w.name)} (faundr workflow show ${plainName(w.ref)}): the team asked for it at the end of responses that touch these files`,
       })),
   ].filter((i) => (seen[i.id] ?? 0) < lastEdit)
   if (items.length) writeState(root, { stopTriggered: { session: sid, at: { ...seen, ...Object.fromEntries(items.map((i) => [i.id, lastEdit])) } } })

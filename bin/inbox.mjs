@@ -2,21 +2,16 @@
 // O hook em segundo plano grava o que o servidor mandou; o hook do pedido e o do fim da resposta entregam ao agente sem
 // usar a rede; o hook seguinte da mesma sessão confirma a entrega ao servidor (ack).
 // Duas sessões na mesma pasta: quem entrega primeiro marca aqui, e a outra não repete.
-import fs from 'node:fs'
-import { ensureFaundrPath, faundrPath } from './paths.mjs'
+import { faundrPath } from './paths.mjs'
+import { readJsonObject, writeJsonAtomic } from './json-file.mjs'
 
 const KEEP_DELIVERED_MS = 24 * 60 * 60_000
 
-function read(root) {
-  try {
-    return JSON.parse(fs.readFileSync(faundrPath(root, 'inbox'), 'utf8'))
-  } catch {
-    return { items: [], delivered: [] }
-  }
-}
+// Ilegível (outro hook gravando): lê como vazio e o write seguinte não grava por cima.
+const read = (root) => readJsonObject(faundrPath(root, 'inbox'), { items: [], delivered: [] })
 
 function write(root, data) {
-  fs.writeFileSync(ensureFaundrPath(root, 'inbox'), JSON.stringify(data, null, 2))
+  writeJsonAtomic(faundrPath(root, 'inbox'), data, 2)
 }
 
 /** O servidor mandou o que está pendente: guarda (o que já foi entregue aqui continua marcado). */

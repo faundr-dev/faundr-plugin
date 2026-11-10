@@ -9,6 +9,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { faundrPath } from './paths.mjs'
+import { readJsonObject, writeJsonAtomic } from './json-file.mjs'
 import { t } from './i18n.mjs'
 import { agentSessionId, agentStdout, currentAgent } from './agent.mjs'
 
@@ -74,6 +75,12 @@ export function saveConfig(patch) {
   fs.mkdirSync(CONFIG_DIR, { recursive: true })
   const next = { ...(readJson(CONFIG_FILE) ?? {}), ...patch }
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(next, null, 2), { mode: 0o600 })
+  // O mode só vale quando o arquivo nasce: um config.json antigo, aberto para todos, fica fechado também.
+  try {
+    fs.chmodSync(CONFIG_FILE, 0o600)
+  } catch {
+    // Sistema sem permissões Unix (Windows): nada a fazer.
+  }
 }
 
 export function log(message) {
@@ -193,8 +200,7 @@ export function projectRoot() {
 const stateFile = (root) => faundrPath(root, 'state')
 export const readState = (root) => readJson(stateFile(root)) ?? {}
 export function writeState(root, patch) {
-  fs.mkdirSync(path.join(root, '.faundr'), { recursive: true })
-  fs.writeFileSync(stateFile(root), JSON.stringify({ ...readState(root), ...patch }, null, 2))
+  writeJsonAtomic(stateFile(root), { ...readJsonObject(stateFile(root)), ...patch }, 2)
 }
 
 // Funcionalidade atual por sessão: duas sessões na mesma pasta podem tocar funcionalidades diferentes. A da pasta

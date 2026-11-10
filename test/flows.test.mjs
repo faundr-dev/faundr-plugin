@@ -102,5 +102,5 @@ test('evento: commit e deploy que deram certo pedem o que o time ligou, uma vez;
   hook({ hook_event_name: 'PostToolUseFailure', tool_input: { command: 'git push origin main' } })
   assert.equal(gate(), '')
   hook({ hook_event_name: 'PostToolUse', tool_input: { command: 'vercel --prod' } })
-  assert.match(gate(), /W-9 Publicar after the push or deploy, but only when the person asks/)
+  assert.match(gate(), /W-9 «Publicar» after the push or deploy, but only when the person asks/)
 })

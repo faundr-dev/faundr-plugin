@@ -2,10 +2,10 @@
 // painel junto da próxima requisição que o hook já faz (nenhum hook espera por isso). Só campos fechados: o comando
 // do Faundr, o tipo e o código do erro e as linhas do próprio plugin no stack. A mensagem nunca vai: pode ter caminho
 // ou trecho do projeto.
-import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CONFIG_DIR, findUp, LINK_FILE, readJson } from './cli-core.mjs'
+import { readJsonForUpdate, writeJsonAtomic } from './json-file.mjs'
 
 const FILE = path.join(CONFIG_DIR, 'failures.json')
 const PLUGIN_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -31,8 +31,10 @@ export function recordFailure(command, kind, err = null, ms = null) {
       node: process.versions.node,
       at: new Date().toISOString(),
     }
-    fs.mkdirSync(CONFIG_DIR, { recursive: true })
-    fs.writeFileSync(FILE, JSON.stringify([...read(), entry].slice(-MAX)))
+    const all = readJsonForUpdate(FILE, [])
+    // Ilegível (outro hook gravando): esta anotação se perde, mas as outras não.
+    if (all === undefined) return
+    writeJsonAtomic(FILE, [...(Array.isArray(all) ? all : []), entry].slice(-MAX))
   } catch {
     // Anotar a falha nunca pode virar outra falha.
   }
@@ -41,19 +43,15 @@ export function recordFailure(command, kind, err = null, ms = null) {
 /** As falhas deste projeto ainda não enviadas; tira do arquivo (vão no corpo do hook). */
 export function takeFailures(projectId) {
   try {
-    const all = read()
+    const all = readJsonForUpdate(FILE, [])
+    if (!Array.isArray(all)) return []
     const mine = all.filter((f) => f.projectId === projectId)
     if (!mine.length) return []
-    fs.writeFileSync(FILE, JSON.stringify(all.filter((f) => f.projectId !== projectId)))
+    writeJsonAtomic(FILE, all.filter((f) => f.projectId !== projectId))
     return mine.map(({ projectId: _, ...f }) => f)
   } catch {
     return []
   }
-}
-
-function read() {
-  const data = readJson(FILE)
-  return Array.isArray(data) ? data : []
 }
 
 // "at fn (C:\…\plugin\bin\x.mjs:12:5)" → "bin/x.mjs:12 fn": só as linhas de dentro do plugin, sem o caminho da máquina.

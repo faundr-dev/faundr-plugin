@@ -44,6 +44,14 @@ const list = (dir) => {
   }
 }
 
+// Uma parte do comando para o shell (spawnSync com shell: true junta tudo sem aspas): no Windows (cmd.exe) entre
+// aspas duplas, onde & | < > ^ ( ) viram texto; no sh, entre aspas simples.
+export function shellArg(a, win = WIN) {
+  const s = String(a)
+  if (win) return /[\s&|<>^()]/.test(s) ? `"${s}"` : s
+  return /[^\w@%+=:,./-]/.test(s) ? `'${s.replace(/'/g, `'\\''`)}'` : s
+}
+
 // O programa está no PATH? (flutter, dart, php, go, mvn, gradle, dotnet)
 const onPath = (cmd) => spawnSync(WIN ? 'where' : 'which', [cmd], { encoding: 'utf8', windowsHide: true }).status === 0
 
@@ -182,8 +190,12 @@ export function runLangTests(root, runner, { dir = '', files = null, out, timeou
   if (runner === 'ctest') return runCtest(cwd, { out, timeout, started, coverageArgs })
   if (runner === 'karma') return runKarma(root, dir, { out, timeout })
   if (runner === 'make') return runMake(cwd, { out, timeout, started, target: makeRunner(root, dir)?.target ?? 'test' })
-  const { cmd, args, shell } = commandFor(root, runner, cwd, { files, out, coverageArgs })
-  // flutter, dart, mvnw.cmd e gradlew.bat são .bat/.cmd no Windows: precisam do shell para abrir.
+  const command = commandFor(root, runner, cwd, { files, out, coverageArgs })
+  const { shell } = command
+  // flutter, dart, mvnw.cmd e gradlew.bat são .bat/.cmd no Windows: precisam do shell para abrir. Com o shell, o Node
+  // junta tudo sem aspas: cada parte vai entre aspas (pasta com espaço, arquivo com & não vira outro comando).
+  const cmd = shell ? shellArg(command.cmd) : command.cmd
+  const args = shell ? command.args.map((a) => (a === '2>&1' ? a : shellArg(a))) : command.args
   const r = spawnSync(cmd, args, { cwd, encoding: 'utf8', windowsHide: true, timeout, maxBuffer: 64 * 1024 * 1024, shell, env: { ...process.env, CI: '1', NO_COLOR: '1' } })
   const durationMs = Date.now() - started
   const failed = spawnFailed(cmd, r, timeout)
@@ -335,8 +347,7 @@ function commandFor(root, runner, cwd, { files, out, coverageArgs }) {
     const targets = files?.length && files.every((f) => RUST_TEST_FILE.test(f)) ? files.flatMap((f) => ['--test', path.posix.basename(f, '.rs')]) : []
     // Com cobertura, o cargo llvm-cov roda os mesmos testes e grava o lcov. O "Running <arquivo>" sai no stderr e os
     // resultados no stdout: o shell junta os dois na ordem (2>&1) para cada teste ficar com o arquivo certo.
-    const quote = (a) => (/\s/.test(a) ? `"${a}"` : a)
-    return { cmd: 'cargo', args: [coverageArgs.length ? 'llvm-cov' : 'test', '--no-fail-fast', ...coverageArgs.map(quote), ...targets, '2>&1'], shell: true }
+    return { cmd: 'cargo', args: [coverageArgs.length ? 'llvm-cov' : 'test', '--no-fail-fast', ...coverageArgs, ...targets, '2>&1'], shell: true }
   }
   return { cmd: runner, args: ['test', runner === 'flutter' ? '--machine' : '--reporter=json', ...coverageArgs, ...(files ?? [])], shell: WIN }
 }

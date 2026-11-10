@@ -9,25 +9,19 @@
 // O aviso é guardado em ~/.faundr/loop-<sessão>.json e entregue ao agente no próximo PreToolUse (o hook que vê
 // a falha roda em segundo plano, e o Claude Code descarta o que ele devolve). Cada aviso uma vez por sessão.
 
-import fs from 'node:fs'
 import path from 'node:path'
+import { readJsonObject, writeJsonAtomic } from './json-file.mjs'
 
 export const SAME_ERROR_TIMES = 3
 export const SAME_FILE_EDITS = 6
 
 const loopFile = (configDir, sid) => path.join(configDir, `loop-${String(sid).replace(/[^\w-]/g, '')}.json`)
 
-function read(configDir, sid) {
-  try {
-    return JSON.parse(fs.readFileSync(loopFile(configDir, sid), 'utf8'))
-  } catch {
-    return { checks: {}, alerts: [], warned: [] }
-  }
-}
+// Ilegível (outro hook gravando): lê como vazio e o write seguinte não grava por cima.
+const read = (configDir, sid) => readJsonObject(loopFile(configDir, sid), { checks: {}, alerts: [], warned: [] })
 
 function write(configDir, sid, state) {
-  fs.mkdirSync(configDir, { recursive: true })
-  fs.writeFileSync(loopFile(configDir, sid), JSON.stringify(state))
+  writeJsonAtomic(loopFile(configDir, sid), state)
 }
 
 // Mensagem do erro sem números que mudam a cada tentativa (linha, tempo, endereço).

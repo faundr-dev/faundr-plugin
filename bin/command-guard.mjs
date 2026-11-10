@@ -37,15 +37,26 @@ const DB_COMMANDS = [
   { re: /\bwrangler\s+d1\s+execute\b.*--remote\b/i, sqlOnly: true },
 ]
 
+// Regra presa ao subcomando do git (depois de -C <pasta> / -c <opção>): "checkout -f" numa mensagem de commit não conta.
+function gitSub(sub, rest) {
+  return new RegExp(String.raw`^\s(?:-[cC]\s+\S+\s+)*${sub}\b${rest}`, 'i')
+}
+
 const GIT_RULES = [
   { re: /\bpush\b.*(\s--force(-with-lease)?\b|\s-f\b|\s-[a-z]*f[a-z]*\b|\s\+[\w/.-]+)/i, what: 'overwrites the history on GitHub (git push --force); other people\'s commits may be lost' },
   { re: /\breset\s+.*--hard\b|\breset\s+--hard\b/i, what: 'discards the changes not committed yet (git reset --hard)', files: true },
   { re: /\bclean\s+-[a-z]*f/i, what: 'deletes the new files not in git yet (git clean)', files: true },
   { re: /\b(checkout|restore)\s+(--\s+)?\.(\s|$)/i, unless: /\brestore\b(?=.*--staged)(?!.*--worktree)/i, what: 'discards the changes not committed yet', files: true },
-  { re: /\bcheckout\s+(-f|--force)\b/i, what: 'switches branch discarding the uncommitted changes', files: true },
   { re: /\bstash\s+(drop|clear)\b/i, what: 'deletes changes saved in the stash' },
   { re: /\bbranch\s+(-D\b|--delete\s+--force\b|-d\s+-f\b)/, what: 'deletes a branch even with commits that are not in another one' },
   { re: /\b(filter-branch|filter-repo)\b/i, what: 'rewrites the whole git history' },
+  // Os que descartam mudanças de alguns arquivos ou trocam de branch à força: só o ponto de volta antes.
+  { re: gitSub('checkout', String.raw`.*\s--\s+\S`), what: 'overwrites these files, discarding their uncommitted changes (git checkout -- <file>)', files: true },
+  { re: gitSub('restore', String.raw`\s+\S`), unless: /\brestore\b(?=.*(--staged|\s-S\b))(?!.*(--worktree|\s-W\b))/, what: 'discards the uncommitted changes of these files (git restore)', files: true },
+  { re: gitSub('checkout', String.raw`.*\s(-f|--force)\b`), what: 'switches branch discarding the uncommitted changes', files: true },
+  { re: gitSub('switch', String.raw`.*\s(-f|--force|--discard-changes)\b`), what: 'switches branch discarding the uncommitted changes', files: true },
+  { re: gitSub('reset', String.raw`.*\s--merge\b`), what: 'goes back discarding changes of the files in the merge (git reset --merge)', files: true },
+  { re: gitSub('stash', String.raw`.*\s(-u|--include-untracked|-a|--all)\b`), what: 'moves the uncommitted changes and the new files out of the folder (git stash -u)', files: true },
 ]
 
 // Baixar e rodar na hora (curl … | sh, iex (iwr …), powershell -enc): o que roda não passa pela leitura de ninguém.
@@ -108,6 +119,19 @@ function removalRisk(target, cwd) {
   return 'outside'
 }
 
+// Pastas que o build ou o instalador refazem: apagar não perde trabalho.
+const GENERATED_DIRS = new Set(['node_modules', 'dist', 'build', 'out', '.next', '.nuxt', '.svelte-kit', '.turbo', '.vercel', '.output', '.cache', '.parcel-cache', 'coverage', 'target', '__pycache__', '.pytest_cache', '.venv', 'venv', '.expo', 'tmp', 'temp'])
+
+// Caminho dentro da pasta do projeto (relativo sem subir, ou absoluto debaixo dela).
+function insideProject(target, cwd) {
+  const t = norm(strip(target))
+  if (!t || t.startsWith('..') || /^[~$%]/.test(t)) return false
+  if (!/^(\/|[A-Z]:\/)/i.test(t)) return true
+  if (!cwd) return false
+  const base = norm(path.resolve(cwd)).toLowerCase()
+  return t.toLowerCase().startsWith(`${base}/`)
+}
+
 const REMOVE_PROGRAMS = new Set(['rm', 'rmdir', 'rd', 'remove-item', 'ri', 'del', 'erase'])
 const WINDOWS_REMOVE = new Set(['rd', 'rmdir', 'del', 'erase'])
 
@@ -137,7 +161,11 @@ function removal(seg, cwd) {
   if (!recursive) return null
   const risks = targets.map((t) => [t, removalRisk(t, cwd)]).filter(([, r]) => r)
   const worst = risks.find(([, r]) => r === 'catastrophe') ?? risks[0]
-  if (!worst) return null
+  if (!worst) {
+    // Pasta do próprio projeto (rm -rf src): sem perguntar, só o ponto de volta antes. Pasta gerada não precisa.
+    const mine = targets.filter((t) => insideProject(t, cwd) && !GENERATED_DIRS.has(path.posix.basename(norm(strip(t))).toLowerCase()))
+    return mine.length ? { level: 'ask', what: `deletes ${mine.join(', ')} inside the project`, files: true } : null
+  }
   return worst[1] === 'catastrophe'
     ? { level: 'deny', what: `deletes the whole ${worst[0]}, with everything in it`, files: true }
     : { level: 'ask', what: `deletes the folder ${worst[0]}, which is outside the project`, files: false }

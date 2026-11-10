@@ -145,3 +145,41 @@ test('baixar sem rodar, ou o mesmo texto numa mensagem, passa', () => {
   ])
     assert.equal(level(cmd), null, cmd)
 })
+
+test('o que descarta mudanças de arquivos ganha ponto de volta antes (sem perguntar, decisão de 04/11)', () => {
+  for (const cmd of [
+    'git checkout -- src/app.ts',
+    'git checkout HEAD -- .',
+    'git checkout main -- src/a.ts src/b.ts',
+    'git restore src/app.ts',
+    'git restore --source=HEAD~2 .',
+    'git restore --staged --worktree src/app.ts',
+    'git checkout main -f',
+    'git checkout --force feature/x',
+    'git switch -f main',
+    'git switch --discard-changes main',
+    'git reset --merge',
+    'git stash -u',
+    'git stash push --include-untracked',
+    'rm -rf src',
+    'rm -rf ./src/components',
+    `rm -rf ${cwd}/src`,
+    'Remove-Item -Recurse -Force src',
+  ])
+    assert.equal(classifyCommand(cmd, { cwd })?.files, true, cmd)
+  for (const cmd of [
+    'git checkout -b nova',
+    'git checkout main',
+    'git switch main',
+    'git restore --staged src/app.ts',
+    'git restore -S .',
+    'git stash',
+    'git stash list',
+    'git reset --soft HEAD~1',
+    'git commit -m "checkout -f e restore src"',
+    'rm -rf node_modules .next',
+    'Remove-Item -Recurse -Force dist',
+    'rm src/a.ts',
+  ])
+    assert.notEqual(classifyCommand(cmd, { cwd })?.files, true, cmd)
+})

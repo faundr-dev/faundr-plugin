@@ -14,7 +14,7 @@
 // tokens, cartões, e-mails e IPs antes de enviar; do pedido vão só o método e o caminho, sem cabeçalhos nem corpo.
 // No Node, liga só com NODE_ENV=production (ou enabled: true).
 
-const VERSION = '1.0.0'
+const VERSION = '1.0.1'
 const PER_MINUTE = 30
 const REPEAT_MS = 30_000
 const sentAt = []
@@ -39,15 +39,17 @@ function luhn(digits) {
 }
 
 // As mesmas regras do SDK do navegador e do recebimento: o servidor do Faundr limpa de novo ao receber.
+// A entrada é cortada antes das regras: texto enorme (corpo de resposta no erro) não trava o app.
 const scrub = (input) =>
   clip(
     String(input)
+      .slice(0, 10_000)
       .replace(/eyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}/g, '[token]')
       .replace(/\b(sk|rk|pk)_(live|test)_\w{10,}|\bsb_secret_[\w-]{10,}|\bgh[pousr]_\w{20,}|\bAKIA[0-9A-Z]{16}\b|\bxox[abpr]-[\w-]{10,}/g, '[chave]')
       .replace(/\bbearer\s+[\w.~+/=-]{12,}/gi, 'Bearer [token]')
       .replace(/\b(pass(?:word|wd)?|senha|secret|token|api[_-]?key|authorization|cookie)(["']?\s*[:=]\s*["']?)([^\s"',;&]{4,})/gi, '$1$2[filtrado]')
       .replace(/\b\d(?:[ -]?\d){12,18}\b/g, (m) => (luhn(m.replace(/\D/g, '')) ? '[cartão]' : m))
-      .replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, '[e-mail]')
+      .replace(/(?<![\w.+-])[\w.+-]+@[\w-]+\.[\w.-]+/g, '[e-mail]')
       .replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[ip]'),
     2000,
   )
@@ -122,8 +124,26 @@ function runtime() {
   return { name: 'node', version: proc?.version }
 }
 
+// Id do evento: Node 18 não tem `crypto` global, e navegador antigo não tem randomUUID.
+function eventId() {
+  const c = globalThis.crypto
+  if (c?.randomUUID) return c.randomUUID().replace(/-/g, '')
+  const bytes = new Uint8Array(16)
+  if (c?.getRandomValues) c.getRandomValues(bytes)
+  else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256)
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
 /** Manda um erro ao Faundr. A promessa nunca falha (serve para ctx.waitUntil). */
 export async function capture(error, extra = {}) {
+  try {
+    await send(error, extra)
+  } catch {
+    // Qualquer falha do SDK fica aqui: o errorHandler chama sem await, e uma rejeição viraria uncaughtException.
+  }
+}
+
+async function send(error, extra) {
   if (!options?.enabled) return
   const now = Date.now()
   if (now < pausedUntil) return
@@ -145,7 +165,7 @@ export async function capture(error, extra = {}) {
   lastSeen.set(key, now)
 
   const event = {
-    event_id: crypto.randomUUID().replace(/-/g, ''),
+    event_id: eventId(),
     timestamp: now / 1000,
     platform: 'node',
     level: 'error',
