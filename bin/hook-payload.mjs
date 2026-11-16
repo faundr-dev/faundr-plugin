@@ -41,6 +41,22 @@ export function commitDone(payload) {
   )
 }
 
+/**
+ * Primeira linha da mensagem do commit, lida do comando inteiro (antes do corte de 300 caracteres que vai ao
+ * servidor): -m "…", -m '…', -m palavra ou heredoc (-F - <<'EOF' … EOF). Sem mensagem legível, "commit".
+ */
+export function commitMessageOf(command) {
+  const cmd = String(command ?? '')
+  const at = cmd.search(/\bgit\b[^\n|;&]*\bcommit\b/)
+  if (at < 0) return null
+  const rest = cmd.slice(at)
+  const m = rest.match(/\s-m\s+(?:"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+))/)
+  const heredoc = rest.match(/<<-?\s*['"]?(\w+)['"]?[^\n]*\n([\s\S]*?)\n\s*\1\b/)
+  const raw = m ? (m[1] ?? m[2] ?? m[3] ?? '') : (heredoc?.[2] ?? '')
+  const first = raw.replace(/\\n/g, '\n').split('\n').map((l) => l.trim()).find(Boolean) ?? ''
+  return (first.startsWith('$(') ? '' : first).slice(0, 120) || 'commit'
+}
+
 /** Número da tarefa que o TaskCreate criou (o TaskUpdate depois se refere a ele). */
 export function createdTaskId(payload) {
   if (payload.tool_name !== 'TaskCreate') return undefined
@@ -82,7 +98,8 @@ function toolInput(toolName, input = {}) {
 /** Payload do hook no formato que vai para /api/hooks/event. */
 export function hookPayload(p) {
   const input = p.tool_name ? toolInput(p.tool_name, p.tool_input ?? {}) : {}
-  const derived = { commit: commitDone(p) || undefined, taskId: createdTaskId(p) }
+  // Commit feito: vai a mensagem (o servidor e o diário não precisam adivinhar pelo comando cortado).
+  const derived = { commit: commitDone(p) ? commitMessageOf(p.tool_input?.command) : undefined, taskId: createdTaskId(p) }
   const out = {
     session_id: p.session_id,
     hook_event_name: p.hook_event_name,

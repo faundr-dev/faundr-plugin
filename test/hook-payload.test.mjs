@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { commitDone, createdTaskId, hookPayload } from '../bin/hook-payload.mjs'
+import { commitDone, commitMessageOf, createdTaskId, hookPayload } from '../bin/hook-payload.mjs'
 import { graphForUpload } from '../bin/cmd-graph.mjs'
 import { withoutSnippets } from '../bin/cmd-security.mjs'
 
@@ -53,7 +53,7 @@ test('patch do Codex: só o primeiro arquivo', () => {
 test('commit e número da tarefa: calculados aqui, sai só o resultado', () => {
   const commit = { ...base, hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'git commit -m "x"' }, tool_response: { stdout: '[main abc1234] x\n 1 file changed' } }
   assert.equal(commitDone(commit), true)
-  assert.deepEqual(hookPayload(commit).derived, { commit: true })
+  assert.deepEqual(hookPayload(commit).derived, { commit: commitMessageOf(commit.tool_input.command) })
   assert.equal(commitDone({ ...commit, tool_response: { stdout: 'nothing to commit' } }), false)
   assert.equal(commitDone({ ...commit, tool_input: { command: 'git commit -q -m x' }, tool_response: { stdout: '' } }), true)
   assert.equal(hookPayload({ ...commit, tool_response: { stdout: 'nothing to commit' } }).derived, undefined)
@@ -108,4 +108,17 @@ test('mapa do código: sem cabeçalho das funções nem comentários', () => {
 
 test('segurança: o trecho do código do achado não sai', () => {
   assert.deepEqual(withoutSnippets([{ title: 'x', file: 'a.ts', line: 3, snippet: CODE }]), [{ title: 'x', file: 'a.ts', line: 3 }])
+})
+
+test('mensagem do commit: -m, aspas simples, heredoc depois de uma lista longa e sem mensagem', () => {
+  assert.equal(commitMessageOf('git commit -m "Login certo"'), 'Login certo')
+  assert.equal(commitMessageOf("git add a && git commit -q -m 'Conserta o menu'"), 'Conserta o menu')
+  const longa = `cd /x; git add ${'src/arquivo-com-nome-longo.ts '.repeat(20)}&& git commit -q -F - <<'EOF'
+Insights: filtro de período
+
+corpo
+EOF`
+  assert.equal(commitMessageOf(longa), 'Insights: filtro de período')
+  assert.equal(commitMessageOf('git commit --amend --no-edit'), 'commit')
+  assert.equal(commitMessageOf('grep -n "commit" arquivo'), null)
 })
