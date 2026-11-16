@@ -1,6 +1,7 @@
 // Mapa do código: faundr graph (gera e envia o grafo), graph-query/path/callers/skeleton/grep, map, o contexto dos
 // subagentes (subagent-start) e o processo que roda as checagens em segundo plano (background).
 
+import { gzipSync } from 'node:zlib'
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -131,16 +132,20 @@ export async function graph(args) {
     engine.writeOutputs(root, result)
     const { graph: graphJson, report } = graphForUpload(result.graph, result.report)
 
-    const res = await fetch(`${config.apiUrl}/api/cli/graph`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${config.token}` },
-      body: JSON.stringify({
+    // Em gzip: o mapa de um projeto grande passa de 10 MB em JSON e cai para ~1 MB (o servidor aceita os dois).
+    const body = gzipSync(
+      JSON.stringify({
         projectId,
         agent: flag(args, '--agent'),
         agentSessionId: flag(args, '--session'),
         graph: graphJson,
         report,
       }),
+    )
+    const res = await fetch(`${config.apiUrl}/api/cli/graph`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/gzip', authorization: `Bearer ${config.token}` },
+      body,
       signal: AbortSignal.timeout(60_000),
     })
     if (!res.ok) throw new Error(`API rejected the graph (${res.status}): ${await res.text()}`)
