@@ -66,15 +66,24 @@ const HANDOFF_EVERY_MS = 30 * 60_000
 const HANDOFF_MIN_FILES = 4
 const HANDOFF_MIN_WORK_MS = 20 * 60_000
 
-function needsHandoff(root, sid) {
-  const last = readState(root).lastHandoff
+// Bilhete velho engana mais do que nenhum: depois de uma tarefa concluída, um registro no quadro ou um commit, push ou
+// deploy, o bilhete daquela funcionalidade é pedido de novo (com um intervalo mínimo, para não pedir a cada resposta).
+// Trocar de funcionalidade com trabalho feito também pede: cada funcionalidade da sessão tem o próprio bilhete.
+const HANDOFF_PROGRESS_MIN_MS = 5 * 60_000
+
+function needsHandoff(root, sid, featureId) {
+  const state = readState(root)
+  const last = state.lastHandoff
   if (last?.session !== sid) {
     const st = fs.statSync(editedFile(sid))
     const worked = st.mtimeMs - (st.birthtimeMs || st.ctimeMs)
     return sessionEditedFiles(sid).length >= HANDOFF_MIN_FILES || worked >= HANDOFF_MIN_WORK_MS
   }
-  const edited = fs.statSync(editedFile(sid)).mtimeMs
   const at = new Date(last.at).getTime()
+  const progressed = Math.max(state.workAt ?? 0, state.commitAt ?? 0) > at
+  if (progressed && featureId && (last.feature ?? null) !== featureId) return true
+  if (progressed && Date.now() - at > HANDOFF_PROGRESS_MIN_MS) return true
+  const edited = fs.statSync(editedFile(sid)).mtimeMs
   return edited > at && Date.now() - at > HANDOFF_EVERY_MS
 }
 
@@ -257,7 +266,7 @@ function stopSignals(root, sid, { featureId, step, stale, stackStale }) {
   // Passos do workflow padrão "Fim da resposta" que o projeto desligou no painel.
   const on = (key) => !stepOff(root, key)
 
-  const handoff = on('stop.handoff') && needsHandoff(root, sid)
+  const handoff = on('stop.handoff') && needsHandoff(root, sid, featureId)
   const finished = step?.feature.finished && (on('stop.criteria') || on('stop.next_step')) ? step : null
   if (finished) writeState(root, { stepAnnounced: featureId })
   const designFiles = on('stop.design') ? designAuditFiles(root, sid) : []
@@ -285,7 +294,7 @@ function stopSteps(root, sid, s, inboxStep, eventSteps) {
     )
   if (s.handoff)
     steps.push(
-      "write the handoff note: 1 to 3 sentences, in plain language and in the user's language, saying what was left half done, what the next stage of the feature you are working on is (see faundr board; if it has recorded stages, name the next one) and anything the next person should watch out for (do not repeat the file list; if nothing is pending, say so). Run it with the Bash tool: faundr handoff \"<note>\"",
+      "write the handoff note for the feature you are working on (it replaces that feature's previous note, so it must be true now: drop what is already done): 1 to 3 sentences in the user's language, for someone who does not program and for whoever picks this up next, saying what was left half done, the next stage (see faundr board; if it has recorded stages, name the next one) and anything to watch out for; if nothing is pending, say so. Plain words only: no file, table, column, function or command names, no code terms (say \"the code map file is stored compressed\", not \"graph_path in project_graphs\"). Run it with the Bash tool: faundr handoff \"<note>\"",
     )
   if (s.designFiles.length) steps.push(designStep(root, sid, s.designFiles))
   steps.push(...finishedSteps(s.finished, s.on))

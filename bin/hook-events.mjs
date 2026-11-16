@@ -291,7 +291,7 @@ async function bashEvents(event, payload, root, projectId, cfg) {
     const done = commandEvent(payload.tool_input?.command)
     if (done) pushEvent(root, payload.session_id, done)
     // Commit ou push: o fim da resposta pede para marcar as tarefas que ele terminou.
-    if (done && payload.session_id) writeState(root, { committedTasks: payload.session_id })
+    if (done && payload.session_id) writeState(root, { committedTasks: payload.session_id, commitAt: Date.now() })
   }
   if ((event === 'PostToolUse' || event === 'PostToolUseFailure') && !stepOff(root, 'run.errors'))
     await captureErrors(payload, root, projectId, cfg).catch((err) => log(`errors: ${err.message}`))

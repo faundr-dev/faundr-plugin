@@ -6,7 +6,7 @@ import { ensureFaundrPath, faundrPath, relPath } from './paths.mjs'
 import { projectFiles } from './security.mjs'
 import { detectStack } from './stack.mjs'
 import { envMatrix, hostingFromCli, hostingProvider } from './env-matrix.mjs'
-import { AGENT, AGENT_SESSION_ID, firstOf, flag, gitHead, linkedProject, textArg, writeState } from './cli-core.mjs'
+import { AGENT, AGENT_SESSION_ID, currentFeature, firstOf, flag, gitHead, linkedProject, textArg, writeState } from './cli-core.mjs'
 import { contentLangNote } from './hook-events.mjs'
 import { memoryApi } from './cmd-features.mjs'
 import { walkFiles } from './cmd-overview.mjs'
@@ -188,15 +188,17 @@ export async function handoffCommand(args) {
   if (!text) throw new Error('usage: faundr handoff "<what was left half done and what is missing>"')
   const { root, projectId, config } = linkedProject()
   const agentSessionId = AGENT_SESSION_ID ?? null
+  // Um bilhete por funcionalidade na sessão: o da funcionalidade atual substitui só o dela.
+  const featureId = currentFeature(root, agentSessionId) ?? null
   const res = await fetch(`${config.apiUrl}/api/cli/session`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${config.token}` },
-    body: JSON.stringify({ projectId, action: 'handoff', text, agent: AGENT, agentSessionId }),
+    body: JSON.stringify({ projectId, action: 'handoff', text, agent: AGENT, agentSessionId, featureId }),
     signal: AbortSignal.timeout(15_000),
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data.error ?? `API error (${res.status})`)
-  if (agentSessionId) writeState(root, { lastHandoff: { session: agentSessionId, at: new Date().toISOString() } })
+  if (agentSessionId) writeState(root, { lastHandoff: { session: agentSessionId, feature: featureId, at: new Date().toISOString() } })
   console.log('Handoff note saved. It shows under Activity → Where I left off and at the start of the next session.')
 }
 
