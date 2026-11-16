@@ -33,7 +33,8 @@ test('arquivo que falha na leitura não fica preso no cache, e a gravação não
   const origWrite = process.stderr.write
   process.stderr.write = () => true
   try {
-    await buildProjectGraph(dir)
+    // O único arquivo de código falhou: o mapa não sai (não troca o anterior por um sem código).
+    await assert.rejects(buildProjectGraph(dir), /Não consegui ler 1 de 1 arquivos de código \(o primeiro, src\/a\.ts/)
   } finally {
     process.stderr.write = origWrite
     if (saved === undefined) delete process.env.FAUNDR_GRAMMARS_DIR
@@ -49,6 +50,41 @@ test('arquivo que falha na leitura não fica preso no cache, e a gravação não
   fs.appendFileSync(path.join(dir, 'src/a.ts'), 'export const b = 2\n')
   assert.deepEqual(await refreshGraph(dir), { changed: ['src/a.ts'] })
   for (const sub of ['.faundr/mapa', '.faundr/cache']) assert.deepEqual(fs.readdirSync(path.join(dir, sub)).filter((f) => f.endsWith('.tmp')), [])
+  fs.rmSync(dir, { recursive: true, force: true })
+  fs.rmSync(broken, { recursive: true, force: true })
+})
+
+test('leitura do código quebrada (Sistema 5S): sem mapa só de documentos; poucas falhas entram no relatório', async () => {
+  const files = { 'README.md': '# Projeto\n\nVeja [m0](src/m0.rb).\n' }
+  // Ruby: nenhum outro teste deste arquivo carrega essa gramática antes (a gramática lida fica guardada no processo).
+  for (let i = 0; i < 12; i++) files[`src/m${i}.rb`] = `def f${i}\n  ${i}\nend\n`
+  const dir = project(files)
+  const saved = process.env.FAUNDR_GRAMMARS_DIR
+  // Leitor sem as gramáticas das linguagens: os documentos são lidos, nenhum arquivo de código.
+  const broken = fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-ge-gram-'))
+  fs.copyFileSync(new URL('../grammars/tree-sitter.wasm', import.meta.url), path.join(broken, 'tree-sitter.wasm'))
+  const origWrite = process.stderr.write
+  process.stderr.write = () => true
+  try {
+    process.env.FAUNDR_GRAMMARS_DIR = broken
+    await assert.rejects(buildProjectGraph(dir), /Não consegui ler 12 de 12 arquivos de código/)
+    // Uma falha em 13 arquivos de código: o mapa sai e o relatório conta o que ficou de fora.
+    fs.writeFileSync(path.join(dir, 'src/zz.lua'), 'return 1\n')
+    const luaFree = fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-ge-gram-'))
+    for (const f of fs.readdirSync(new URL('../grammars', import.meta.url))) {
+      if (f !== 'tree-sitter-lua.wasm') fs.copyFileSync(new URL(`../grammars/${f}`, import.meta.url), path.join(luaFree, f))
+    }
+    process.env.FAUNDR_GRAMMARS_DIR = luaFree
+    const { graph, report, stats } = await buildProjectGraph(dir)
+    assert.equal(stats.failed, 1)
+    assert.ok(graph.nodes.some((n) => n.source_file === 'src/m0.rb' && /^f0/.test(n.label)), 'o código lido entra no mapa')
+    assert.match(report, /1 arquivo não pôde ser lido e ficou fora do mapa/)
+    fs.rmSync(luaFree, { recursive: true, force: true })
+  } finally {
+    process.stderr.write = origWrite
+    if (saved === undefined) delete process.env.FAUNDR_GRAMMARS_DIR
+    else process.env.FAUNDR_GRAMMARS_DIR = saved
+  }
   fs.rmSync(dir, { recursive: true, force: true })
   fs.rmSync(broken, { recursive: true, force: true })
 })

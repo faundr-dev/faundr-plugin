@@ -13503,7 +13503,9 @@ function summarySection(opts, thin) {
   const total = g.size || 1;
   const pct = (n) => Math.round(n / total * 100);
   L.push(`# Relat\xF3rio do grafo - ${path12.basename(opts.root)}  (${today})`, "");
-  L.push("## Corpus", `- ${opts.totalFiles} arquivos \xB7 ~${opts.totalWords.toLocaleString("pt-BR")} palavras`, "");
+  L.push("## Corpus", `- ${opts.totalFiles} arquivos \xB7 ~${opts.totalWords.toLocaleString("pt-BR")} palavras`);
+  if (opts.failedFiles) L.push(`- ${opts.failedFiles} ${opts.failedFiles === 1 ? "arquivo n\xE3o p\xF4de ser lido e ficou" : "arquivos n\xE3o puderam ser lidos e ficaram"} fora do mapa`);
+  L.push("");
   L.push(
     "## Resumo",
     `- ${g.order} n\xF3s \xB7 ${g.size} liga\xE7\xF5es \xB7 ${communities.size} comunidades${thin ? ` (${communities.size - thin} exibidas, ${thin} pequenas omitidas)` : ""}`,
@@ -13639,7 +13641,7 @@ async function extractAll(root, files) {
   const cached = loadCache(root, files);
   const entries = {};
   const changed = [];
-  const failed = /* @__PURE__ */ new Set();
+  const failed = /* @__PURE__ */ new Map();
   let words = 0;
   for (const f of files) {
     let st;
@@ -13674,21 +13676,36 @@ async function extractAll(root, files) {
       else if (f.kind === "json") entry.extraction = extractJson(f.rel, source) ?? null;
       else entry.extraction = await extractCode(f.rel, source, languageForFile(f.rel), resolver);
     } catch (err2) {
-      process.stderr.write(`faundr graph: falha ao ler ${f.rel}: ${err2.message}
+      const message = err2.message;
+      process.stderr.write(`faundr graph: falha ao ler ${f.rel}: ${message}
 `);
-      failed.add(f.rel);
+      failed.set(f.rel, message);
     }
     entries[f.rel] = entry;
   }
-  saveCache(root, files, entries, failed);
+  saveCache(root, files, entries, new Set(failed.keys()));
   const extractions = /* @__PURE__ */ new Map();
   for (const [rel, e] of Object.entries(entries)) if (e.extraction) extractions.set(rel, e.extraction);
-  return { extractions, words, changed: changed.filter((r) => !failed.has(r)) };
+  return { extractions, words, failed, changed: changed.filter((r) => !failed.has(r)) };
+}
+function codeReadingBroken(codeFiles, codeFailed) {
+  if (!codeFailed) return false;
+  return codeFailed === codeFiles || codeFailed >= 10 && codeFailed * 2 >= codeFiles;
+}
+function assertCodeRead(files, failed) {
+  const code = new Set(files.filter((f) => f.kind === "code").map((f) => f.rel));
+  const codeFailures = [...failed].filter(([rel2]) => code.has(rel2));
+  if (!codeReadingBroken(code.size, codeFailures.length)) return;
+  const [rel, message] = codeFailures[0];
+  throw new Error(
+    `N\xE3o consegui ler ${codeFailures.length} de ${code.size} arquivos de c\xF3digo (o primeiro, ${rel}: ${message}). O mapa n\xE3o foi gerado para n\xE3o trocar o anterior por um s\xF3 com documentos. Rode "faundr graph" de novo; se repetir, mande esta mensagem para o suporte do Faundr.`
+  );
 }
 async function buildProjectGraph(root) {
   const started = Date.now();
   const files = collectFiles(root);
-  const { extractions, words } = await extractAll(root, files);
+  const { extractions, words, failed } = await extractAll(root, files);
+  assertCodeRead(files, failed);
   const { nodes, edges } = resolveCorpus(extractions);
   const g = buildGraph(nodes, edges);
   const communities = cluster(g);
@@ -13705,13 +13722,14 @@ async function buildProjectGraph(root) {
     questions: suggestQuestions(g, communities, names),
     totalFiles: files.length,
     totalWords: words,
+    failedFiles: failed.size,
     commit
   });
   const graph = toGraphJson(g, communities, names, commit);
   return {
     graph,
     report,
-    stats: { files: files.length, dropped: files.dropped, nodes: g.order, edges: g.size, communities: communities.size, ms: Date.now() - started }
+    stats: { files: files.length, dropped: files.dropped, failed: failed.size, nodes: g.order, edges: g.size, communities: communities.size, ms: Date.now() - started }
   };
 }
 var sortKeys = (o, first) => Object.fromEntries([...first.filter((k) => k in o).map((k) => [k, o[k]]), ...Object.keys(o).filter((k) => !first.includes(k)).sort().map((k) => [k, o[k]])]);
