@@ -89,6 +89,32 @@ const SVC = {
 }
 Object.assign(SVC, LANG_SVC)
 const SVC_PREFIX = [['@sentry/', 'Sentry', 'monitoramento', 'erros do app publicado']]
+// Serviço chamado direto pelo endereço da API (fetch), sem pacote instalado: o endereço no código é a prova.
+// Só APIs que pedem chave; endereço de webhook (Slack, Discord) fica fora, porque aparece como exemplo em telas.
+const SVC_HOST = [
+  [/\b(?:api|js|checkout)\.stripe\.com\b/, 'Stripe', 'pagamentos', 'cobrança e pagamentos'],
+  [/\bapi\.mercadopago\.com\b/, 'Mercado Pago', 'pagamentos', 'cobrança e pagamentos'],
+  [/\bapi\.lemonsqueezy\.com\b/, 'Lemon Squeezy', 'pagamentos', 'cobrança e pagamentos'],
+  [/\bapi\.paddle\.com\b/, 'Paddle', 'pagamentos', 'cobrança e pagamentos'],
+  [/\bapi\.pagar\.me\b/, 'Pagar.me', 'pagamentos', 'cobrança e pagamentos'],
+  [/\bapi\.asaas\.com\b/, 'Asaas', 'pagamentos', 'cobrança e pagamentos'],
+  [/\bapi\.resend\.com\b/, 'Resend', 'email', 'envio de e-mails'],
+  [/\bapi\.sendgrid\.com\b/, 'SendGrid', 'email', 'envio de e-mails'],
+  [/\bapi\.postmarkapp\.com\b/, 'Postmark', 'email', 'envio de e-mails'],
+  [/\bapi\.mailgun\.net\b/, 'Mailgun', 'email', 'envio de e-mails'],
+  [/\bapi\.brevo\.com\b/, 'Brevo', 'email', 'envio de e-mails'],
+  [/\bapi\.openai\.com\b/, 'OpenAI', 'ia', 'inteligência artificial'],
+  [/\bapi\.anthropic\.com\b/, 'Anthropic (Claude)', 'ia', 'inteligência artificial'],
+  [/\bgenerativelanguage\.googleapis\.com\b/, 'Google Gemini', 'ia', 'inteligência artificial'],
+  [/\bapi\.replicate\.com\b/, 'Replicate', 'ia', 'inteligência artificial'],
+  [/\bapi\.groq\.com\b/, 'Groq', 'ia', 'inteligência artificial'],
+  [/\bopenrouter\.ai\/api\b/, 'OpenRouter', 'ia', 'inteligência artificial'],
+  [/\bapi\.twilio\.com\b/, 'Twilio', 'mensagens', 'SMS e WhatsApp'],
+]
+const ANY_SVC_HOST = new RegExp(SVC_HOST.map(([re]) => re.source).join('|'))
+// Teste, exemplo e dado de mentira citam endereços de API sem o app usar o serviço.
+const NOT_APP_CODE = /(^|\/)(tests?|__tests__|e2e|fixtures?|mocks?|__mocks__|examples?)\/|\.(test|spec)\.[a-z]+$/i
+const SVC_EVIDENCE_MAX = 4
 
 // Para quê de cada serviço (SVC e LANG_SVC guardam em português): o texto em inglês, escolhido na hora de detectar.
 const PURPOSE_EN = {
@@ -239,6 +265,17 @@ function techAndServices(stack, deps) {
       svcSeen.set(s[0], svc)
       stack.services.push(svc)
     }
+  }
+}
+
+// Serviços que o arquivo chama direto pelo endereço da API (sem pacote): entram na lista, ou ganham o arquivo como prova.
+function servicesByHost(stack, text, file) {
+  if (NOT_APP_CODE.test(file) || !ANY_SVC_HOST.test(text)) return
+  for (const [re, name, category, purpose] of SVC_HOST) {
+    if (!re.test(text)) continue
+    const cur = stack.services.find((s) => s.name === name)
+    if (!cur) stack.services.push({ name, category, purpose: purposeText(purpose), env: [], evidence: [file] })
+    else if (cur.evidence.length < SVC_EVIDENCE_MAX && !cur.evidence.includes(file)) cur.evidence.push(file)
   }
 }
 
@@ -430,7 +467,12 @@ function collectEnv(ctx, codeFiles, envMap, supa) {
     if (!fs.existsSync(path.join(root, f))) continue
     for (const n of envNames(read(root, f))) addEnv(n, f, false)
   }
-  for (const f of codeFiles) for (const m of read(root, f).matchAll(LANG_CODE_FILE.test(f) ? LANG_ENV_USE : ENV_USE)) addEnv(m[1], f, false)
+  // Uma leitura só de cada arquivo: as variáveis que ele usa e os serviços que ele chama pelo endereço da API.
+  for (const f of codeFiles) {
+    const text = read(root, f)
+    for (const m of text.matchAll(LANG_CODE_FILE.test(f) ? LANG_ENV_USE : ENV_USE)) addEnv(m[1], f, false)
+    servicesByHost(stack, text, f)
+  }
   stack.env = [...envMap.values()]
     .map((e) => ({ ...e, scope: PUBLIC_PREFIX.test(e.name) ? 'publica' : 'servidor', service: envService(e.name) }))
     .sort((a, b) => (a.service ?? 'zz').localeCompare(b.service ?? 'zz') || a.name.localeCompare(b.name))

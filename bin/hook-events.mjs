@@ -247,7 +247,7 @@ function startBackground(agent, root, sid, syncUsage) {
   // Skills conectadas: relê as do computador (projeto, pessoais e plugins) e só envia quando a lista mudou.
   jobs.push(['skills', 'scan', '--quiet'])
   if (readState(root).agentsMd?.length) jobs.push(['agents-md', '--sync', '--quiet'])
-  // Stack sem IA: pacotes, deploy e variáveis mudam pouco; só envia quando a impressão digital muda.
+  // Stack sem IA: pacotes, deploy e variáveis mudam pouco; o servidor só grava quando a impressão digital muda.
   jobs.push(['stack-scan', '--quiet'], ['env-check', '--quiet'], ['architecture-check', '--quiet', '--session', sid])
   // Pontos de volta no painel: o que mudou desde o último.
   jobs.push(['checkpoints-sync', '--quiet'])

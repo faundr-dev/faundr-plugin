@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { ensureFaundrPath, faundrPath } from './paths.mjs'
 import { projectFiles } from './security.mjs'
-import { checkBuilt, newOffPlan, offPlan, readIgnore } from './architecture.mjs'
+import { checkBuilt, checkKey, newOffPlan, offPlanViews, readIgnore } from './architecture.mjs'
 import { addSessionNotes } from './inbox.mjs'
 import { AGENT, AGENT_SESSION_ID, currentFeature, flag, gitHead, linkedProject, MARK, readState, textArg, writeState } from './cli-core.mjs'
 import { contentLangNote } from './hook-events.mjs'
@@ -190,7 +190,8 @@ export async function overviewSave(args) {
 // em português, para o Claude corrigir só o que falhou.
 export async function diagramSave(args) {
   const { root, projectId, config } = linkedProject()
-  const file = path.resolve(textArg(args) || faundrPath(root, 'diagram'))
+  // --architecture e --no-wait não levam valor: o arquivo pode vir antes ou depois deles.
+  const file = path.resolve(textArg(args.filter((a) => a !== '--architecture' && a !== '--no-wait')) || faundrPath(root, 'diagram'))
   let spec
   try {
     spec = JSON.parse(fs.readFileSync(file, 'utf8'))
@@ -279,7 +280,7 @@ export async function architectureCheck(args) {
     return data
   }
   const quiet = args.includes('--quiet')
-  const { spec, marked = [], autoFit = false } = await api({ action: 'architecture' })
+  const { spec, marked = [], autoFit = false, checked } = await api({ action: 'architecture' })
   // --pull: grava a arquitetura atual para o agente editar (ex.: pôr uma pasta fora do plano nos paths de uma peça).
   if (args.includes('--pull')) {
     if (!spec) return console.log('The project has no architecture yet (Architecture (project menu)).')
@@ -300,18 +301,20 @@ export async function architectureCheck(args) {
   } catch {
     // Sem .faundrignore: nenhuma pasta marcada como fora.
   }
-  // O painel recebe a lista completa e esconde as pastas marcadas como fora de propósito (assim "voltar" devolve a pasta
-  // na hora); o aviso no terminal e o resumo daqui já pulam as marcadas.
-  const { names: all, ...outside } = offPlan(spec, files, ignore)
-  const { names, ...shown } = offPlan(spec, files, ignore, marked)
+  // O painel recebe a lista sem descontar as pastas marcadas como fora de propósito e as esconde lá (assim "voltar"
+  // devolve a pasta na hora); o aviso no terminal e o resumo daqui já pulam as marcadas.
+  const { panel: outside, shown, all, names } = offPlanViews(spec, files, ignore, marked)
   // Pasta nova fora do plano: o próximo pedido desta sessão leva o aviso (uma vez; a seguinte já conhece a pasta).
   // As já vistas incluem as marcadas: desmarcar uma pasta no painel não a torna "nova".
   const fresh = newOffPlan(names, readState(root).offPlanSeen)
   const sid = flag(args, '--session')
   if (fresh.length && sid) addSessionNotes(root, sid, [offPlanNote(fresh, shown, autoFit)])
   writeState(root, { offPlanSeen: all })
-  const key = JSON.stringify({ built, outside })
-  if (readState(root).architectureChecked === key && quiet) return
+  // Só envia quando o painel ainda não tem este resultado. Quem diz é o servidor (outra máquina ou outra branch pode
+  // ter enviado o dela por cima); servidor antigo não diz, e aí vale a lembrança desta pasta.
+  const key = checkKey(built, outside)
+  const upToDate = checked ? checkKey(checked.built, checked.offPlan) === key : readState(root).architectureChecked === key
+  if (upToDate && quiet) return
   await api({ action: 'built', built, offPlan: outside })
   writeState(root, { architectureChecked: key })
   if (quiet) return
