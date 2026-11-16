@@ -52,3 +52,21 @@ test('Pacote e endereço do mesmo serviço: um serviço só; o serviço novo mud
   assert.equal(service(after.stack, 'Asaas')?.category, 'pagamentos')
   assert.notEqual(stackHash(before.stack), stackHash(after.stack))
 })
+
+test('Scripts do projeto: o comando vai sem senha de endereço nem valor de variável secreta', () => {
+  const { stack } = detectStack(project({
+    'package.json': JSON.stringify({
+      name: 'app',
+      scripts: {
+        dev: 'vite dev --port 3000',
+        migrate: 'DATABASE_URL=postgres://app:s3nh4@db.exemplo.com/app prisma migrate deploy',
+        sync: 'STRIPE_SECRET_KEY="sk_live abc" NODE_ENV=production node sync.mjs',
+      },
+    }),
+  }))
+  const command = (name) => stack.scripts.find((s) => s.name === `npm run ${name}`)?.command
+  assert.equal(command('dev'), 'vite dev --port 3000')
+  assert.equal(command('migrate'), 'DATABASE_URL=postgres://***@db.exemplo.com/app prisma migrate deploy')
+  assert.equal(command('sync'), 'STRIPE_SECRET_KEY=*** NODE_ENV=production node sync.mjs')
+  assert.equal(JSON.stringify(stack).includes('s3nh4'), false)
+})

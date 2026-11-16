@@ -486,11 +486,21 @@ function collectEnv(ctx, codeFiles, envMap, supa) {
     stack.services.unshift({ name: 'Supabase', category: 'outro', purpose: t('database and backend', 'banco de dados e backend'), env: stack.env.filter((e) => e.service === 'Supabase').map((e) => e.name), evidence: [supa.file] })
 }
 
+/**
+ * Comando de script sem segredo: senha dentro de endereço ("postgres://user:senha@…") e valor de variável colado
+ * na frente do comando ("DATABASE_URL=… prisma db push") saem; o nome da variável fica. O servidor repete a limpeza.
+ */
+export function hideCommandSecrets(command) {
+  return command
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/gi, '$1***@')
+    .replace(/(?<![A-Za-z0-9_])([A-Za-z_][A-Za-z0-9_]*(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN|KEY|DSN|AUTH|CREDENTIALS?)[A-Za-z0-9_]*=)(?:"[^"]*"|'[^']*'|[^\s"']+)/gi, '$1***')
+}
+
 // Scripts: como rodar, testar e publicar.
 function collectScripts(ctx, rootPkg, manager) {
   const { root, files, stack } = ctx
   for (const [name, command] of Object.entries(rootPkg.scripts ?? {}).slice(0, 40))
-    stack.scripts.push({ name: `${manager === 'npm' || !manager ? 'npm run' : manager} ${name}`, command: String(command), ...(SCRIPT_WHAT[name] ? { what: SCRIPT_WHAT[name]() } : {}) })
+    stack.scripts.push({ name: `${manager === 'npm' || !manager ? 'npm run' : manager} ${name}`, command: hideCommandSecrets(String(command)), ...(SCRIPT_WHAT[name] ? { what: SCRIPT_WHAT[name]() } : {}) })
   const makefile = files.includes('Makefile') ? read(root, 'Makefile') : ''
   for (const m of makefile.matchAll(/^([a-zA-Z][\w-]*):(?!=)/gm)) if (stack.scripts.length < 40) stack.scripts.push({ name: `make ${m[1]}`, command: `make ${m[1]}` })
 }
