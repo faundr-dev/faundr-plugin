@@ -143,6 +143,8 @@ export async function hook(agent) {
       currentFeatureId: currentFeature(root, payload.session_id),
       // Assinatura da cópia local da memória: o servidor só manda a memória de novo quando ela mudou.
       memoryStamp: readState(root).memoryStamp ?? null,
+      // Assinatura da cópia local das skills: só manda quando a cópia existe, senão o servidor nunca reenviaria.
+      skillsStamp: fs.existsSync(faundrPath(root, 'skills')) ? (readState(root).skillsStamp ?? null) : null,
       // Só os campos que o servidor lê: conteúdo de arquivo e saída das ferramentas ficam aqui (ver hook-payload.mjs).
       payload: hookPayload(payload),
       usage,
@@ -339,7 +341,11 @@ function saveAnswer(answer, root, sid) {
   // Workflows ativos e skills ligadas, com o gatilho: chegam no início, a cada pedido e no fim da resposta, para uma
   // mudança no painel valer no próximo pedido; o hook do pedido, o guard e o fim da resposta leem sem rede.
   if (Array.isArray(answer.workflows)) writeWorkflows(root, answer.workflows)
-  if (Array.isArray(answer.skills)) writeSkillIndex(root, answer.skills)
+  if (Array.isArray(answer.skills)) {
+    writeSkillIndex(root, answer.skills)
+    // A lista volta só quando muda: a assinatura nova vai junto da cópia nova.
+    writeState(root, { skillsStamp: answer.skillsStamp ?? null })
+  }
   // Plano aprovado virou funcionalidade: passa a ser a atual desta pasta.
   if (answer.currentFeatureId) setCurrentFeature(root, answer.currentFeatureId, sid)
   // Memória mudou com a sessão aberta (decisão nova, editada ou substituída): cópias locais novas, já no próximo

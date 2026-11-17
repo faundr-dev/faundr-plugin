@@ -5,6 +5,7 @@ import { readSkillIndex, scanSkills, writeSkillIndex } from './skills.mjs'
 import { parseItem } from './workflows.mjs'
 import { AGENT_SESSION_ID, flag, flags, linkedProject, readState, textArg, writeState } from './cli-core.mjs'
 import { ownerSaid, runOf, saveRun } from './workflow-run.mjs'
+import { machineName } from './live.mjs'
 
 // Workflows do projeto: o Claude lista, lê os passos e cria rascunho; aprovar e editar ficam com o dono no painel.
 async function workflowApi(body) {
@@ -154,13 +155,27 @@ export async function skillsCommand(args) {
   throw new Error(SKILLS_USAGE)
 }
 
+// De 3 em 3 dias, o computador cuja lista não mudou avisa que segue em uso: sem o aviso, depois de 30 dias as skills
+// dele deixam de contar e podem aparecer como "sumiu" para o time.
+const TOUCH_MS = 3 * 86_400_000
+
+/** Este computador e esta pasta ("notebook#3fa2"): o "sumiu" conta por computador, e duas pastas podem estar em branches diferentes. */
+export const skillsMachine = (root, config) =>
+  `${machineName(config) ?? 'computer'}#${createHash('sha256').update(String(root).toLowerCase()).digest('hex').slice(0, 4)}`
+
 async function skillsScan(root, rest) {
   const found = scanSkills(root)
+  const machine = skillsMachine(root, linkedProject().config)
   // Só envia quando a lista mudou desde a última leitura nesta pasta (a cada sessão, sem gastar rede à toa).
   const sig = createHash('sha256').update(JSON.stringify(found)).digest('hex').slice(0, 16)
-  if (rest.includes('--quiet') && readState(root).skillsSig === sig) return
-  const r = await skillsApi({ action: 'sync', skills: found })
-  writeState(root, { skillsSig: sig })
+  const state = readState(root)
+  if (rest.includes('--quiet') && state.skillsSig === sig) {
+    if (Date.now() - (state.skillsTouchedAt ?? 0) < TOUCH_MS) return
+    await skillsApi({ action: 'touch', machine })
+    return writeState(root, { skillsTouchedAt: Date.now() })
+  }
+  const r = await skillsApi({ action: 'sync', skills: found, machine })
+  writeState(root, { skillsSig: sig, skillsTouchedAt: Date.now() })
   if (rest.includes('--quiet')) return
   const by = (s) => found.filter((x) => x.source === s).length
   console.log(`${found.length} skills on this computer: ${by('projeto')} from the project, ${by('pessoal')} personal, ${by('plugin')} from plugins. In Faundr: ${r.total}.`)
