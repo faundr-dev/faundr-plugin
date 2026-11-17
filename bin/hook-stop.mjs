@@ -117,7 +117,7 @@ async function currentStep(projectId, featureId, token, apiUrl, signal) {
   const res = await fetch(`${apiUrl}/api/cli/memory`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-    body: JSON.stringify({ projectId, action: 'board' }),
+    body: JSON.stringify({ projectId, action: 'board', slim: true }),
     signal,
   })
   if (!res.ok) return null

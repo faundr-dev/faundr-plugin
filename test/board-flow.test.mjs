@@ -192,3 +192,15 @@ test('faundr task --review manda a tarefa como revisão; sem a opção, o servid
     s.close()
   }
 })
+
+test('quadro pedido sem a lista repetida: o plugin manda slim e refaz features a partir de allFeatures', async () => {
+  const s = await setup({})
+  try {
+    // focus lê features; o servidor novo só manda allFeatures quando não há funcionalidade escolhida.
+    const a = await run(['focus', 'Figurinhas'], { cwd: s.root, env: s.env })
+    assert.match(a.out, /Current feature:/, a.err)
+    assert.equal(s.calls.find((c) => c.action === 'board').slim, true)
+  } finally {
+    s.close()
+  }
+})

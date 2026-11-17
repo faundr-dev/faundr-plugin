@@ -15,11 +15,13 @@ export async function memoryApi(body) {
   const res = await fetch(`${config.apiUrl}/api/cli/memory`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${config.token}` },
-    body: JSON.stringify({ projectId, ...body }),
+    // Quadro: o servidor não repete a lista (features = allFeatures sem funcionalidade escolhida); refeita aqui.
+    body: JSON.stringify({ projectId, ...body, ...(body.action === 'board' && { slim: true }) }),
     signal: AbortSignal.timeout(15_000),
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data.error ?? `API error (${res.status})`)
+  if (body.action === 'board' && !data.features && data.allFeatures) data.features = data.allFeatures
   // Seguiu com o OK na funcionalidade de outra pessoa: o servidor mandou um recado ao dono.
   if (data.notified) console.log(`Faundr sent ${data.notified} a message saying what you changed (it reaches them at their next question). Tell the user.`)
   return data
