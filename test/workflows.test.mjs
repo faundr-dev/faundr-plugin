@@ -45,7 +45,7 @@ test('cada workflow chega uma vez por sessão', () => {
   writeWorkflows(root, LIST)
   const pick = (list, ids) => workflowsForPrompt(list, 'design da home', ids)
   const first = workflowsOnce(root, 's1', pick, 'This request')
-  assert.match(first, /W-2 Design/)
+  assert.match(first, /W-2 «Design»/)
   assert.match(first, /faundr workflow show W-2/)
   assert.equal(workflowsOnce(root, 's1', pick, 'This request'), null)
   assert.match(workflowsOnce(root, 's2', pick, 'This request'), /W-2/)
@@ -54,6 +54,15 @@ test('cada workflow chega uma vez por sessão', () => {
 test('passo do draft: tipo na frente e detalhe depois do travessão', () => {
   assert.deepEqual(parseStep('skill: /faundr:design — auditar as telas'), { type: 'skill', title: '/faundr:design', body: 'auditar as telas' })
   assert.deepEqual(parseStep('agentes 3: ler o código'), { type: 'agents', title: 'ler o código', body: '', count: 3 })
+  assert.deepEqual(parseStep('agentes auto: auditar'), { type: 'agents', title: 'auditar', body: '', count: 0 })
+  assert.equal(parseStep('agents: read').count, 2)
+  // Pipe dentro do comando fica no comando; o ramo novo começa no próximo tipo.
+  assert.deepEqual(parseItem('paralelo: comando: git log | head -5 | skill: faundr:design'), {
+    parallel: [
+      { type: 'command', title: 'git log | head -5', body: '' },
+      { type: 'skill', title: 'faundr:design', body: '' },
+    ],
+  })
   assert.deepEqual(parseStep('comando: npm test'), { type: 'command', title: 'npm test', body: '' })
   assert.deepEqual(parseStep('perguntar: qual repositório?'), { type: 'ask', title: 'qual repositório?', body: '' })
   assert.deepEqual(parseStep('Buscar repositórios parecidos no GitHub'), { type: 'step', title: 'Buscar repositórios parecidos no GitHub', body: '' })

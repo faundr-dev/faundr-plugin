@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { faundrPath } from './paths.mjs'
 import { readJsonObject, writeJsonAtomic } from './json-file.mjs'
-import { matchesPath, stemsOf } from './rules.mjs'
+import { matchesPath, stemsOf, teamQuote } from './rules.mjs'
 
 const file = (root) => faundrPath(root, 'workflows')
 
@@ -90,7 +90,7 @@ export function workflowNote(items, where) {
     `[Faundr] ${where} matches ${items.length > 1 ? 'project workflows' : 'a project workflow'} (it is how the team wants you to work on this). Before going on, read the steps and follow them in order, marking progress (show explains how; the team follows along on the canvas):`,
     ...items.map(
       (w) =>
-        `- ${w.ref} ${w.name}${w.trigger ? ` — when: ${w.trigger}` : ''} → ${
+        `- ${w.ref} ${teamQuote(w.name, 120)}${w.trigger ? ` — when: ${teamQuote(w.trigger)}` : ''} → ${
           w.call === 'user' ? `only when the person asks: do not follow it on your own; ask in one line whether they want to follow ${w.ref}` : `faundr workflow show ${w.ref}`
         }`,
     ),
@@ -133,8 +133,8 @@ function againNote(items) {
   return items
     .map((w) =>
       w.call === 'user'
-        ? `[Faundr] This request matches ${w.ref} ${w.name} again, which only runs when the person asks: ask in one line whether they want to follow it.`
-        : `[Faundr] This request matches ${w.ref} ${w.name} again: follow its steps for this request too (faundr workflow run ${w.ref} --why "<request>"), unless it is the same request you are already following.`,
+        ? `[Faundr] This request matches ${w.ref} ${teamQuote(w.name, 120)} again, which only runs when the person asks: ask in one line whether they want to follow it.`
+        : `[Faundr] This request matches ${w.ref} ${teamQuote(w.name, 120)} again: follow its steps for this request too (faundr workflow run ${w.ref} --why "<request>"), unless it is the same request you are already following.`,
     )
     .join('\n')
 }
@@ -143,7 +143,7 @@ function maybeNote(items) {
   if (!items.length) return null
   return [
     "[Faundr] This request may be a case for a project workflow. Check its \"when\": if it fits, follow it as the team asked; if not, ignore this note.",
-    ...items.map((w) => `- ${w.ref} ${w.name}${w.trigger ? ` — when: ${w.trigger}` : ''} → ${w.call === 'user' ? 'only when the person asks: ask in one line whether they want it' : `faundr workflow show ${w.ref}`}`),
+    ...items.map((w) => `- ${w.ref} ${teamQuote(w.name, 120)}${w.trigger ? ` — when: ${teamQuote(w.trigger)}` : ''} → ${w.call === 'user' ? 'only when the person asks: ask in one line whether they want it' : `faundr workflow show ${w.ref}`}`),
   ].join('\n')
 }
 
@@ -175,7 +175,16 @@ const STEP_KINDS = [
 export function parseItem(raw) {
   const m = String(raw ?? '').trim().match(/^(?:paralelo|parallel)\s*:\s*(.+)$/is)
   if (!m) return parseStep(raw)
-  const parallel = m[1].split(/\s+\|\s+/).map(parseStep).filter(Boolean)
+  // Ramo novo só onde um " | " vem antes de outro tipo ("skill:", "comando:"…): o pipe de um comando fica no comando.
+  const parts = []
+  for (const piece of m[1].split(/\s+\|\s+/)) {
+    const kind = piece.match(/^([\p{L}]+)(?:\s+(?:\d+|auto|ia|ai))?\s*:/u)?.[1]
+    const known = kind && STEP_KINDS.some(([re]) => re.test(kind))
+    const prev = parts.length ? parseStep(parts[parts.length - 1]) : null
+    if (parts.length && !known && prev?.type === 'command') parts[parts.length - 1] += ` | ${piece}`
+    else parts.push(piece)
+  }
+  const parallel = parts.map(parseStep).filter(Boolean)
   return parallel.length > 1 ? { parallel } : parallel[0] ?? null
 }
 
@@ -183,7 +192,7 @@ export function parseItem(raw) {
 export function parseStep(raw) {
   const text = String(raw ?? '').trim()
   if (!text) return null
-  const m = text.match(/^([\p{L}]+)(?:\s+(\d+))?\s*:\s*(.+)$/su)
+  const m = text.match(/^([\p{L}]+)(?:\s+(\d+|auto|ia|ai))?\s*:\s*(.+)$/su)
   const kind = m && STEP_KINDS.find(([re]) => re.test(m[1]))?.[1]
   const rest = kind ? m[3] : text
   const [title, ...body] = rest.split(/\s+—\s+/)
@@ -191,6 +200,7 @@ export function parseStep(raw) {
     type: kind ?? 'step',
     title: title.trim(),
     body: body.join(' — ').trim(),
-    ...(kind === 'agents' && { count: Number(m[2]) || 2 }),
+    // "agentes auto:" (ou ia/ai, ou 0) = a IA escolhe quantos (count 0); sem número, 2.
+    ...(kind === 'agents' && { count: /^(auto|ia|ai|0)$/i.test(m[2] ?? '') ? 0 : Number(m[2]) || 2 }),
   }
 }

@@ -6,7 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { outOfOrderNote, ownerSaid, rememberPrompt, saveRun } from '../bin/workflow-run.mjs'
+import { outOfOrderNote, ownerSaid, rememberPrompt, runOf, saveRun } from '../bin/workflow-run.mjs'
 import { workflowsForPrompt, workflowsForRequest, workflowsMaybe, writeWorkflows } from '../bin/workflows.mjs'
 
 const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin')
@@ -46,7 +46,7 @@ test('gatilho: o que bate chega em todo pedido do assunto; o aviso leve, uma vez
   assert.match(first, /matches a project workflow/)
   assert.match(first, /faundr workflow show W-1/)
   const again = workflowsForRequest(root, 's1', 'agora clona https://github.com/c/d também')
-  assert.match(again, /matches W-1 Estudar outro projeto again: follow its steps for this request too/)
+  assert.match(again, /matches W-1 «Estudar outro projeto» again: follow its steps for this request too/)
   const soft = workflowsForRequest(root, 's1', 'copia o jeito do Linear')
   assert.match(soft, /may be a case for a project workflow/)
   assert.equal(workflowsForRequest(root, 's1', 'copia aquele outro jeito'), null)
@@ -139,4 +139,23 @@ test('faundr workflow step --answer: frase que o dono não disse não chega ao p
   } finally {
     server.close()
   }
+})
+
+test('ownerSaid: resposta de uma palavra só vale quando é a mensagem inteira', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-owner-'))
+  rememberPrompt(root, 's1', 'o painel de workflows precisa de ajuste')
+  rememberPrompt(root, 's1', 'Sim')
+  assert.ok(ownerSaid(root, 's1', 'sim', 0))
+  assert.ok(!ownerSaid(root, 's1', 'o', 0))
+  assert.ok(!ownerSaid(root, 's1', 'painel', 0))
+  assert.ok(ownerSaid(root, 's1', 'painel de workflows', 0))
+})
+
+test('runOf: chamado pelo nome do workflow, vale a execução aberta mais recente da sessão', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-runof-'))
+  saveRun(root, 's1', 'W-1', [], { startedAt: 10 })
+  saveRun(root, 's1', 'W-2', [], { startedAt: 20 })
+  assert.equal(runOf(root, 's1', 'W-1').startedAt, 10)
+  assert.equal(runOf(root, 's1', 'AUDITORIA DE ABA').startedAt, 20)
+  assert.equal(runOf(root, 's2', 'W-1'), null)
 })

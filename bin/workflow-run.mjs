@@ -53,7 +53,10 @@ export function ownerSaid(root, sid, answer, since = 0) {
   const list = state.prompts.list
   // O pedido que fez o workflow começar conta: é o último antes do começo.
   const first = Math.max(0, list.findLastIndex((p) => p.at <= since))
-  return list.slice(first).some((p) => ` ${plain(p.text)} `.includes(` ${want} `))
+  // Resposta de uma palavra só ("sim", "pode") vale quando é a mensagem inteira: uma palavra solta no meio de
+  // qualquer frase ("o", "de") não é o OK da pessoa.
+  const oneWord = !want.includes(' ')
+  return list.slice(first).some((p) => (oneWord ? plain(p.text) === want : ` ${plain(p.text)} `.includes(` ${want} `)))
 }
 
 /** Guarda os passos da execução (o que o servidor devolve depois de run/step). `startedAt`: só no run. */
@@ -68,7 +71,10 @@ export function saveRun(root, sid, ref, outline, { startedAt, closed = false } =
 
 export function runOf(root, sid, ref) {
   const state = read(root)
-  return state.workflowRuns?.session === sid ? (state.workflowRuns.runs[ref] ?? null) : null
+  if (state.workflowRuns?.session !== sid) return null
+  const runs = state.workflowRuns.runs ?? {}
+  // Chamado pelo nome do workflow, e não pelo W-n: vale a execução aberta mais recente desta sessão.
+  return runs[ref] ?? Object.values(runs).filter((r) => r && !r.closed).sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))[0] ?? null
 }
 
 // O mesmo jeito do painel de dizer que o comando do passo é o que rodou (src/lib/workflows.ts, commandHit).

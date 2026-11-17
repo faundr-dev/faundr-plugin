@@ -17,7 +17,7 @@
 //   faundr feature "<title>" [--desc "..."] [--done-when "a; b"]  creates a feature (with its Done when) and makes it the current one
 //     --after <current | name>                 records it as the next stage of another (stays planned; does not become current)
 //   faundr criteria ["<criterion>"] [--remove <n>] | criteria-check <n> --met|--not-met [--note]   Done when of the current feature
-//   faundr task "<description>" [--feature name]  adds a task to the checklist of the current feature (or of another stage)
+//   faundr task "<description>" [--feature name] [--review]  adds a task to the checklist of the current feature (or of another stage)
 //   faundr start|done "<snippet or #>"         marks a task as in progress / done
 //   faundr decision "<title>" [--why "..."]    records a technical decision
 //   faundr rule "<title>" [--why "..."] [--file <pattern>] [--forbid "<regex>"]  team rule; --forbid: what the code must not contain

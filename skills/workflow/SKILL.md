@@ -13,7 +13,7 @@ A workflow is the script Claude follows when a request matches a topic. You only
 3. **Build the steps** in the order you would follow them. Each step is a `--step`, with the type in front when it is not a plain instruction (write the step text in the project's content language, shown in the Faundr context; keep the type prefixes exactly as shown):
    - instruction: `"Search GitHub for similar repositories — 3 to 5, with an open license"`
    - Faundr skill: `"skill: /faundr:design — audit the screens touched"`
-   - parallel agents: `"agentes 2: read the code — one per area, each returns what is worth copying"`
+   - parallel agents: `"agentes 2: read the code — one per area, each returns what is worth copying"` (use `"agentes auto: …"` when the number depends on the work: the agent then decides how many to open, with no limit)
    - exact command: `"comando: git clone --depth 1 <url> ../referencias/<nome>"`
    - ask the owner before continuing: `"perguntar: which of the repositories to clone?"`
    - wait for something to happen: `"esperar: the tests to pass"`
