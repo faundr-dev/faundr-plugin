@@ -125,7 +125,18 @@ export function workflowsForRequest(root, sid, prompt) {
     { ...readJsonObject(faundrPath(root, 'state')), workflowsShown: { session: sid, ids: [...new Set([...seen.ids, ...fresh.map((w) => w.id)])], maybe: [...(seen.maybe ?? []), ...maybe.map((w) => w.id)] } },
     2,
   )
-  return [workflowNote(fresh, 'This request'), againNote(again), maybeNote(maybe)].filter(Boolean).join('\n\n')
+  return [pickNote(hits), workflowNote(fresh, 'This request'), againNote(again), maybeNote(maybe)].filter(Boolean).join('\n\n')
+}
+
+/**
+ * Dois ou mais workflows (que o Claude segue sozinho) no mesmo pedido: a IA pergunta ao dono qual seguir antes de
+ * começar, em vez de seguir todos em ordem (decisão do dono, 17/11/2026).
+ */
+export function pickNote(items) {
+  const auto = items.filter((w) => w.call !== 'user')
+  if (auto.length < 2) return null
+  const refs = auto.map((w) => w.ref).join(', ')
+  return `[Faundr] ${auto.length} project workflows match this at once (${refs}). Before starting, ask the owner in one line which one to follow (or both), then follow only what they chose. Do not mix their steps.`
 }
 
 function againNote(items) {
@@ -159,7 +170,7 @@ export function workflowsOnce(root, sid, pick, where) {
     { ...readJsonObject(faundrPath(root, 'state')), workflowsShown: { ...shown, session: sid, ids: [...shown.ids, ...items.map((w) => w.id)] } },
     2,
   )
-  return workflowNote(items, where)
+  return [pickNote(items), workflowNote(items, where)].filter(Boolean).join('\n\n')
 }
 
 const STEP_KINDS = [

@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
-import { parseItem, parseStep, topicHit, workflowsForFile, workflowsForPrompt, workflowsOnce, writeWorkflows } from '../bin/workflows.mjs'
+import { parseItem, parseStep, pickNote, topicHit, workflowsForFile, workflowsForPrompt, workflowsForRequest, workflowsOnce, writeWorkflows } from '../bin/workflows.mjs'
 
 const LIST = [
   { id: 'w1', ref: 'W-1', name: 'Estudar outro projeto', trigger: 'copiar funções de outro repositório', topics: ['copiar funcionalidade', 'repositório', 'repo'], paths: [] },
@@ -49,6 +49,17 @@ test('cada workflow chega uma vez por sessão', () => {
   assert.match(first, /faundr workflow show W-2/)
   assert.equal(workflowsOnce(root, 's1', pick, 'This request'), null)
   assert.match(workflowsOnce(root, 's2', pick, 'This request'), /W-2/)
+})
+
+test('dois workflows no mesmo pedido: a IA pergunta ao dono qual seguir; "só quando pede" não conta', () => {
+  const a = { id: 'a', ref: 'W-1', name: 'Publicar', topics: ['deploy'] }
+  const b = { id: 'b', ref: 'W-2', name: 'Lançar', topics: ['deploy'] }
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-wf-'))
+  writeWorkflows(root, [a, b])
+  const note = workflowsForRequest(root, 's1', 'faz o deploy')
+  assert.match(note, /2 project workflows match this at once \(W-1, W-2\)\. Before starting, ask the owner in one line which one to follow/)
+  assert.equal(pickNote([a, { ...b, call: 'user' }]), null)
+  assert.equal(pickNote([a]), null)
 })
 
 test('passo do draft: tipo na frente e detalhe depois do travessão', () => {
