@@ -72,7 +72,8 @@ function baseTheme(bgs, light, dark) {
 }
 
 /**
- * Quais temas o projeto tem, pelo código: o principal (a cor de fundo do design.md, ou o que os sinais indicam) e se
+ * Quais temas o projeto tem: com `tokens.themes` (o CSS lido por tema), o principal e o outro vêm de lá; sem ele,
+ * pelo código: o principal (a cor de fundo do design.md, ou o que os sinais indicam) e se
  * existe o outro (variantes dark:/light:, [data-theme], .dark, prefers-color-scheme). followsSystem = olha a
  * preferência do aparelho (o dark: do Tailwind sem @custom-variant dark já segue o sistema).
  */
@@ -81,8 +82,10 @@ export function themeSupport(p, tokens) {
   const dark = /prefers-color-scheme\s*:\s*dark|\[data-(theme|mode|color-scheme)=['"]?dark|(^|[\s"'`.])\.dark\b|(^|[\s"'`])dark:[a-z!-]|@custom-variant\s+dark|darkMode\s*:/m.test(code)
   const light = /prefers-color-scheme\s*:\s*light|\[data-(theme|mode|color-scheme)=['"]?light|(^|[\s"'`])\.light\b|(^|[\s"'`])light:[a-z!-]|@custom-variant\s+light/m.test(code)
   const bgs = (tokens?.colors ?? []).filter((t) => /fundo|background|superf[ií]cie/i.test(t.usage ?? '')).map((t) => parseColor(t.value)).filter(Boolean)
-  const base = baseTheme(bgs, light, dark)
-  const both = base === 'claro' ? dark : light
+  // Os tokens já leram o CSS por tema (tema base × troca de tema): valem mais que os sinais soltos do código.
+  const css = tokens?.themes
+  const base = css?.base === 'escuro' || css?.base === 'claro' ? css.base : baseTheme(bgs, light, dark)
+  const both = !!css?.other || (base === 'claro' ? dark : light)
   const usesTailwindDark = /(^|[\s"'`])dark:[a-z!-]/m.test(code) && !/@custom-variant\s+dark|darkMode\s*:/.test(code)
   const followsSystem = /prefers-color-scheme/.test(code) || usesTailwindDark
   return { base, both, followsSystem }

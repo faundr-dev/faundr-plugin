@@ -17,7 +17,7 @@ Each replica is static HTML that reproduces a component's look, drawn by the das
 
 ## 1. Choose the components
 
-- With design.md: all of the components table (except whole-page frames, like AppShell — at most a reduced version).
+- With design.md: **one replica per component listed in its components table** (except whole-page frames, like AppShell — at most a reduced version). The table is the list: do not add internals that are not in it (helpers, sub-parts, one-screen pieces) unless the user asks for them. Several names in one row (e.g. `Menu`, `MenuItem`) are one replica. Never two replicas of the same component: if the file already has one with that name (or for that same component under another name), update it instead of adding another.
 - Without design.md: the components reused across several screens (buttons, fields, cards, menus, tags, modals, notices). Suggest creating design.md with /faundr:design.
 - With an argument: only that component. Without an argument and with an existing showcase: only the ones that are not "atual" (up to date) in the context, plus the missing ones. Keep the other replicas as they are in the file.
 
@@ -49,10 +49,10 @@ Open the component's file (and the class's CSS, when it is a global class) befor
 }
 ```
 
-- `file`: the component's main file; `files`: all the files whose look the replica copies (the component and the classes' CSS). **These are what Faundr uses to mark the replica as outdated when the code changes**; do not forget the CSS.
+- `file`: the component's main file; `files`: all the files whose look the replica copies (the component and the classes' CSS). **These are what Faundr uses to mark the replica as outdated when the code changes**; do not forget the CSS. For a global stylesheet (e.g. `src/styles.css`) only the rules and tokens the replica's classes use count, so editing another part of the file does not mark it outdated.
 - `group`: groups on the canvas (Buttons, Fields, Cards, Navigation, Tags, Feedback, Modals, Other).
 - `usage`: when to use it, in plain language, in the project's content language, shown in the Faundr context (from design.md).
-- `background`: the background where the component really appears (e.g. the background of the dark screens). Without it, the project's `body` background applies.
+- `background`: the background where the component really appears (e.g. the background of the dark screens). Without it, the project's `body` background applies. In a project with two themes, prefer leaving it out (or use the token's `var(--…)`): a fixed hex stays the same when the dashboard switches the theme.
 - `width`: frame width in px (200–1400; default 480). Use more for cards and headers.
 - `variants`: 1 to 8 states side by side: default, with icon, sizes, active, disabled, empty, with long content… For hover/focus, write the variant with the state classes already applied (e.g. `bg-neutral-200` instead of `hover:bg-neutral-200`) and say so in the name ("On hover").
 
@@ -62,6 +62,7 @@ HTML rules:
 - Icons: inline SVG with the same strokes as the original icon (e.g. Lucide: `viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"` and the icon's paths).
 - No `<script>`, no external images (use a color block in place of a photo) and no dependence on real user data.
 - Menus, dropdowns and modals: draw them already open, in normal position (no `fixed`), within the frame width.
+- **Two themes (light and dark):** the dashboard shows each replica in both, setting the project's theme switch on the frame (`data-theme="light"`/`"dark"` on `<html>`, or the `.dark` class). So use the token classes that change with the theme (`bg-ink`, `text-white`…), never fixed colors (`bg-[#151515]`, `style="color:#fff"`), and do not write a separate "light" variant. The CLI sends the project's CSS with the block that switches the theme (e.g. `:root[data-theme='light']`); if that block lives in a file the app does not import, say so in the answer.
 
 ## 4. Send
 

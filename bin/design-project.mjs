@@ -6,6 +6,7 @@ import { allDeps, faundrIgnore, ignoredBy, isClaudePlugin } from './parts.mjs'
 
 const SKIP = /(^|\/)(node_modules|\.git|\.faundr|dist|build|out|coverage|\.claude|\.remember|\.wrangler|\.next|\.nuxt|\.svelte-kit|\.tanstack|\.vercel|\.output)(\/|$)/
 const NOT_APP = /(^|\/)(__tests__|__mocks__|fixtures?|mocks?|stories|test|tests|e2e)(\/|$)|\.(test|spec|stories)\.|\.gen\./
+const EMAIL_TEMPLATES = /(^|\/)supabase\/templates\//
 
 // ---------- leitura do projeto ----------
 
@@ -60,8 +61,9 @@ const HEAD_FILES = [
 
 export function loadProject(root, uiExt) {
   const all = walk(root)
-  const ui = all.filter((f) => uiExt.test(f) && !NOT_APP.test(f))
-  const css = all.filter((f) => /\.(css|scss)$/.test(f) && !NOT_APP.test(f))
+  // Templates de e-mail (supabase/templates/) não são tela: e-mail precisa de cor e largura fixas na tag.
+  const ui = all.filter((f) => uiExt.test(f) && !NOT_APP.test(f) && !EMAIL_TEMPLATES.test(f))
+  const css = all.filter((f) => /\.(css|scss)$/.test(f) && !NOT_APP.test(f) && !EMAIL_TEMPLATES.test(f))
   const head = all.filter((f) => HEAD_FILES.some((re) => re.test(f)))
   // Telas Flutter: o código do app fica em lib/ (sem os arquivos gerados).
   const dart = all.filter((f) => /(^|\/)lib\/.*\.dart$/.test(f) && !NOT_APP.test(f) && !/\.(g|freezed|gr|mocks)\.dart$/.test(f))

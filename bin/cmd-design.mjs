@@ -9,7 +9,7 @@ import { allScripts } from './parts.mjs'
 import { AGENT, AGENT_SESSION_ID, CONFIG_DIR, firstOf, flag, linkedProject, log, QUALITY_FLOOR, readState, textArg, writeState } from './cli-core.mjs'
 import { editedFile, sessionEditedFiles } from './hook-stop.mjs'
 import { contentLangNote } from './hook-events.mjs'
-import { walkFiles } from './cmd-overview.mjs'
+import { appStyleFiles } from './design-tokens.mjs'
 import { coverageLines } from './cmd-design-audit.mjs'
 import { patternLines } from './patterns.mjs'
 
@@ -148,10 +148,8 @@ export async function designContext(args) {
   } else {
     out.push('## design.md', '', 'DOES NOT EXIST. The first step is to create one (see the skill).')
   }
-  // Onde ficam os tokens hoje (css global / tema).
-  const cssFiles = walkFiles(root, root)
-    .filter((f) => /\.(css|scss)$/.test(f) && !f.startsWith('plugin/'))
-    .slice(0, 5)
+  // Onde ficam os tokens hoje: o CSS que o app importa (sem os temas de marca em public/, a extensão e os e-mails).
+  const cssFiles = appStyleFiles(root).files.slice(0, 5)
   for (const css of cssFiles) {
     out.push('', `## Global styles: ${css}`, '', '```css', fs.readFileSync(path.join(root, css), 'utf8').slice(0, 6000), '```')
   }

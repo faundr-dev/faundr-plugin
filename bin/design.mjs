@@ -11,7 +11,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { t } from './i18n.mjs'
 import { faundrIgnore, ignoredBy, isClaudePlugin, projectParts } from './parts.mjs'
-import { extractTokens } from './design-tokens.mjs'
+import { designExceptions, designSections, extractTokens, PROHIBITED_TITLE, withoutProhibitions } from './design-tokens.mjs'
 import { detectThemes, runRules } from './design-rules.mjs'
 
 const SKIP = /(^|\/)(node_modules|\.git|\.faundr|dist|build|out|coverage|\.claude|\.remember|\.wrangler|\.next|\.nuxt|\.svelte-kit|\.tanstack|\.vercel|\.output)(\/|$)/
@@ -20,6 +20,8 @@ const UI_EXT = /\.(tsx|jsx|vue|svelte|astro|html?)$|\.blade\.php$/
 // Flutter: as telas são os .dart de lib/ (menos os gerados).
 const isFlutterScreen = (rel) => /(^|\/)lib\/.*\.dart$/.test(rel) && !/\.(g|freezed|gr|mocks)\.dart$/.test(rel)
 const GENERATED = /\.gen\.|\.d\.ts$|\.test\.|\.spec\.|\.stories\./
+// Templates de e-mail (Supabase Auth): HTML de e-mail usa cor e largura fixas escritas na tag de propósito; não é tela.
+export const EMAIL_TEMPLATES = /(^|\/)supabase\/templates\//
 const DESIGN_NAMES = /^design\.md$/i
 const DESIGN_DIRS = ['', 'docs', 'doc', 'design', '.faundr', '.claude', 'src']
 
@@ -41,7 +43,7 @@ export function findDesignMd(root) {
   return null
 }
 
-const isScreenFile = (name, rel) => (UI_EXT.test(name) || isFlutterScreen(rel)) && !GENERATED.test(name)
+const isScreenFile = (name, rel) => (UI_EXT.test(name) || isFlutterScreen(rel)) && !GENERATED.test(name) && !EMAIL_TEMPLATES.test(rel)
 
 /** Arquivos de tela do projeto (componentes e páginas). */
 export function uiFiles(root) {
@@ -95,11 +97,26 @@ const normHex = (h) => {
   return '#' + (s.length === 3 ? [...s].map((c) => c + c).join('') : s)
 }
 
-/** Cores declaradas no design.md e nos arquivos de tokens (css com variáveis / @theme). */
-function palette(root, designMd) {
+// Seção de cores ou de tokens (pelo título): ali todo hex conta como cor da paleta.
+const COLOR_SECTION = /\bcor(es)?\b|colou?rs?|palet|token|tema|theme|modo (claro|escuro)|(light|dark) mode/i
+// Linha que define uma cor: "- Fundo: #151515", "**Texto** — `#fff`", "`--ink`: #151515".
+const COLOR_DEFINITION = /^\s*(?:[-*+]\s*)?(?:\*\*|`)?[^:|#]{1,40}?(?:\*\*|`)?\s*[:=—–-]\s*`?#[0-9a-f]{3,6}\b/i
+
+/**
+ * Cores da paleta do design.md: as tabelas de cor, as seções de cores/tokens e as linhas que definem uma cor.
+ * Nunca o que o design.md proíbe (seção "Não faça"/"Don't", ou o trecho depois de "nunca", "não use", "never", "avoid").
+ */
+export function palette(root, designMd) {
   const colors = new Set()
-  const add = (text) => (text.match(HEX) ?? []).forEach((h) => colors.add(normHex(h)))
-  if (designMd) add(fs.readFileSync(path.join(root, designMd), 'utf8'))
+  if (!designMd) return colors
+  for (const sec of designSections(fs.readFileSync(path.join(root, designMd), 'utf8'))) {
+    if (PROHIBITED_TITLE.test(sec.title)) continue
+    const colorSection = COLOR_SECTION.test(sec.title)
+    for (const raw of sec.lines) {
+      const line = withoutProhibitions(raw)
+      if (colorSection || /^\s*\|/.test(line) || COLOR_DEFINITION.test(line)) (line.match(HEX) ?? []).forEach((h) => colors.add(normHex(h)))
+    }
+  }
   return colors
 }
 
@@ -350,7 +367,9 @@ export function lintProject(root) {
     ...(rules.themes?.both && designMdPath ? texts.flatMap(([rel, text]) => fixedThemeColors(rel, text, colors)) : []),
     ...rules.findings,
   ]
-  return { designMdPath, designMd, tokens, themes: rules.themes ?? null, uiFiles: files.length, findings, ignored: rules.ignored, rulesError: rules.error }
+  // Exceções decididas no design.md ("técnica — motivo"): o painel mostra e a auditoria não cobra.
+  const exceptions = designExceptions(designMd ?? '')
+  return { designMdPath, designMd, tokens, themes: rules.themes ?? null, uiFiles: files.length, findings, ignored: rules.ignored, rulesError: rules.error, exceptions }
 }
 
 /** Temas do projeto pelo código (principal, se tem o outro, se segue o sistema). */
@@ -389,4 +408,4 @@ export function measurePlan(scopeTheme, detected, widths) {
 }
 
 /** O arquivo é de tela? (para a auditoria do fim da resposta) */
-export const isUiFile = (rel) => UI_EXT.test(rel) || /\.(css|scss)$/.test(rel) || isFlutterScreen(rel)
+export const isUiFile = (rel) => (UI_EXT.test(rel) || /\.(css|scss)$/.test(rel) || isFlutterScreen(rel)) && !EMAIL_TEMPLATES.test(rel)

@@ -245,29 +245,42 @@ export function iconLibRules(c, code) {
 
 const decimal = (n) => n.toLocaleString(locale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-// Contraste entre as cores do design.md (texto × fundo) e tema escuro sem color-scheme.
-export function contrastRules(c, { designMdPath, tokens, code, headText }) {
-  if (!designMdPath || !tokens?.colors?.length) return
-  const colors = tokens.colors.map((t) => ({ ...t, rgb: parseColor(t.value) })).filter((t) => t.rgb)
+// Texto × fundo de um mesmo tema: cada cor com o valor daquele tema (rgb), nunca o texto de um tema sobre o fundo do outro.
+function contrastPairs(c, designMdPath, colors, themeLabel) {
   const isBg = (t) => /fundo|background|superf[ií]cie/i.test(t.usage ?? '')
   const isText = (t) => !isBg(t) && /texto|t[íi]tulo|r[óo]tulo|[íi]cone|label|text/i.test(t.usage ?? '')
   const bgs = colors.filter(isBg)
-  for (const t of colors.filter(isText)) {
+  for (const tx of colors.filter(isText)) {
     const fails = bgs
-      .map((b) => ({ b, ratio: contrast(t.rgb, b.rgb) }))
+      .map((b) => ({ b, ratio: contrast(tx.rgb, b.rgb) }))
       .filter((x) => x.ratio < 4.5)
       .sort((a, b) => a.ratio - b.ratio)
     if (!fails.length) continue
     const worst = fails[0]
+    // No outro tema o nome leva o tema: o achado (e a impressão digital) fica separado do tema principal.
+    const name = themeLabel ? `${tx.name} (${themeLabel})` : tx.name
     c.add('acessibilidade/contraste-baixo', designMdPath, null, {
-      text: t.name,
-      textValue: t.value,
+      text: name,
+      textValue: tx.shown,
       bg: worst.b.name,
-      bgValue: worst.b.value,
+      bgValue: worst.b.shown,
       ratio: decimal(worst.ratio),
       others: fails.slice(1).map((x) => `${x.b.name} (${decimal(x.ratio)}:1)`).join(', '),
       high: worst.ratio < 3,
-    }, t.name)
+    }, name)
+  }
+  return bgs
+}
+
+// Contraste entre as cores do design.md (texto × fundo), dentro de cada tema, e tema escuro sem color-scheme.
+export function contrastRules(c, { designMdPath, tokens, code, headText }) {
+  if (!designMdPath || !tokens?.colors?.length) return
+  const inTheme = (pick) => tokens.colors.map((tk) => ({ ...tk, shown: pick(tk), rgb: parseColor(pick(tk)) })).filter((tk) => tk.rgb)
+  const bgs = contrastPairs(c, designMdPath, inTheme((tk) => tk.value), null)
+  // O outro tema (tokens.colors[].alt): a cor que não muda fica com o valor do principal.
+  if (tokens.colors.some((tk) => tk.alt)) {
+    const other = tokens.themes?.base === 'claro' ? t('dark theme', 'tema escuro') : t('light theme', 'tema claro')
+    contrastPairs(c, designMdPath, inTheme((tk) => tk.alt ?? tk.value), other)
   }
   const mainBg = bgs[0]
   if (mainBg && luminance(mainBg.rgb) < 0.2 && !/color-scheme|scheme-dark|colorScheme/.test(code + headText))
