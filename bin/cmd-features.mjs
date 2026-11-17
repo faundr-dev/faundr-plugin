@@ -45,10 +45,21 @@ export async function findFeature(query, current) {
     if (!f) throw new Error('There is no current feature in this folder. Use the name of the previous stage.')
     return f
   }
-  const q = query.toLowerCase()
-  const f = list.find((x) => x.id === query) ?? list.find((x) => x.title.toLowerCase() === q) ?? list.find((x) => x.title.toLowerCase().includes(q))
-  if (!f) throw new Error(`No feature found for "${query}". Existing: ${list.map((x) => x.title).join('; ') || '(none)'}`)
-  return f
+  return pickFeatureByName(list, query)
+}
+
+// Pelo id (ou começo dele), pelo nome exato ou por um trecho; trecho que serve a mais de uma é erro (pede o id), para
+// --feature "Hub" ou --after "Fase" não ligarem à funcionalidade errada.
+export function pickFeatureByName(list, query) {
+  const q = query.trim().toLowerCase()
+  const byId = list.find((x) => x.id === query) ?? (/^[0-9a-f-]{6,}$/.test(q) ? list.find((x) => x.id.startsWith(q)) : undefined)
+  if (byId) return byId
+  const exact = list.find((x) => x.title.trim().toLowerCase() === q)
+  if (exact) return exact
+  const hits = list.filter((x) => x.title.toLowerCase().includes(q))
+  if (hits.length === 1) return hits[0]
+  if (!hits.length) throw new Error(`No feature found for "${query}". Existing: ${list.map((x) => x.title).join('; ') || '(none)'}`)
+  throw new Error(`More than one feature for "${query}": ${hits.map((x) => `${x.id.slice(0, 8)} ${x.title}`).join('; ')}. Use the id.`)
 }
 
 function printFeature(f, byId, people) {
@@ -123,7 +134,7 @@ function memoryReach(r) {
 export async function work(command, args) {
   await workCommand(command, args)
   // A barra de status lê o resumo do arquivo de estado: atualiza depois de mexer no quadro.
-  if (['feature', 'task', 'done', 'start', 'claim', 'own', 'disown', 'focus', 'concern', 'resolve', 'feature-discard', 'feature-restore'].includes(command)) await refreshStatus().catch((err) => log(`status: ${err?.message ?? err}`))
+  if (['feature', 'task', 'done', 'start', 'claim', 'own', 'disown', 'focus', 'concern', 'resolve', 'feature-discard', 'feature-restore', 'task-remove'].includes(command)) await refreshStatus().catch((err) => log(`status: ${err?.message ?? err}`))
 }
 
 /** Guarda em .faundr/state.json o resumo que a barra de status mostra (projeto, funcionalidade, passo, preocupações). */
@@ -150,9 +161,13 @@ async function workFeature({ args, root, current, text }) {
   if (after) {
     // Próxima etapa: fica planejada, ligada à anterior; a funcionalidade atual não muda.
     const prev = await findFeature(after, current)
-    const { id } = await memoryApi({ action: 'add', kind: 'feature', title: text, body: flag(args, '--desc'), afterId: prev.id })
+    // O --done-when da etapa também entra (antes sumia sem aviso).
+    const stageCriteria = (flag(args, '--done-when') ?? '').split(';').map((c) => c.trim()).filter(Boolean)
+    const { id } = await memoryApi({ action: 'add', kind: 'feature', title: text, body: flag(args, '--desc'), afterId: prev.id, criteria: stageCriteria })
     writeState(root, { lastStepId: id })
-    return console.log(`Next stage recorded (after "${prev.title}"): ${text}\nIts tasks: faundr task "<step>" --feature "${text}". To start it: faundr focus "${text}".`)
+    console.log(`Next stage recorded (after "${prev.title}"): ${text}\nIts tasks: faundr task "<step>" --feature "${text}". To start it: faundr focus "${text}".`)
+    if (stageCriteria.length) console.log(`Done when: ${stageCriteria.map((c, i) => `${i + 1}. ${c}`).join(' ')}`)
+    return
   }
   if (args.includes('--existing')) return workExistingFeature(args, text)
   const criteria = (flag(args, '--done-when') ?? '').split(';').map((c) => c.trim()).filter(Boolean)
@@ -174,9 +189,15 @@ async function reusePlannedStage(root, args, text, after) {
   }
   setCurrentFeature(root, same.id)
   const criteria = (flag(args, '--done-when') ?? '').split(';').map((c) => c.trim()).filter(Boolean)
-  for (const c of criteria) await memoryApi({ action: 'criteria', featureId: same.id, text: c })
+  const added = []
+  for (const c of criteria) {
+    const r = await memoryApi({ action: 'criteria', featureId: same.id, text: c, force: args.includes('--force') })
+    // Etapa de outra pessoa: nada foi gravado; avisa em vez de dizer que os critérios entraram.
+    if (ownerBlocked(r.blocked, `faundr criteria "${c}" --force`)) break
+    added.push(c)
+  }
   console.log(`"${same.title}" was already on the board${same.planned ? ' as a planned stage' : ''}: it is now the current feature (no copy created).`)
-  if (criteria.length) console.log(`Done when added: ${criteria.map((c, i) => `${i + 1}. ${c}`).join(' ')}`)
+  if (added.length) console.log(`Done when added: ${added.map((c, i) => `${i + 1}. ${c}`).join(' ')}`)
   return true
 }
 
@@ -403,10 +424,8 @@ async function workOwner({ command, args, current, text }) {
 
 async function workFocus({ root, text }) {
   const { features, people, me } = await memoryApi({ action: 'board' })
-  const q = text.toLowerCase()
   // Nome exato antes de "contém": "Stacks de startups" não pode cair em "Hub fase 2: stacks de startups e montador".
-  const f = features.find((x) => x.id === text) ?? features.find((x) => x.title.toLowerCase() === q) ?? features.find((x) => x.title.toLowerCase().includes(q))
-  if (!f) throw new Error(`No feature found for "${text}". Existing: ${features.map((x) => x.title).join('; ') || '(none)'}`)
+  const f = pickFeatureByName(features, text)
   setCurrentFeature(root, f.id)
   console.log('Current feature:')
   printFeature(f, new Map(features.map((x) => [x.id, x])), people)
@@ -464,10 +483,19 @@ function printReview(all, current) {
   }
 }
 
-async function workDiscard({ command, text }) {
+// Tarefa que não vai ser feita (passo de plano antigo, teste que ninguém vai rodar): sai do checklist.
+async function workTaskRemove({ command, args, current, text }) {
+  if (!text) throw new Error(`usage: faundr ${command} "<snippet of the task name, # or id>" [--force]`)
+  const r = await memoryApi({ action: 'task-remove', query: text, featureId: current, force: args.includes('--force') })
+  if (ownerBlocked(r.blocked, `faundr ${command} "${text}" --force`)) return
+  return console.log(`Task removed: ${r.title}`)
+}
+
+async function workDiscard({ command, args, text }) {
   if (!text) throw new Error(`usage: faundr ${command} "<feature id or name>"`)
   const restore = command === 'feature-restore'
-  const r = await memoryApi({ action: 'feature-discard', query: text, restore })
+  const r = await memoryApi({ action: 'feature-discard', query: text, restore, force: args.includes('--force') })
+  if (ownerBlocked(r.blocked, `faundr ${command} "${text}" --force`)) return
   return console.log(restore ? `Restored: ${r.title}` : `Discarded: ${r.title} (leaves the tabs; to bring it back: faundr feature-restore "${r.id.slice(0, 8)}")`)
 }
 
@@ -501,4 +529,5 @@ const WORK_HANDLERS = {
   board: workBoard,
   'feature-discard': workDiscard,
   'feature-restore': workDiscard,
+  'task-remove': workTaskRemove,
 }

@@ -12,7 +12,7 @@ Use the Faundr CLI through the Bash tool (`faundr ...`; if it is not on the PATH
    If one with that goal already exists, switch to it: `faundr focus "<name>"`.
 2. Record the plan as a checklist: one `faundr task "<step>"` per step (3 to 8 steps, starting with a verb).
 3. **Work in stages** (phase 0/1/2, MVP and then the rest, "now X, then Y", something you yourself proposed to split): the current feature is only the current stage. Record **right at the start** all the following stages you know of, in order, each one after the previous, with what goes into it:
-   `faundr feature "<stage 2>" --after current --desc "<what goes in>"`, then `faundr feature "<stage 3>" --after "<stage 2>" --desc "…"`. If you already know a future stage's steps, add them with `faundr task "<step>" --feature "<stage>"`. They stay planned (they do not become the current one) and Faundr reminds about them at the start of the conversation, at the end of the checklist, in the handoff note and in `/faundr:resume`.
+   `faundr feature "<stage 2>" --after current --desc "<what goes in>"`, then `faundr feature "<stage 3>" --after "<stage 2>" --desc "…"`. If you already know a future stage's steps, add them with `faundr task "<step>" --feature "<stage>"`. They stay planned (they do not become the current one) and Faundr reminds about them: the stages that follow the current feature at the start of the conversation, at the end of the checklist and in the handoff note, and all planned stages in `/faundr:resume`.
    When a stage is finished, tell the user the next one by name and ask whether to continue; to start it: `faundr focus "<stage>"`. Never treat the feature as finished when it has recorded stages ahead.
 
 **During the work:**

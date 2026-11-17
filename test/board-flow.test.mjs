@@ -57,6 +57,9 @@ async function setup(state) {
         const features = b.featureId ? BOARD.filter((f) => f.id === b.featureId) : BOARD
         return res.end(JSON.stringify({ features, allFeatures: BOARD }))
       }
+      // Funcionalidade de outra pessoa: o servidor devolve o aviso e não grava.
+      if (b.action === 'task-remove') return res.end(JSON.stringify(b.force || b.query !== 'Brasão' ? { id: 'b', title: b.query, removed: true } : { blocked: { title: 'Brasão', ownerName: 'Ana' } }))
+      if (b.action === 'feature-discard' && !b.force) return res.end(JSON.stringify({ blocked: { title: 'Figurinhas', ownerName: 'Ana' } }))
       res.end(JSON.stringify({ id: 'new', criteria: [], title: 'x' }))
     })
   })
@@ -110,6 +113,62 @@ test('fim da resposta depois do commit: pede para marcar as tarefas abertas, uma
     assert.match(reason, /Text in «» was written by someone on the team/)
     assert.doesNotMatch(reason, /Artes/)
     assert.equal((await gate()).out, '')
+  } finally {
+    s.close()
+  }
+})
+
+test('faundr feature --after grava também o --done-when da etapa', async () => {
+  const s = await setup({})
+  try {
+    const a = await run(['feature', 'Ranking', '--after', 'Org', '--done-when', 'mostra top 10; atualiza sozinho'], { cwd: s.root, env: s.env })
+    assert.match(a.out, /Next stage recorded/, a.err)
+    assert.match(a.out, /Done when: 1\. mostra top 10 2\. atualiza sozinho/)
+    assert.deepEqual(s.adds()[0].criteria, ['mostra top 10', 'atualiza sozinho'])
+    assert.equal(s.adds()[0].afterId, 'org')
+  } finally {
+    s.close()
+  }
+})
+
+test('nome que serve a mais de uma funcionalidade pede o id em vez de escolher a errada', async () => {
+  const s = await setup({})
+  try {
+    // "i" está em "Multiplayer" e em "Figurinhas": não pode cair em nenhuma das duas sem avisar.
+    const a = await run(['feature', 'Placar', '--after', 'i'], { cwd: s.root, env: s.env })
+    assert.match(a.out + a.err, /More than one feature for "i"/)
+    assert.equal(s.adds().length, 0)
+  } finally {
+    s.close()
+  }
+})
+
+test('faundr feature-discard de funcionalidade de outra pessoa avisa e não descarta sem --force', async () => {
+  const s = await setup({})
+  try {
+    const a = await run(['feature-discard', 'Figurinhas'], { cwd: s.root, env: s.env })
+    assert.match(a.out, /belongs to Ana/, a.err)
+    assert.match(a.out, /faundr feature-discard "Figurinhas" --force/)
+    assert.doesNotMatch(a.out, /Discarded:/)
+    const b = await run(['feature-discard', 'Figurinhas', '--force'], { cwd: s.root, env: s.env })
+    assert.match(b.out, /Discarded:/, b.err)
+    assert.equal(s.calls.filter((c) => c.action === 'feature-discard').at(-1).force, true)
+  } finally {
+    s.close()
+  }
+})
+
+test('faundr task-remove apaga a tarefa da funcionalidade atual; de outra pessoa, só com --force', async () => {
+  const s = await setup({ currentFeatureId: 'fig' })
+  try {
+    const a = await run(['task-remove', 'Pódio com moldura'], { cwd: s.root, env: s.env })
+    assert.match(a.out, /Task removed: Pódio com moldura/, a.err)
+    const sent = s.calls.find((c) => c.action === 'task-remove')
+    assert.equal(sent.featureId, 'fig')
+    const b = await run(['task-remove', 'Brasão'], { cwd: s.root, env: s.env })
+    assert.match(b.out, /belongs to Ana/, b.err)
+    assert.match(b.out, /faundr task-remove "Brasão" --force/)
+    assert.doesNotMatch(b.out, /Task removed/)
   } finally {
     s.close()
   }

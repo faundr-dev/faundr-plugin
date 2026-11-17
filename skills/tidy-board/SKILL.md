@@ -25,7 +25,7 @@ Do not mark anything yet. Spend at most 3 searches per feature.
 
 ## 2. Show the proposal and wait for the OK
 
-In plain language, a short table per group (Done, Discard, Keep, Don't know), with: name, what to do, and the proof in a few words. Remember that a feature only moves to Completed with **all** its tasks done: under "Done", say which open tasks will be marked. If a task is left over and will not be done (e.g. a test nobody will run), propose discarding the feature or keeping only that task, and let the owner choose.
+In plain language, a short table per group (Done, Discard, Keep, Don't know), with: name, what to do, and the proof in a few words. Remember that a feature only moves to Completed with **all** its tasks done: under "Done", say which open tasks will be marked. If a task is left over and will not be done (e.g. a test nobody will run), propose removing that task, discarding the feature or keeping the task, and let the owner choose.
 
 Ask: **"Can I apply it? If you want to change any, tell me which."** Do not apply anything before the answer.
 
@@ -33,6 +33,7 @@ Ask: **"Can I apply it? If you want to change any, tell me which."** Do not appl
 
 - Task done: `faundr done "<task short id>" --already-committed` (the short id finds the task in any feature; the option avoids marking as "not committed" work that is already in git)
 - Discard: `faundr feature-discard "<short id>"` (can be undone with `faundr feature-restore "<short id>"`, or with the Restore button in the dashboard)
+- Remove a leftover task that will not be done: `faundr task-remove "<task short id>"` (it leaves the checklist; if it was the last open one, the feature moves to Completed)
 - Keep: nothing.
 
 At the end, run `faundr board --review` again and say in one sentence how many were completed, discarded and kept. If the Project overview exists, remind them that its "Where we are" already reflects the board live.
