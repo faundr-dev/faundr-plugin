@@ -118,7 +118,10 @@ export async function memoryEdit(args) {
   const item = index.find((m) => m.id === r.id)
   writeMemoryIndex(root, obsolete ? index.filter((m) => m.id !== r.id) : index.map((m) => (m.id === r.id ? { ...m, kind: r.kind, paths: r.paths } : m)))
   const rules = readRules(root).filter((x) => x.id !== r.id)
-  if (!obsolete && r.paths.length) rules.push({ id: r.id, kind: r.kind, title: r.title, body: item?.body ?? '', paths: r.paths })
+  // Com o padrão proibido e o autor: sem eles, o aviso "o código não pode ter" parava e a regra de um colega vinha sem «».
+  const before = readRules(root).find((x) => x.id === r.id)
+  if (!obsolete && r.paths.length)
+    rules.push({ id: r.id, kind: r.kind, title: r.title, body: item?.body ?? '', paths: r.paths, forbid: r.forbid ?? before?.forbid ?? null, by: item?.by ?? before?.by })
   writeRules(root, rules)
   const name = r.kind === 'rule' ? 'Rule' : 'Decision'
   if (obsolete) return console.log(`Retired: ${r.title}`)

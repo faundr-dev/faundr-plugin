@@ -2,7 +2,7 @@
 // (parte de quality-rules.mjs).
 import fs from 'node:fs'
 import path from 'node:path'
-import { matchesPath, readRules } from './rules.mjs'
+import { isSafePattern, matchesPath, readRules } from './rules.mjs'
 import { read } from './quality-common.mjs'
 
 // ---------- regras da casa (.faundr-regras/*.md) ----------
@@ -31,7 +31,8 @@ function globToRegex(glob) {
 export function memoryRules(root) {
   const out = []
   for (const r of readRules(root)) {
-    if (!r.forbid) continue
+    // Padrão que travaria a checagem (ex.: (a+)+): fica de fora, como no guard.
+    if (!r.forbid || !isSafePattern(r.forbid)) continue
     let re
     try {
       re = new RegExp(r.forbid)

@@ -25,7 +25,7 @@ const INDEX = [
 ]
 
 test('stemsOf: sem acento, sem plural, sem palavra vazia', () => {
-  assert.deepEqual([...stemsOf('As Decisões técnicas para o projeto')], ['decisoe', 'tecnica', 'projeto'])
+  assert.deepEqual([...stemsOf('As Decisões técnicas para o projeto')], ['decisao', 'tecnica', 'projeto'])
 })
 
 test('memória pelo assunto: traz a decisão do assunto do pedido', () => {

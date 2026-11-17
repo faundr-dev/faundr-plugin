@@ -91,11 +91,29 @@ const FORBID_MAX = 300
 const FORBID_LINES = 5000
 const FORBID_LINE_CHARS = 1000
 
+/**
+ * Padrão que não trava o guard: grupo repetido com repetição dentro, como (a+)+ ou (a|aa)*, pode levar segundos numa
+ * linha comum e estourar o tempo do hook (todo aviso do time sumia). A mesma regra de src/lib/memory-rules.ts, que
+ * recusa o padrão ao gravar; aqui protege o que já estava gravado.
+ */
+export function isSafePattern(p) {
+  if (!p || p.length > 200) return false
+  try {
+    new RegExp(p)
+  } catch {
+    return false
+  }
+  if (/\\[1-9]/.test(p)) return false
+  if (/\((?:[^()\\]|\\.)*(?:[+*]|\{\d*,\d*\})(?:[^()\\]|\\.)*\)\s*(?:[+*]|\{\d*,\d*\})/.test(p)) return false
+  if (/\((?:[^()\\]|\\.)*\|(?:[^()\\]|\\.)*\)\s*(?:[+*]|\{\d*,\d*\})/.test(p)) return false
+  return true
+}
+
 export function forbiddenIn(rules, rel, text) {
   const out = []
   let lines = null
   for (const r of rules) {
-    if (!r.forbid || r.forbid.length > FORBID_MAX || !r.paths?.some((p) => matchesPath(p, rel))) continue
+    if (!r.forbid || r.forbid.length > FORBID_MAX || !isSafePattern(r.forbid) || !r.paths?.some((p) => matchesPath(p, rel))) continue
     let re
     try {
       re = new RegExp(r.forbid)
@@ -114,8 +132,14 @@ export function forbiddenNote(rel, hits) {
   if (!hits.length) return null
   return [
     `[Faundr] This change to ${rel} breaks ${hits.length === 1 ? 'a team rule' : `${hits.length} team rules`}:`,
-    ...hits.map((h) => `- "${h.rule.title}" (the code must not have: ${h.rule.forbid}). Excerpt: ${h.line}`),
+    // Título e padrão de outra pessoa entre «», com o nome: dado, não ordem.
+    ...hits.map((h) =>
+      h.rule.by
+        ? `- by ${h.rule.by}: ${teamQuote(h.rule.title)} (the code must not have: ${teamQuote(h.rule.forbid, 200)}). Excerpt: ${h.line}`
+        : `- "${h.rule.title}" (the code must not have: ${h.rule.forbid}). Excerpt: ${h.line}`,
+    ),
     'Fix it before saving. If the rule no longer applies, ask the user before going on (it can be changed on the dashboard, in Memory).',
+    ...(hits.some((h) => h.rule.by) ? [TEAM_TEXT_GUARD] : []),
   ].join('\n')
 }
 
@@ -147,7 +171,7 @@ const STOP = new Set(
   ).split(' '),
 )
 
-/** Radicais das palavras com 4+ letras, sem acento e sem o plural: "Decisões técnicas" → ["decisoe", "tecnica"]. */
+/** Radicais das palavras com 4+ letras, sem acento e sem o plural: "Decisões técnicas" → ["decisao", "tecnica"]. */
 export function stemsOf(text) {
   const out = new Set()
   for (const raw of String(text ?? '')
@@ -156,7 +180,14 @@ export function stemsOf(text) {
     .toLowerCase()
     .split(/[^\p{L}\p{N}]+/u)) {
     if (raw.length < 4 || STOP.has(raw) || /^\d+$/.test(raw)) continue
-    out.add(raw.replace(/s$/, '').slice(0, 7))
+    // Plural do português antes do "s" final: decisões → decisao, canais → canal, servidores → servidor.
+    const singular = raw
+      .replace(/(oes|aes)$/, 'ao')
+      .replace(/ais$/, 'al')
+      .replace(/eis$/, 'el')
+      .replace(/ores$/, 'or')
+      .replace(/s$/, '')
+    out.add(singular.slice(0, 7))
   }
   return out
 }
@@ -197,4 +228,4 @@ export function memoryNote(items) {
 }
 
 /** Regras do time sem arquivo ligado: valem sempre (vão também para os subagentes). */
-export const globalRules = (index) => index.filter((m) => m.kind === 'rule' && !m.paths?.length)
+export const globalRules = (index) => index.filter((m) => m.kind === 'rule' && (!m.paths?.length || m.paths.every((p) => p === '**')))
