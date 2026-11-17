@@ -261,3 +261,19 @@ test('apagar a pasta inteira ou o .git leva os checkpoints junto', () => {
   // Numa subpasta, "rm -rf ." não chega ao .git da raiz.
   assert.equal(wipesRepo(classifyCommand('rm -rf .', { cwd: path.join(root, 'src') }), root), false)
 })
+
+test('checkpoint no repositório certo: segue cd, pushd, Set-Location e git -C antes do comando que descarta', async () => {
+  const { commandDir } = await import('../bin/command-guard.mjs')
+  const pathMod = await import('node:path')
+  const base = pathMod.resolve('/proj/app')
+  const other = pathMod.resolve('/proj/outro')
+  assert.equal(commandDir('git reset --hard', base), base)
+  assert.equal(commandDir('cd ../outro && git reset --hard', base), other)
+  assert.equal(commandDir('cd ../outro; git clean -fd', base), other)
+  assert.equal(commandDir('pushd ../outro && git checkout .', base), other)
+  assert.equal(commandDir('Set-Location -Path ../outro; git reset --hard', base), other)
+  assert.equal(commandDir('git -C ../outro reset --hard', base), other)
+  // cd depois do comando não muda nada; pasta com variável não dá para seguir.
+  assert.equal(commandDir('git reset --hard && cd ../outro', base), base)
+  assert.equal(commandDir('cd $OUTRO && git reset --hard', base), base)
+})

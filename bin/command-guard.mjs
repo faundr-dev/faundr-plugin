@@ -211,6 +211,37 @@ function removal(seg, cwd) {
 
 // O comando apaga o .git do projeto (rm -rf da pasta inteira, de uma pasta acima ou do próprio .git)? Aí os
 // checkpoints, que moram no .git, vão junto.
+/**
+ * Pasta onde o comando descarta mudanças: segue cd / pushd / Set-Location / sl / chdir antes dele (cd ../outro &&
+ * git reset --hard mexe no outro repositório, não no da sessão) e o git -C <pasta> do próprio trecho. Pasta escrita
+ * com variável ($X, %X%) não dá para seguir: fica a última conhecida.
+ */
+export function commandDir(command, cwd) {
+  let dir = cwd
+  const resolve = (target) => {
+    if (!target || /[$%`]/.test(target)) return null
+    const t = target.replace(/^~(?=$|[\/])/, os.homedir())
+    return path.resolve(dir, t)
+  }
+  for (const seg of segments(String(command ?? '').replace(HEREDOC, '$1'))) {
+    if (['cd', 'pushd', 'set-location', 'sl', 'chdir'].includes(seg.program)) {
+      const target = seg.words.filter((w) => !/^-/.test(w))[0]
+      const next = resolve(target)
+      if (next) dir = next
+      continue
+    }
+    const verdict = classifyCommand(seg.text, { cwd: dir })
+    if (!verdict?.files) continue
+    if (seg.program === 'git') {
+      const i = seg.words.indexOf('-C')
+      const next = i >= 0 ? resolve(seg.words[i + 1]) : null
+      if (next) return next
+    }
+    return dir
+  }
+  return dir
+}
+
 export function wipesRepo(verdict, root) {
   if (!verdict?.removes?.length || !root) return false
   const r = norm(path.resolve(root)).toLowerCase()

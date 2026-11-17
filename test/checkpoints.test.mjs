@@ -302,3 +302,13 @@ test('apagar o .git salva um bundle de resgate fora da pasta e diz como trazer d
   assert.equal(bundles.length, 1)
   assert.match(bundles[0], new RegExp(`^${path.basename(root)}-.+\\.bundle$`))
 })
+
+test('cd para outro repositório antes do git reset --hard: o checkpoint sai no outro, não no da sessão', () => {
+  const root = linkedRepo()
+  const other = repo()
+  fs.writeFileSync(path.join(other, 'a.txt'), 'mudou no outro\n')
+  const { out } = runGuard(root, `cd "${other}" && git reset --hard`)
+  assert.match(out, /Checkpoint saved before this command \(git reset --hard\)/)
+  assert.equal(listCheckpoints(other).length, 1)
+  assert.equal(listCheckpoints(root).length, 0)
+})

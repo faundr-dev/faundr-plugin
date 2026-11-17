@@ -191,22 +191,24 @@ export function checkpointsList(args) {
 export const checkpointMachine = (repo, config) =>
   `${machineName(config) ?? 'computer'}#${createHash('sha256').update(String(repo).toLowerCase()).digest('hex').slice(0, 4)}`
 
-// Manda ao painel os 20 pontos de volta mais recentes e o que mudou depois de cada um (só nomes de arquivo).
+// Manda ao painel os 30 checkpoints mais recentes (o painel mostra 30) e o que cada um muda nos arquivos de agora (só nomes).
 // Só quando há ponto novo ou os arquivos mudaram desde o último envio.
 export async function checkpointsSync(args) {
   const { root, projectId, config } = linkedProject()
   const repo = gitRoot(root)
   if (!repo) return
   const everything = listCheckpoints(repo)
-  const all = everything.slice(0, 20)
+  const all = everything.slice(0, 30)
   if (!all.length) return
   const now = currentTree(repo)
   const last = readState(root).checkpointsSynced
   if (last?.newest === all[0].commit && last?.tree === now) return
   const at = new Date().toISOString()
   const checkpoints = all.map((c, i) => {
-    const changes = changesSince(repo, c, i === 0 ? now : all[i - 1].tree)
-    return { commit: c.commit, at: c.at, reason: c.reason, session: c.session, changes: changes.slice(0, 60), changesCount: changes.length, changesUntil: i === 0 ? at : all[i - 1].at }
+    // Diferença direta para os arquivos de agora: o painel mostra exatamente o que a volta muda (um arquivo mudado e
+    // desfeito depois não aparece, o que a soma de trechos não sabia).
+    const changes = changesSince(repo, c, now)
+    return { commit: c.commit, at: c.at, reason: c.reason, session: c.session, changes: changes.slice(0, 60), changesCount: changes.length, changesUntil: at, changesToNow: true }
   })
   const res = await fetch(`${config.apiUrl}/api/cli/checkpoints`, {
     method: 'POST',

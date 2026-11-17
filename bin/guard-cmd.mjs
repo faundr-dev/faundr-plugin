@@ -14,7 +14,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createCheckpoint, ensureSessionCheckpoint, gitRoot, HOOK_CHECKPOINT_MS, rescueBundle, unsafeCheckpointRoot } from './checkpoints.mjs'
-import { classifyCommand, isReadOnly, wipesRepo } from './command-guard.mjs'
+import { classifyCommand, commandDir, isReadOnly, wipesRepo } from './command-guard.mjs'
 import { takeLoopAlerts } from './loop.mjs'
 import { t } from './i18n.mjs'
 import { agentStdout } from './agent.mjs'
@@ -54,7 +54,9 @@ const HOOK_BUDGET_MS = 13_000
 
 // Comando que descarta mudanças nos arquivos: checkpoint antes, para dar para desfazer. Nunca pergunta nem barra;
 // quando o checkpoint não sai, avisa o agente (ele precisa saber que não há volta).
-function checkpointBefore(command, { cwd, sql, sessionId, started = performance.timeOrigin }) {
+function checkpointBefore(command, { cwd: sessionCwd, sql, sessionId, started = performance.timeOrigin }) {
+  // Onde o comando apaga: cd ../outro && git reset --hard protege o outro repositório, não o da sessão.
+  const cwd = sql ? sessionCwd : commandDir(command, sessionCwd)
   const verdict = classifyCommand(command, { cwd, sql })
   const root = gitRoot(cwd)
   if (!verdict?.files || !root) return null
