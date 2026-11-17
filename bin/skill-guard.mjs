@@ -5,7 +5,7 @@
 // passos desligados, entrega o aviso de quais pular. Não usa a rede: lê as cópias locais das skills e dos interruptores.
 //
 // Regra de ouro dos hooks: nunca quebrar o agente. Qualquer erro → sai em silêncio.
-import { blockedSkill, noteSkillRan } from './skills.mjs'
+import { blockedSkill, noteSkillRan, plainName } from './skills.mjs'
 import { markSkillStart } from './ai-cost.mjs'
 import { skillStepsNote } from './flows.mjs'
 import { findDirWith, readStdin } from './paths.mjs'
@@ -25,7 +25,8 @@ try {
         hookSpecificOutput: {
           hookEventName: 'PreToolUse',
           permissionDecision: 'deny',
-          permissionDecisionReason: `[Faundr] The team set /${s.name} to run only when the person calls it (dashboard → Workflows → Skills). Do not run it; say in one line "this looks like a job for /${s.name}, want to run it?" (in the user's language) and continue without it.`,
+          // O nome vem do índice do time: só letras, números e _ : . - no aviso.
+          permissionDecisionReason: `[Faundr] The team set /${plainName(s.name)} to run only when the person calls it (dashboard → Workflows → Skills). Do not run it; say in one line "this looks like a job for /${plainName(s.name)}, want to run it?" (in the user's language) and continue without it.`,
         },
       }),
     )

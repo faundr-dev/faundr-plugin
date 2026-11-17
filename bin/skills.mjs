@@ -8,7 +8,7 @@ import path from 'node:path'
 import { faundrPath } from './paths.mjs'
 import { readJsonObject, writeJsonAtomic } from './json-file.mjs'
 import { topicHit } from './workflows.mjs'
-import { matchesPath } from './rules.mjs'
+import { matchesPath, teamQuote } from './rules.mjs'
 
 const unquote = (v) => {
   const t = v.trim()
@@ -193,7 +193,8 @@ export function scanSkills(root, home = os.homedir()) {
 }
 
 // ---- Aviso pelo assunto do pedido ---------------------------------------------------------------------------
-// O início da sessão traz as skills ligadas com os assuntos (.faundr/painel/skills.json); o hook do pedido avisa,
+// O início da sessão traz as skills com os assuntos (.faundr/painel/skills.json; a desligada vem sem momento nem
+// assunto, só para o bloqueio e o registro da conectada); o hook do pedido avisa,
 // sem rede, quando o pedido fala do assunto de uma delas. Cada skill uma vez por sessão.
 
 const file = (root) => faundrPath(root, 'skills')
@@ -215,8 +216,9 @@ export const onlyUser = (s) => !!s.manual || s.call === 'user'
 /** Skills cujo assunto bate com o pedido. Sem assuntos definidos, usa o nome (ex.: "copywriting"). */
 export function skillsForPrompt(list, prompt, shownIds = [], max = 2) {
   const clean = String(prompt ?? '').replace(/<pasted_content[\s\S]*?<\/pasted_content>/g, ' ')
-  // Quem já chamou a skill pelo nome (/nome no Claude Code, $nome no Codex) não precisa do aviso.
-  if (/(^|\s)[/$][\w:-]+/.test(clean.trim().split('\n')[0])) return []
+  // Quem já chamou a skill pelo nome (/nome no Claude Code, $nome no Codex) não precisa do aviso. Só quando o pedido
+  // começa com ele: "corrige a rota /api/users" no meio do texto não é chamada de skill.
+  if (/^[/$][\w:.-]+(\s|$)/.test(clean.trim())) return []
   return list
     .filter((s) => !shownIds.includes(s.name) && skillMoment(s, 'prompt'))
     .filter((s) => {
@@ -226,19 +228,23 @@ export function skillsForPrompt(list, prompt, shownIds = [], max = 2) {
     .slice(0, max)
 }
 
-// Quando usar a skill: o "quando" que o time escreveu ou, sem ele, a descrição.
+// Quando usar a skill: o "quando" que o time escreveu ou, sem ele, a descrição. Os dois vêm do time (ou do arquivo
+// da skill): entre «», sem nada que feche a citação.
 function skillWhen(s) {
-  if (s.when) return ` — when: ${s.when}`
-  return s.description ? ` — ${clip(s.description, 160)}` : ''
+  if (s.when) return ` — when: ${teamQuote(s.when)}`
+  return s.description ? ` — ${teamQuote(s.description, 160)}` : ''
 }
+
+/** Nome da skill dentro de um aviso ao agente: só letras, números e _ : . - (vem do arquivo, pode ser de outra pessoa). */
+export const plainName = (name) => String(name ?? '').replace(/[^\w:.-]/g, '')
 
 /** Como a pessoa chama uma skill: /nome no Claude Code, $nome no Codex. */
 const callSign = (agent) => (agent === 'codex' ? '$' : '/')
 
 /** Linha de uma skill no aviso: a que só a pessoa chama vira um lembrete em uma linha para ela, nunca uma chamada. */
 const skillLine = (s, agent) => {
-  const call = `${callSign(agent)}${s.name}`
-  return `- ${onlyUser(s) ? `${call} (only the person calls it: do not run it; say in one line "this looks like a job for ${call}, want to run it?")` : `skill ${s.name}`}${skillWhen(s)}`
+  const call = `${callSign(agent)}${plainName(s.name)}`
+  return `- ${onlyUser(s) ? `${call} (only the person calls it: do not run it; say in one line "this looks like a job for ${call}, want to run it?")` : `skill ${plainName(s.name)}`}${skillWhen(s)}`
 }
 
 export function skillNote(items, where = 'this kind of request', agent = 'claude') {
@@ -252,26 +258,42 @@ export const skillsForFile = (list, rel, shownIds = []) =>
 
 const readState = (root) => readJson(faundrPath(root, 'state')) ?? {}
 
-/** Entrega cada skill uma vez por sessão (pelo pedido ou pelo arquivo editado): devolve o aviso e marca. */
-function skillsShownOnce(root, sid, pick, where, agent) {
+/**
+ * Entrega cada skill uma vez por sessão em cada lista (`key`): devolve o aviso e marca. O aviso pelo assunto e o de
+ * "antes de editar" têm listas separadas: a skill lembrada pelo pedido ainda avisa (uma vez) quando o arquivo dela muda.
+ */
+function skillsShownOnce(root, sid, key, pick, where, agent) {
   if (!sid) return null
   const state = readState(root)
-  const ids = state.skillsShown?.session === sid ? state.skillsShown.ids : []
+  const ids = state[key]?.session === sid ? state[key].ids : []
   const items = pick(readSkillIndex(root), ids)
   if (!items.length) return null
-  writeJsonAtomic(faundrPath(root, 'state'), { ...readJsonObject(faundrPath(root, 'state')), skillsShown: { session: sid, ids: [...ids, ...items.map((s) => s.name)] } }, 2)
+  writeJsonAtomic(faundrPath(root, 'state'), { ...readJsonObject(faundrPath(root, 'state')), [key]: { session: sid, ids: [...ids, ...items.map((s) => s.name)] } }, 2)
   return skillNote(items, where, agent)
 }
 
 export const skillsOnce = (root, sid, prompt, agent = 'claude') =>
-  skillsShownOnce(root, sid, (list, ids) => skillsForPrompt(list, prompt, ids), 'this kind of request', agent)
+  skillsShownOnce(root, sid, 'skillsShown', (list, ids) => skillsForPrompt(list, prompt, ids), 'this kind of request', agent)
 
-export const skillsFileOnce = (root, sid, rel) => skillsShownOnce(root, sid, (list, ids) => skillsForFile(list, rel, ids), `editing ${rel}`)
+export const skillsFileOnce = (root, sid, rel) =>
+  skillsShownOnce(root, sid, 'skillsShownEdit', (list, ids) => skillsForFile(list, rel, ids), `editing ${rel}`)
+
+/**
+ * A skill do índice local pelo nome: o exato vence; sem ele, o fim do nome ("review" → "acme:review") só quando uma
+ * única skill termina assim (duas com o mesmo fim: nenhuma, para não barrar nem registrar a errada).
+ */
+export function findSkill(list, name) {
+  const clean = String(name ?? '').trim().replace(/^[/$]/, '')
+  if (!clean) return null
+  const exact = list.find((x) => x.name === clean)
+  if (exact) return exact
+  const bySuffix = list.filter((x) => String(x.name ?? '').split(':').pop() === clean)
+  return bySuffix.length === 1 ? bySuffix[0] : null
+}
 
 /** Skill que o Claude não pode chamar sozinho (o time escolheu "Só você no terminal"); null quando pode. */
 export function blockedSkill(root, name) {
-  const short = String(name ?? '').replace(/^\//, '')
-  const s = readSkillIndex(root).find((x) => x.name === short || x.name.split(':').pop() === short)
+  const s = findSkill(readSkillIndex(root), name)
   return s && s.call === 'user' ? s : null
 }
 
@@ -286,8 +308,7 @@ const stateFile = (root) => faundrPath(root, 'state')
 
 /** A skill do índice local, se ela é conectada (tem tipo e não é do Faundr). */
 export function connectedSkill(root, name) {
-  const clean = String(name ?? '').trim().replace(/^\//, '')
-  const s = readSkillIndex(root).find((x) => x.name === clean)
+  const s = findSkill(readSkillIndex(root), name)
   return s && Object.hasOwn(CONNECTED_KINDS, s.kind ?? '') && !s.name.startsWith('faundr:') ? s : null
 }
 
@@ -317,6 +338,6 @@ export function takeSkillsRan(root, sid) {
 
 export function skillReportStep(s) {
   // O nome vem do arquivo da skill (pode ser de outra pessoa do time): só letras, números e _ : . - no aviso.
-  const name = String(s.name ?? '').replace(/[^\w:.-]/g, '')
+  const name = plainName(s.name)
   return `the /${name} skill (connected to Faundr: ${CONNECTED_KINDS[s.kind]}) ran in this response: record its result on the dashboard. Write a JSON list to a temporary file with each problem it found and each one fixed in this conversation: {"area":"seguranca|qualidade|testes|erros","status":"open|fixed","title":"<the problem, short>","severity":"critical|high|medium|low","file":"<path>","line":<n>,"detail":"<what it is, in plain language, in the user's language>","impact":"<what can happen>","fix":"<how to fix it>"} and run faundr skill-report "${name}" --areas ${s.kind} --file <file> (add --scope a,b if it looked at only some files). If it found nothing, run faundr skill-report "${name}" --areas ${s.kind} --none (closes what it had found before). Record only what is in its result, without making things up or repeating what Faundr already shows`
 }
