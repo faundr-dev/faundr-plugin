@@ -10,7 +10,7 @@ import { takeInbox, writeInbox } from './inbox.mjs'
 import { escutar } from './listen.mjs'
 import { browse, parseBrowseArgs } from './browse.mjs'
 import { locale, t } from './i18n.mjs'
-import { changesSince, createCheckpoint, currentTree, describeChanges, findCheckpoint, gitRoot, listCheckpoints, restoreCheckpoint, restoreSummary } from './checkpoints.mjs'
+import { changesSince, createCheckpoint, currentTree, describeChanges, findCheckpoint, gitRoot, listCheckpoints, restorableChanges, restoreCheckpoint, restoreSummary } from './checkpoints.mjs'
 import { AGENT, AGENT_SESSION_ID, CONFIG_DIR, CONFIG_FILE, flag, linkedProject, readJson, readState, saveConfig, textArg, writeState } from './cli-core.mjs'
 
 // ---- Pontos de volta ---------------------------------------------------------------------------
@@ -20,8 +20,8 @@ function checkpointRoot() {
   if (!root)
     throw new Error(
       t(
-        'This folder is not in a git repository: without git, Faundr cannot keep restore points. To start: git init',
-        'Esta pasta não está num repositório git: sem git, o Faundr não consegue guardar pontos de volta. Para começar: git init',
+        'This folder is not in a git repository: without git, Faundr cannot keep checkpoints. To start: git init',
+        'Esta pasta não está num repositório git: sem git, o Faundr não consegue guardar checkpoints. Para começar: git init',
       ),
     )
   return root
@@ -35,8 +35,8 @@ export function checkpointCommand(args) {
   const c = createCheckpoint(root, { reason })
   console.log(
     c.created
-      ? t(`Restore point saved (${when(c.at)}): ${reason}.`, `Ponto de volta salvo (${when(c.at)}): ${reason}.`)
-      : t(`Nothing changed since the last restore point (${when(c.at)}); it still applies.`, `Nada mudou desde o último ponto de volta (${when(c.at)}); ele continua valendo.`),
+      ? t(`Checkpoint saved (${when(c.at)}): ${reason}.`, `Checkpoint salvo (${when(c.at)}): ${reason}.`)
+      : t(`Nothing changed since the last checkpoint (${when(c.at)}); it still applies.`, `Nada mudou desde o último checkpoint (${when(c.at)}); ele continua valendo.`),
   )
 }
 
@@ -152,7 +152,7 @@ export async function teamCommand() {
 // O que mudou nos arquivos desde o ponto de volta (vazio quando não deu para saber).
 function changesNote(changes) {
   if (!changes) return ''
-  return changes.length ? t(`since then: ${describeChanges(changes)}`, `desde então: ${describeChanges(changes)}`) : t('the files match this point', 'os arquivos estão iguais a este ponto')
+  return changes.length ? t(`since then: ${describeChanges(changes)}`, `desde então: ${describeChanges(changes)}`) : t('the files match this checkpoint', 'os arquivos estão iguais a este checkpoint')
 }
 
 export function checkpointsList(args) {
@@ -161,15 +161,15 @@ export function checkpointsList(args) {
   if (!all.length)
     return console.log(
       t(
-        'No restore points yet. Faundr saves one by itself before the first change of each session (or: faundr checkpoint).',
-        'Nenhum ponto de volta ainda. O Faundr salva um sozinho antes da primeira mudança de cada sessão (ou: faundr checkpoint).',
+        'No checkpoints yet. Faundr saves one by itself before the first change of each session (or: faundr checkpoint).',
+        'Nenhum checkpoint ainda. O Faundr salva um sozinho antes da primeira mudança de cada sessão (ou: faundr checkpoint).',
       ),
     )
   const limit = Number(flag(args, '--limit')) || 10
   const shown = all.slice(0, limit)
   // Uma foto do estado atual para comparar com todos (abrir o git leva tempo no Windows).
   const now = currentTree(root)
-  console.log(t('Restore points (1 is the most recent). To go back: faundr restore <n>', 'Pontos de volta (o 1 é o mais recente). Para voltar: faundr restore <n>'))
+  console.log(t('Checkpoints (1 is the most recent; the code in brackets does not change). To go back: faundr restore <code>', 'Checkpoints (o 1 é o mais recente; o código entre colchetes não muda). Para voltar: faundr restore <código>'))
   for (const c of shown) {
     let changes = null
     try {
@@ -178,7 +178,7 @@ export function checkpointsList(args) {
       // Ponto que o git não acha mais: sai sem o resumo das mudanças.
     }
     const since = changesNote(changes)
-    console.log(`  ${c.n}. ${when(c.at)} · ${c.reason}${since ? `\n     ${since}` : ''}`)
+    console.log(`  ${c.n}. [${c.commit.slice(0, 10)}] ${when(c.at)} · ${c.reason}${since ? `\n     ${since}` : ''}`)
   }
   if (all.length > shown.length) console.log(t(`  … and ${all.length - shown.length} more (--limit ${all.length})`, `  … e mais ${all.length - shown.length} (--limit ${all.length})`))
 }
@@ -208,33 +208,46 @@ export async function checkpointsSync(args) {
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data.error ?? `API error (${res.status})`)
   writeState(root, { checkpointsSynced: { newest: all[0].commit, tree: now } })
-  if (!args.includes('--quiet')) console.log(`${data.saved ?? 0} restore points sent to the dashboard (Protection → Restore points).`)
+  if (!args.includes('--quiet')) console.log(`${data.saved ?? 0} checkpoints sent to the dashboard (Checkpoints).`)
 }
 
 export function restoreCommand(args) {
   const root = checkpointRoot()
   const which = args.find((a) => !a.startsWith('--'))
-  if (!which) throw new Error(t('Say which restore point: faundr restore <n> (see the list with faundr checkpoints).', 'Diga qual ponto de volta: faundr restore <n> (veja a lista com faundr checkpoints).'))
+  if (!which) throw new Error(t('Say which checkpoint: faundr restore <code> (see the list with faundr checkpoints).', 'Diga qual checkpoint: faundr restore <código> (veja a lista com faundr checkpoints).'))
   const c = findCheckpoint(root, which)
-  if (!c) throw new Error(t(`Restore point ${which} not found (see the list with faundr checkpoints).`, `Ponto de volta ${which} não encontrado (veja a lista com faundr checkpoints).`))
-  const changes = changesSince(root, c)
-  if (!changes.length) return console.log(t(`The files already match the point from ${when(c.at)}; nothing to do.`, `Os arquivos já estão iguais ao ponto de ${when(c.at)}; nada a fazer.`))
+  if (!c) throw new Error(t(`Checkpoint ${which} not found (see the list with faundr checkpoints).`, `Checkpoint ${which} não encontrado (veja a lista com faundr checkpoints).`))
+  // A mesma lista que a volta usa: sem .env*, node_modules e o que o .gitignore ignora agora.
+  const changes = restorableChanges(root, changesSince(root, c))
+  if (!changes.length) return console.log(t(`The files already match the checkpoint from ${when(c.at)}; nothing to do.`, `Os arquivos já estão iguais ao checkpoint de ${when(c.at)}; nada a fazer.`))
   if (!args.includes('--yes')) {
     console.log(restoreSummary(c, changes, { max: 40 }))
-    // Instrução para o Claude: fica em inglês.
-    return console.log(`Show this to the user and only confirm with their OK: faundr restore ${c.n} --yes`)
+    // Instrução para o Claude: fica em inglês. Vai o código do commit, não o número: o número muda quando sai um
+    // checkpoint novo entre a prévia e o --yes.
+    return console.log(`Show this to the user and only confirm with their OK: faundr restore ${c.commit.slice(0, 10)} --yes`)
   }
   const r = restoreCheckpoint(root, c)
+  const undo = `faundr restore ${r.saved.commit.slice(0, 10)} --yes`
   console.log(
     t(
-      `Done: files back to the point from ${when(c.at)} (${r.restored.length} restored, ${r.removed.length} deleted).`,
-      `Pronto: arquivos de volta ao ponto de ${when(c.at)} (${r.restored.length} restaurados, ${r.removed.length} apagados).`,
+      `Done: files back to the checkpoint from ${when(c.at)} (${r.restored.length} restored, ${r.removed.length} deleted).`,
+      `Pronto: arquivos de volta ao checkpoint de ${when(c.at)} (${r.restored.length} restaurados, ${r.removed.length} apagados).`,
     ),
   )
+  if (r.failed.length) {
+    process.exitCode = 1
+    const list = r.failed.map((f) => `  - ${f.path} (${f.error})`).join('\n')
+    console.log(
+      t(
+        `Could not change ${r.failed.length} file(s) (open in another program, OneDrive, antivirus or the dev server?):\n${list}\nClose what is using them and run the same restore again.`,
+        `Não deu para mexer em ${r.failed.length} arquivo(s) (abertos em outro programa, OneDrive, antivírus ou o servidor de dev?):\n${list}\nFeche o que está usando e rode a mesma volta de novo.`,
+      ),
+    )
+  }
   console.log(
     t(
-      `The previous state was saved as a restore point (${when(r.saved.at)}); to undo the restore: faundr restore 1 --yes`,
-      `O estado de antes ficou salvo como ponto de volta (${when(r.saved.at)}); para desfazer a volta: faundr restore 1 --yes`,
+      `The state before the restore was saved as a checkpoint (${when(r.saved.at)}, code ${r.saved.commit.slice(0, 10)}); to undo the restore: ${undo}`,
+      `O estado de antes da volta ficou salvo como checkpoint (${when(r.saved.at)}, código ${r.saved.commit.slice(0, 10)}); para desfazer a volta: ${undo}`,
     ),
   )
 }

@@ -101,8 +101,8 @@
 //   faundr errors-sdk [--dir src/lib]          copies Faundr's server error SDK (Node, Workers) into the project
 //   faundr errors-uptime <https://site> | --off  checks the site every 5 min; down becomes E-n
 //   faundr errors-import-sentry --org O --project P  brings in the open errors of people who already use Sentry (SENTRY_AUTH_TOKEN)
-//   faundr checkpoint ["reason"]               saves a restore point of the files (Faundr already saves one by itself before changes)
-//   faundr checkpoints                         lists the restore points and what changed since each one
+//   faundr checkpoint ["reason"]               saves a checkpoint of the files (Faundr already saves one by itself before changes)
+//   faundr checkpoints                         lists the checkpoints and what changed since each one
 //   faundr team                                who else is on the project right now, where and in which files
 //   faundr claim "<task>" [--force]            becomes the person responsible for the task (warns if it already belongs to someone else)
 //   faundr release "<task>"                    frees the task for anyone
@@ -110,7 +110,7 @@
 //   faundr disown ["<feature>"]                leaves the feature without an owner (whoever touches it first becomes the owner)
 //   faundr inbox [--done <code> "note"]        dashboard requests, messages and notes waiting for you; --done closes a request
 //   faundr msg "<text>" [--to "<name>"]        message to a person on the team (without --to: to the whole team)
-//   faundr restore <n> [--yes]                 restores the files to point n (without --yes, only shows what would change)
+//   faundr restore <code> [--yes]              restores the files to that checkpoint (commit code; without --yes, only shows what would change)
 //   faundr guard claude                        called by the PreToolUse hook: blocks dangerous keys before writing
 //   faundr hook <claude|codex>                 called by the hooks (reads the JSON from stdin)
 //

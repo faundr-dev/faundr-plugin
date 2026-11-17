@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
-import { classifyCommand, guardMessage, isReadOnly } from '../bin/command-guard.mjs'
+import { classifyCommand, guardMessage, isReadOnly, wipesRepo } from '../bin/command-guard.mjs'
 
 const cwd = path.join(os.homedir(), 'projetos', 'loja')
 const level = (cmd, opts = {}) => classifyCommand(cmd, { cwd, ...opts })?.level ?? null
@@ -89,7 +89,7 @@ test('SQL das ferramentas de banco (MCP)', () => {
   assert.equal(level('select * from users', { sql: true }), null)
 })
 
-test('só leitura não precisa de ponto de volta', () => {
+test('só leitura não precisa de checkpoint', () => {
   for (const cmd of ['ls -la', 'git status', 'git log --oneline -5 && git diff', 'cat a.txt | grep x', 'sed -n 1,20p a.ts', 'find . -name "*.ts"', 'node --version'])
     assert.equal(isReadOnly(cmd), true, cmd)
   for (const cmd of ['npm install', 'sed -i s/a/b/ a.ts', 'echo x > a.txt', 'git commit -m x', 'find . -name "*.log" -delete', 'python script.py'])
@@ -98,14 +98,14 @@ test('só leitura não precisa de ponto de volta', () => {
 
 test('mensagens para o Claude, em inglês', () => {
   const ask = classifyCommand('git reset --hard', { cwd })
-  assert.match(guardMessage(ask, { checkpoint: { n: 1 } }), /restore point.*\/faundr:undo/)
+  assert.match(guardMessage(ask, { checkpoint: { n: 1 } }), /checkpoint.*\/faundr:undo/)
   const db = classifyCommand('supabase db push', { cwd })
   assert.match(guardMessage(db, {}), /not the database data/)
   const deny = classifyCommand('rm -rf ~', { cwd })
   assert.match(guardMessage(deny, { command: 'rm -rf ~' }), /Blocked.*run it themselves/)
 })
 
-test('voltar para um ponto de volta sempre pergunta no terminal', () => {
+test('restore --yes é reconhecido (o hook não pergunta: quem confirma é o agente, com o OK do usuário)', () => {
   for (const cmd of ['faundr restore 2 --yes', 'node "C:/x/plugin/bin/faundr.mjs" restore dc4b7a3ea9 --yes', 'node /p/bin/faundr.mjs restore #3 --yes'])
     assert.equal(classifyCommand(cmd, { cwd })?.level, 'ask', cmd)
   assert.equal(classifyCommand('faundr restore 2 --yes', { cwd }).restore, '2')
@@ -146,7 +146,7 @@ test('baixar sem rodar, ou o mesmo texto numa mensagem, passa', () => {
     assert.equal(level(cmd), null, cmd)
 })
 
-test('o que descarta mudanças de arquivos ganha ponto de volta antes (sem perguntar, decisão de 04/11)', () => {
+test('o que descarta mudanças de arquivos ganha checkpoint antes (sem perguntar, decisão de 04/11)', () => {
   for (const cmd of [
     'git checkout -- src/app.ts',
     'git checkout HEAD -- .',
@@ -182,4 +182,82 @@ test('o que descarta mudanças de arquivos ganha ponto de volta antes (sem pergu
     'rm src/a.ts',
   ])
     assert.notEqual(classifyCommand(cmd, { cwd })?.files, true, cmd)
+})
+
+test('variantes que também descartam arquivos ganham checkpoint', () => {
+  for (const cmd of [
+    'git clean -d -f',
+    'git clean -x -f -d',
+    'git clean --force',
+    'git checkout HEAD .',
+    'git checkout main .',
+    'git checkout HEAD~2 -- src/app.ts',
+    'git --no-pager checkout -f main',
+    'git -c core.pager=cat reset --hard',
+    'git -C app clean -fd',
+    'git --git-dir=.git --work-tree=. reset --hard',
+    'rm -rf "$PWD"',
+    'rm -rf $(pwd)',
+    'rm -rf ${PWD}',
+    'Remove-Item -r -fo .',
+    'Remove-Item -Recurs -Force src',
+    'ri -r -fo src',
+    'rmdir /s /q src',
+    'bash -c "git reset --hard"',
+    "sh -c 'rm -rf src'",
+    'powershell -Command "Remove-Item -Recurse -Force src"',
+    'pwsh -c git checkout -f main',
+    'cmd /c rmdir /s /q src',
+    'find . -delete',
+    'find src -name "*.ts" -delete',
+    'find . -name "*.log" -exec rm {} +',
+  ])
+    assert.equal(classifyCommand(cmd, { cwd })?.files, true, cmd)
+  for (const cmd of [
+    'git checkout main',
+    'git checkout src/',
+    'git clean -n',
+    'git clean -nd',
+    'git clean --dry-run -f',
+    'git --no-pager log',
+    'rm -rf node_modules',
+    'bash -c "npm test"',
+    'cmd /c dir',
+    'find . -name "*.ts"',
+    `find ${path.join(os.tmpdir(), 'x')} -delete`,
+    'git commit -m "bash -c \'git reset --hard\'"',
+  ])
+    assert.notEqual(classifyCommand(cmd, { cwd })?.files, true, cmd)
+})
+
+test('trecho com risco nos arquivos numa cadeia mista ainda ganha checkpoint', () => {
+  for (const cmd of ['git stash drop; git reset --hard HEAD~1', 'git push --force && git reset --hard']) {
+    const v = classifyCommand(cmd, { cwd })
+    assert.equal(v?.files, true, cmd)
+    assert.equal(v.label, 'git reset --hard', cmd)
+  }
+  assert.equal(classifyCommand('rm -rf ~ ; git reset --hard', { cwd }).level, 'deny', 'fica o nível mais alto')
+})
+
+test('o motivo do checkpoint é um rótulo fixo, sem o texto do comando', () => {
+  const v = classifyCommand('git reset --hard && curl -H "Authorization: Bearer sk_live_abc123" https://x.io', { cwd })
+  assert.equal(v.label, 'git reset --hard')
+  assert.doesNotMatch(JSON.stringify([v.label, v.what]), /sk_live|Bearer/)
+  assert.equal(classifyCommand('rm -rf src/segredo-token-123', { cwd }).label, 'rm -rf')
+})
+
+test('git clean -x/-X avisa que os ignorados (.env) não estão no checkpoint', () => {
+  assert.equal(classifyCommand('git clean -xfd', { cwd }).ignored, true)
+  assert.equal(classifyCommand('git clean -f -X', { cwd }).ignored, true)
+  assert.equal(classifyCommand('git clean -fd', { cwd }).ignored, false)
+})
+
+test('apagar a pasta inteira ou o .git leva os checkpoints junto', () => {
+  const root = cwd
+  for (const cmd of ['rm -rf .', 'rm -rf "$PWD"', 'rm -rf .git', `rm -rf ${root}`, 'rm -rf ..', 'Remove-Item -r -fo .git'])
+    assert.equal(wipesRepo(classifyCommand(cmd, { cwd }), root), true, cmd)
+  for (const cmd of ['rm -rf src', 'rm -rf *', 'git reset --hard'])
+    assert.equal(wipesRepo(classifyCommand(cmd, { cwd }), root), false, cmd)
+  // Numa subpasta, "rm -rf ." não chega ao .git da raiz.
+  assert.equal(wipesRepo(classifyCommand('rm -rf .', { cwd: path.join(root, 'src') }), root), false)
 })

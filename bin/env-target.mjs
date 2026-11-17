@@ -103,8 +103,8 @@ export function remoteDatabaseFindings(root) {
       `A variável ${d.name}, no ${d.file}, aponta para ${d.host}${d.sameAsProduction ? ', o mesmo banco do app no ar' : ''}. Tudo o que o agente roda no seu computador (migrações, seed, testes, scripts) vai para esse banco.`,
     ),
     impact: t(
-      "A mistake by the agent (dropping a table, running the wrong migration, a test that wipes data) hits the users' real data, and Faundr's restore point does not cover the database.",
-      'Um erro do agente (apagar uma tabela, rodar uma migração errada, um teste que limpa dados) atinge os dados reais dos usuários, e o ponto de volta do Faundr não guarda o banco.',
+      "A mistake by the agent (dropping a table, running the wrong migration, a test that wipes data) hits the users' real data, and Faundr's checkpoint does not cover the database.",
+      'Um erro do agente (apagar uma tabela, rodar uma migração errada, um teste que limpa dados) atinge os dados reais dos usuários, e o checkpoint do Faundr não guarda o banco.',
     ),
     fix: t(
       'Use a database just for development: in Supabase, "supabase start" runs a local database (or create a second project for testing) and put its address in .env; keep the production address only in your hosting. Until then, check that the production database has automatic backups.',

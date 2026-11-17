@@ -209,7 +209,7 @@ function setupGit(add, { cwd, linkFile0, apply }) {
       status: 'pedir',
       applyId: 'git',
       detail: t('the folder is not in a git repository', 'a pasta não está num repositório git'),
-      why: t('without git, Faundr cannot keep restore points or see what changed.', 'sem git, o Faundr não guarda pontos de volta nem vê o que mudou.'),
+      why: t('without git, Faundr cannot keep checkpoints or see what changed.', 'sem git, o Faundr não guarda checkpoints nem vê o que mudou.'),
       apply: 'faundr setup --apply git',
     })
   return root

@@ -1,9 +1,10 @@
 // Pontos de volta: uma foto dos arquivos do projeto guardada no próprio git, sem mexer no que o usuário vê.
 //
 // A foto usa um índice temporário e vira um commit solto
-// em refs/faundr/checkpoints/<ms>. Não muda a branch, o índice, o stash nem os arquivos. Entra tudo o que não
-// está no .gitignore, inclusive arquivos ainda não commitados; .env e node_modules ficam de fora (estão no
-// .gitignore) e a pasta .faundr/ também (é o estado do próprio Faundr).
+// em refs/faundr/checkpoints/<ms> (numa worktree ligada, refs/faundr/wt/<nome>/checkpoints/<ms>: cada worktree tem a
+// sua lista). Não muda a branch, o índice, o stash nem os arquivos. Entra tudo o que não está no .gitignore,
+// inclusive arquivos ainda não commitados; .env*, node_modules/ e .faundr/ ficam sempre de fora, mesmo sem
+// .gitignore (segredos, pastas enormes e o estado do próprio Faundr).
 //
 // Voltar salva antes uma foto do estado atual: dá para desfazer a volta.
 
@@ -19,18 +20,57 @@ const KEEP = 50
 export const CHECKPOINT_EVERY_MS = 30 * 60_000
 const IDENTITY = { GIT_AUTHOR_NAME: 'Faundr', GIT_AUTHOR_EMAIL: 'faundr@localhost', GIT_COMMITTER_NAME: 'Faundr', GIT_COMMITTER_EMAIL: 'faundr@localhost' }
 const OWN = (p) => p === '.faundr' || p.startsWith('.faundr/')
+// Nunca entram num checkpoint nem são mexidos por uma volta: segredos e pacotes instalados.
+const NEVER = (p) => /(^|\/)node_modules(\/|$)/.test(p) || /(^|\/)\.env(\.[^/]*)?$/.test(p)
+const NEVER_PATTERNS = ['node_modules', '.env', '.env.*']
 
-// Ponto tirado por um hook (o Claude Code derruba o hook aos 15 s): o git todo tem esse prazo, e passar dele só
-// deixa o comando seguir sem ponto.
+// Checkpoint tirado pelo hook dos comandos (o Claude Code derruba o hook aos 15 s): o git todo tem esse prazo, e
+// passar dele só deixa o comando seguir sem checkpoint.
 export const HOOK_CHECKPOINT_MS = 10_000
+// Hook das edições: o Claude Code derruba aos 10 s, então o git tem menos (sobra tempo para o node e o marcador).
+export const EDIT_HOOK_CHECKPOINT_MS = 6_000
 
 // `deadline`: hora (ms) em que o git é parado; sem ela, sem prazo (comandos da pessoa, como faundr restore).
 function git(root, args, { env, input, deadline } = {}) {
-  const timeout = deadline ? Math.max(1, deadline - Date.now()) : undefined
+  const timeout = deadline ? Math.max(1, Math.floor(deadline - Date.now())) : undefined
   const r = spawnSync('git', args, { cwd: root, env: env ?? process.env, input, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true, timeout })
   if (r.error) throw r.error
   if (r.status !== 0) throw new Error(`git ${args[0]}: ${(r.stderr || r.stdout).trim().split('\n').pop()}`)
   return r.stdout
+}
+
+// Pasta pessoal ou raiz do disco como raiz do git (um "git init" esquecido em ~ ou em C:\): a foto pegaria a
+// máquina inteira. Nesses casos não há checkpoint.
+export function unsafeCheckpointRoot(root, home = os.homedir()) {
+  const r = path.resolve(root)
+  const same = (a, b) => (process.platform === 'win32' || process.platform === 'darwin' ? a.toLowerCase() === b.toLowerCase() : a === b)
+  return same(r, path.resolve(home)) || same(r, path.parse(r).root)
+}
+
+// Namespace dos refs: o projeto principal usa refs/faundr/checkpoints/ (como sempre); uma worktree ligada (ajudante
+// do /faundr:parallel) usa o seu, senão os checkpoints dela apareceriam como #1 no projeto principal.
+const prefixes = new Map()
+export function checkpointPrefix(root) {
+  const key = path.resolve(root)
+  if (prefixes.has(key)) return prefixes.get(key)
+  let prefix = CHECKPOINT_PREFIX
+  let dotGit = null
+  try {
+    dotGit = fs.statSync(path.join(key, '.git'))
+  } catch {
+    // Sem .git na raiz: pergunta ao git abaixo.
+  }
+  // .git em pasta é sempre o repositório principal; arquivo .git é worktree ligada ou submódulo.
+  if (!dotGit?.isDirectory()) {
+    try {
+      const [gitDir, commonDir] = git(key, ['rev-parse', '--git-dir', '--git-common-dir']).trim().split('\n').map((p) => path.resolve(key, p.trim()))
+      if (gitDir.toLowerCase() !== commonDir.toLowerCase()) prefix = `refs/faundr/wt/${path.basename(gitDir).replace(/[^\w.-]/g, '-').replace(/^\.+/, '') || 'wt'}/checkpoints/`
+    } catch {
+      // Git que não responde: fica o namespace principal.
+    }
+  }
+  prefixes.set(key, prefix)
+  return prefix
 }
 
 // Raiz do repositório (a pasta que tem o .git), sem abrir o git.
@@ -53,9 +93,11 @@ export function currentTree(root, deadline) {
     const m = entry.match(/^(\d+) \S+ \d\t(.+)$/s)
     if (m) modes.set(m[2], m[1])
   }
-  const untracked = git(root, ['ls-files', '-z', '-o', '--exclude-standard'], { deadline }).split('\0')
+  // node_modules e .env* ficam de fora mesmo sem .gitignore (sem isso, um repositório sem .gitignore hasheia o
+  // node_modules inteiro e estoura o prazo do hook).
+  const untracked = git(root, ['ls-files', '-z', '-o', '--exclude-standard', ...NEVER_PATTERNS.map((p) => `--exclude=${p}`)], { deadline }).split('\0')
   const files = [...new Set([...modes.keys(), ...untracked])].filter((f) => {
-    if (!f || OWN(f) || /[\n\r]/.test(f)) return false
+    if (!f || OWN(f) || NEVER(f) || /[\n\r]/.test(f)) return false
     try {
       return fs.lstatSync(path.join(root, f)).isFile()
     } catch {
@@ -91,7 +133,7 @@ function readBlobs(root, commit, paths) {
     const nl = out.indexOf(10, at)
     const header = out.subarray(at, nl).toString()
     const size = Number(header.split(' ')[2])
-    if (!header.includes(' blob ') || Number.isNaN(size)) throw new Error(t(`${p} not found in the restore point`, `não achei ${p} no ponto de volta`))
+    if (!header.includes(' blob ') || Number.isNaN(size)) throw new Error(t(`${p} not found in the checkpoint`, `não achei ${p} no checkpoint`))
     at = nl + 1 + size + 1
     return out.subarray(nl + 1, nl + 1 + size)
   })
@@ -109,7 +151,8 @@ function parseMessage(body) {
 
 // Pontos de volta, do mais novo para o mais antigo (n = 1 é o mais novo).
 export function listCheckpoints(root, deadline) {
-  const out = git(root, ['for-each-ref', '--sort=-refname', '--format=%(refname)%1f%(objectname)%1f%(tree)%1f%(contents)%1e', CHECKPOINT_PREFIX], { deadline })
+  const prefix = checkpointPrefix(root)
+  const out = git(root, ['for-each-ref', '--sort=-refname', '--format=%(refname)%1f%(objectname)%1f%(tree)%1f%(contents)%1e', prefix], { deadline })
   return out
     .split('\x1e')
     .map((r) => r.replace(/^\n/, ''))
@@ -117,14 +160,22 @@ export function listCheckpoints(root, deadline) {
     .map((r, i) => {
       const [ref, commit, tree, contents] = r.split('\x1f')
       const msg = parseMessage(contents.trim())
-      return { n: i + 1, ref, commit, tree, at: new Date(Number(ref.slice(CHECKPOINT_PREFIX.length))).toISOString(), reason: msg.reason, session: msg.session ?? null }
+      return { n: i + 1, ref, commit, tree, at: new Date(Number(ref.slice(prefix.length))).toISOString(), reason: msg.reason, session: msg.session ?? null }
     })
 }
 
 // Tira uma foto. Se nada mudou desde a última, não cria outra (devolve a última com created: false).
 // `timeoutMs`: prazo de todo o git da foto (nos hooks, HOOK_CHECKPOINT_MS); passou dele, dá erro sem criar o ponto.
-export function createCheckpoint(root, { reason = t('restore point', 'ponto de volta'), session = null, now = Date.now(), timeoutMs } = {}) {
+export function createCheckpoint(root, { reason = t('checkpoint', 'checkpoint'), session = null, now = Date.now(), timeoutMs } = {}) {
+  if (unsafeCheckpointRoot(root))
+    throw new Error(
+      t(
+        `The git repository starts at ${root} (home folder or disk root): Faundr does not save checkpoints there. Run git init in the project folder.`,
+        `O repositório git começa em ${root} (pasta pessoal ou raiz do disco): o Faundr não salva checkpoints aí. Rode git init na pasta do projeto.`,
+      ),
+    )
   const deadline = timeoutMs ? Date.now() + timeoutMs : undefined
+  const prefix = checkpointPrefix(root)
   const tree = currentTree(root, deadline)
   const all = listCheckpoints(root, deadline)
   if (all[0]?.tree === tree) return { ...all[0], created: false }
@@ -137,8 +188,8 @@ export function createCheckpoint(root, { reason = t('restore point', 'ponto de v
   const message = [`faundr: ${reason.replace(/\s+/g, ' ').slice(0, 200)}`, '', session && `session: ${session}`].filter((l) => l !== null && l !== undefined && l !== false).join('\n')
   const commit = git(root, ['commit-tree', tree, ...(head ? ['-p', head] : []), '-F', '-'], { env: { ...process.env, ...IDENTITY }, input: message, deadline }).trim()
   let stamp = now
-  while (all.some((c) => c.ref === `${CHECKPOINT_PREFIX}${stamp}`)) stamp++
-  const ref = `${CHECKPOINT_PREFIX}${stamp}`
+  while (all.some((c) => c.ref === `${prefix}${stamp}`)) stamp++
+  const ref = `${prefix}${stamp}`
   git(root, ['update-ref', ref, commit])
   for (const old of all.slice(KEEP - 1)) git(root, ['update-ref', '-d', old.ref])
   return { n: 1, ref, commit, tree, at: new Date(stamp).toISOString(), reason, session, created: true }
@@ -163,31 +214,58 @@ export function changesSince(root, checkpoint, tree = currentTree(root)) {
   return treeDiff(root, checkpoint.tree, tree)
 }
 
+// Número da lista (muda quando sai um checkpoint novo), código do commit (7+ letras hex, o que vale para confirmar)
+// ou o ref inteiro. Número exato primeiro: "8" nunca vira o commit que começa com 8.
 export function findCheckpoint(root, which) {
   const all = listCheckpoints(root)
-  const s = String(which ?? '').replace(/^#/, '')
-  return all.find((c) => String(c.n) === s || c.ref === s || c.commit.startsWith(s)) ?? null
+  const s = String(which ?? '').trim().replace(/^#/, '')
+  if (!s) return null
+  const byNumber = all.find((c) => String(c.n) === s)
+  if (byNumber) return byNumber
+  const byRef = all.find((c) => c.ref === s)
+  if (byRef) return byRef
+  if (/^[0-9a-f]{7,40}$/i.test(s)) return all.find((c) => c.commit.startsWith(s.toLowerCase())) ?? null
+  return null
 }
 
-// Volta os arquivos para o ponto de volta. Antes, guarda o estado atual (a volta pode ser desfeita).
+// Tira da volta o que ela nunca mexe: .env*, node_modules/ e o que o .gitignore ignora agora (o checkpoint pode ser
+// de antes de o arquivo entrar no .gitignore).
+export function restorableChanges(root, changes) {
+  const kept = changes.filter((c) => !NEVER(c.path))
+  if (!kept.length) return kept
+  const r = spawnSync('git', ['check-ignore', '--stdin', '-z'], { cwd: root, input: `${kept.map((c) => c.path).join('\0')}\0`, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024 })
+  if (r.error) throw r.error
+  // 0: algum ignorado; 1: nenhum; outro: erro do git.
+  if (r.status !== 0 && r.status !== 1) throw new Error(`git check-ignore: ${(r.stderr || '').trim().split('\n').pop()}`)
+  const ignored = new Set(r.stdout.split('\0').filter(Boolean))
+  return kept.filter((c) => !ignored.has(c.path))
+}
+
+// Volta os arquivos para o checkpoint. Antes, guarda o estado atual (a volta pode ser desfeita).
+// Primeiro apaga, depois escreve: numa troca só de maiúsculas (A.txt → a.txt) em disco que não diferencia, apagar
+// depois apagaria o arquivo recém-escrito. Arquivo preso (OneDrive, antivírus, servidor de dev) não para a volta:
+// o resto segue e ele sai em `failed`.
 export function restoreCheckpoint(root, checkpoint, { session = null } = {}) {
-  const saved = createCheckpoint(root, { reason: t(`before restoring the point from ${new Date(checkpoint.at).toLocaleString(locale())}`, `antes de voltar para o ponto de ${new Date(checkpoint.at).toLocaleString(locale())}`), session })
-  const changes = treeDiff(root, saved.tree, checkpoint.tree)
+  const at = new Date(checkpoint.at).toLocaleString(locale())
+  const saved = createCheckpoint(root, { reason: t(`before restoring the checkpoint from ${at}`, `antes de voltar para o checkpoint de ${at}`), session })
+  const changes = restorableChanges(root, treeDiff(root, saved.tree, checkpoint.tree))
   const bring = changes.filter((c) => c.status !== 'apagado').map((c) => c.path)
+  // Comparação sem caixa: o mesmo caminho (A.txt/a.txt) que sai e volta não perde a pasta no meio.
+  const brought = new Set(bring.map((p) => p.toLowerCase()))
   const remove = changes.filter((c) => c.status === 'apagado').map((c) => c.path)
   const blobs = bring.length ? readBlobs(root, checkpoint.commit, bring) : []
-  bring.forEach((rel, i) => {
-    const file = path.join(root, rel)
-    fs.mkdirSync(path.dirname(file), { recursive: true })
-    fs.writeFileSync(file, blobs[i])
-  })
+  const failed = []
+  const removed = []
   for (const rel of remove) {
     const file = path.join(root, rel)
     try {
       fs.unlinkSync(file)
-    } catch {
-      // Já não existia ou está preso: o resto da volta segue.
+      removed.push(rel)
+    } catch (err) {
+      if (err.code === 'ENOENT') removed.push(rel)
+      else failed.push({ path: rel, error: err.code ?? err.message })
     }
+    if (brought.has(rel.toLowerCase())) continue
     // Pastas que ficaram vazias saem também.
     let dir = path.dirname(file)
     while (dir.startsWith(root) && dir !== root) {
@@ -199,7 +277,54 @@ export function restoreCheckpoint(root, checkpoint, { session = null } = {}) {
       dir = path.dirname(dir)
     }
   }
-  return { saved, restored: bring, removed: remove }
+  const restored = []
+  bring.forEach((rel, i) => {
+    const file = path.join(root, rel)
+    try {
+      fs.mkdirSync(path.dirname(file), { recursive: true })
+      fs.writeFileSync(file, blobs[i])
+      restored.push(rel)
+    } catch (err) {
+      failed.push({ path: rel, error: err.code ?? err.message })
+    }
+  })
+  return { saved, restored, removed, failed }
+}
+
+// Cópia de resgate do checkpoint fora do .git, para comando que apaga a pasta inteira ou o .git (os checkpoints vão
+// junto). Um commit sem pai com a árvore do checkpoint, num bundle em `dir` que `git clone` abre. Feito num
+// repositório temporário com alternates: não cria branch nem ref no projeto. Guarda só os 5 mais novos.
+export function rescueBundle(root, checkpoint, { dir, deadline, now = Date.now() } = {}) {
+  fs.mkdirSync(dir, { recursive: true })
+  const commit = git(root, ['commit-tree', checkpoint.tree, '-m', `faundr: ${checkpoint.reason}`], { env: { ...process.env, ...IDENTITY }, deadline }).trim()
+  const objects = path.resolve(root, git(root, ['rev-parse', '--git-common-dir'], { deadline }).trim(), 'objects')
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'faundr-rescue-'))
+  const name = `${path.basename(root).replace(/[^\w.-]/g, '-') || 'project'}-${new Date(now).toISOString().replace(/[:.]/g, '-')}.bundle`
+  const file = path.join(dir, name)
+  try {
+    git(tmp, ['init', '-q', '--bare', '.'], { deadline })
+    fs.writeFileSync(path.join(tmp, 'objects', 'info', 'alternates'), `${objects.split(path.sep).join('/')}\n`)
+    fs.mkdirSync(path.join(tmp, 'refs', 'heads'), { recursive: true })
+    fs.writeFileSync(path.join(tmp, 'refs', 'heads', 'checkpoint'), `${commit}\n`)
+    fs.writeFileSync(path.join(tmp, 'HEAD'), 'ref: refs/heads/checkpoint\n')
+    git(tmp, ['bundle', 'create', '-q', file, 'HEAD', 'checkpoint'], { deadline })
+  } catch (err) {
+    fs.rmSync(file, { force: true })
+    throw err
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true })
+  }
+  try {
+    const all = fs
+      .readdirSync(dir)
+      .filter((f) => f.endsWith('.bundle'))
+      .map((f) => ({ f, at: fs.statSync(path.join(dir, f)).mtimeMs }))
+      .sort((a, b) => b.at - a.at)
+    for (const { f } of all.slice(5)) fs.rmSync(path.join(dir, f), { force: true })
+  } catch {
+    // Faxina dos bundles antigos: falhar não tira o bundle novo.
+  }
+  return file
 }
 
 // Ponto que não saiu (git lento, prazo do hook): tenta de novo depois deste tempo, e não em todo comando.
@@ -211,6 +336,15 @@ export function ensureSessionCheckpoint(cwd, sessionId, { configDir, reason = t(
   if (!sessionId || !configDir) return null
   const root = gitRoot(cwd)
   if (!root) return null
+  if (unsafeCheckpointRoot(root)) {
+    try {
+      fs.mkdirSync(configDir, { recursive: true })
+      fs.appendFileSync(path.join(configDir, 'hook.log'), `${new Date(now).toISOString()} checkpoint: o git começa em ${root} (pasta pessoal ou raiz do disco), sem checkpoint\n`)
+    } catch {
+      // Sem onde registrar: segue sem checkpoint, em silêncio.
+    }
+    return null
+  }
   const marker = path.join(configDir, `checkpoint-${String(sessionId).replace(/[^\w-]/g, '')}`)
   let last = 0
   try {
@@ -221,14 +355,10 @@ export function ensureSessionCheckpoint(cwd, sessionId, { configDir, reason = t(
   if (last && now - last < every) return null
   fs.mkdirSync(configDir, { recursive: true })
   cleanMarkers(configDir, now)
-  let c
-  try {
-    c = createCheckpoint(root, { reason: last ? t('before continuing the changes (30 min after the last point)', 'antes de continuar as mudanças (30 min depois do último ponto)') : reason, session: sessionId, now, timeoutMs })
-  } catch (err) {
-    fs.writeFileSync(marker, String(now - every + RETRY_AFTER_FAIL_MS))
-    throw err
-  }
-  // O marcador só depois de o ponto existir: hook derrubado no meio não deixa a sessão 30 min sem ponto.
+  // Marcador de "tentar de novo em 5 min" ANTES da foto: se o Claude Code derrubar o hook no meio, a próxima edição
+  // não espera o prazo inteiro de novo. Deu certo, vira a hora do checkpoint (o próximo, em 30 min).
+  fs.writeFileSync(marker, String(now - every + RETRY_AFTER_FAIL_MS))
+  const c = createCheckpoint(root, { reason: last ? t('before continuing the changes (30 min after the last checkpoint)', 'antes de continuar as mudanças (30 min depois do último checkpoint)') : reason, session: sessionId, now, timeoutMs })
   fs.writeFileSync(marker, String(now))
   return c.created ? c : null
 }
@@ -249,20 +379,20 @@ function cleanMarkers(configDir, now) {
 // `changes` = changesSince(ponto): o que mudou depois dele (alterado, criado, apagado).
 export function restoreSummary(checkpoint, changes, { max = 8 } = {}) {
   const when = new Date(checkpoint.at).toLocaleString(locale(), { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-  const head = t(`Restore the point from ${when} (${checkpoint.reason}).`, `Voltar para o ponto de ${when} (${checkpoint.reason}).`)
-  if (!changes.length) return `${head} ${t('The files already match this point: nothing changes.', 'Os arquivos já estão iguais a este ponto: nada muda.')}`
+  const head = t(`Restore the checkpoint from ${when} (${checkpoint.reason}).`, `Voltar para o checkpoint de ${when} (${checkpoint.reason}).`)
+  if (!changes.length) return `${head} ${t('The files already match this checkpoint: nothing changes.', 'Os arquivos já estão iguais a este checkpoint: nada muda.')}`
   const list = (items) => `${items.slice(0, max).map((c) => c.path).join(', ')}${items.length > max ? t(` and ${items.length - max} more`, ` e mais ${items.length - max}`) : ''}`
   const of = (s) => changes.filter((c) => c.status === s)
   const lines = [head, t('What happens to the files:', 'O que acontece com os arquivos:')]
   if (of('alterado').length)
     lines.push(
       t(
-        `- ${of('alterado').length} go back to how they were; the changes made to them after the point are lost: ${list(of('alterado'))}`,
-        `- ${of('alterado').length} voltam como eram; as mudanças feitas neles depois do ponto se perdem: ${list(of('alterado'))}`,
+        `- ${of('alterado').length} go back to how they were; the changes made to them after the checkpoint are lost: ${list(of('alterado'))}`,
+        `- ${of('alterado').length} voltam como eram; as mudanças feitas neles depois do checkpoint se perdem: ${list(of('alterado'))}`,
       ),
     )
-  if (of('criado').length) lines.push(t(`- ${of('criado').length} created after the point are deleted: ${list(of('criado'))}`, `- ${of('criado').length} criados depois do ponto são apagados: ${list(of('criado'))}`))
-  if (of('apagado').length) lines.push(t(`- ${of('apagado').length} deleted after the point come back: ${list(of('apagado'))}`, `- ${of('apagado').length} apagados depois do ponto voltam: ${list(of('apagado'))}`))
+  if (of('criado').length) lines.push(t(`- ${of('criado').length} created after the checkpoint are deleted: ${list(of('criado'))}`, `- ${of('criado').length} criados depois do checkpoint são apagados: ${list(of('criado'))}`))
+  if (of('apagado').length) lines.push(t(`- ${of('apagado').length} deleted after the checkpoint come back: ${list(of('apagado'))}`, `- ${of('apagado').length} apagados depois do checkpoint voltam: ${list(of('apagado'))}`))
   // O que fica fora da foto e pode não bater com os arquivos de volta.
   if (changes.some((c) => /(^|\/)(package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|requirements\.txt|pyproject\.toml)$/.test(c.path)))
     lines.push(
@@ -279,8 +409,8 @@ export function restoreSummary(checkpoint, changes, { max = 8 } = {}) {
       ),
     )
   lines.push(
-    t('What does not change: the .env, node_modules, the database and the git commits.', 'O que não muda: o .env, o node_modules, o banco de dados e os commits do git.'),
-    t('The current state is saved first, as a new restore point: the restore can be undone.', 'O estado de agora é salvo antes, como um ponto de volta novo: dá para desfazer a volta.'),
+    t('What does not change: the .env, node_modules, the files ignored by git, the database and the git commits.', 'O que não muda: o .env, o node_modules, os arquivos ignorados pelo git, o banco de dados e os commits do git.'),
+    t('The current state is saved first, as a new checkpoint: the restore can be undone.', 'O estado de agora é salvo antes, como um checkpoint novo: dá para desfazer a volta.'),
   )
   return lines.join('\n')
 }

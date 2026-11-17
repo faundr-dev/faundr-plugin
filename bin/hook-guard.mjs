@@ -12,7 +12,7 @@ import { forbiddenIn, forbiddenNote, readRules, rulesFor, rulesNote } from './ru
 import { editLoopNote, takeLoopAlerts } from './loop.mjs'
 import { fileWarning, readTeam } from './team.mjs'
 import { toolEdits } from './agent.mjs'
-import { ensureSessionCheckpoint } from './checkpoints.mjs'
+import { EDIT_HOOK_CHECKPOINT_MS, ensureSessionCheckpoint } from './checkpoints.mjs'
 import { CONFIG_DIR, findUp, fitContext, LINK_FILE, log, readState, readStdin, writeState } from './cli-core.mjs'
 import { editedFile } from './hook-stop.mjs'
 import { takeSecurityAlert } from './cmd-security.mjs'
@@ -127,13 +127,13 @@ export async function guard() {
   if (!edits.length) return
   const checked = edits.map((e) => ({ ...e, ...guardContent(e.content, e.rel) }))
   const blocked = checked.filter((e) => e.block.length)
-  // Ponto de volta antes da primeira edição da sessão (e de novo a cada 30 min de edições).
+  // Checkpoint antes da primeira edição da sessão (e de novo a cada 30 min de edições).
   let checkpoint = null
   if (!blocked.length) {
     try {
-      checkpoint = ensureSessionCheckpoint(root, payload.session_id, { configDir: CONFIG_DIR })
+      checkpoint = ensureSessionCheckpoint(root, payload.session_id, { configDir: CONFIG_DIR, timeoutMs: EDIT_HOOK_CHECKPOINT_MS })
     } catch (err) {
-      log(`guard restore point: ${err?.message ?? err}`)
+      log(`guard checkpoint: ${err?.message ?? err}`)
     }
   }
   const how = 'Put the value in the .env file (which does not go to git) and read it with process.env.VARIABLE_NAME; if it is only an example, use a clearly fake value (e.g. sk_live_xxx).'
@@ -153,7 +153,7 @@ export async function guard() {
   // O alerta da checagem de segurança em segundo plano entra antes da próxima edição: o hook de cada pergunta
   // roda em segundo plano e o Claude Code descarta o que ele devolve.
   const context = [
-    checkpoint && '[Faundr] Restore point of the files saved before this change (to undo: /faundr:undo).',
+    checkpoint && '[Faundr] Checkpoint of the files saved before this change (to undo: /faundr:undo).',
     takeSecurityAlert(payload.session_id),
     ...checked.flatMap(({ file, rel, content, warn, isNew }) => [
       warn.length && `[Faundr] Warning: ${rel} is about to receive what looks like a secret key (${warn.map((w) => `${w.name}: ${w.masked}`).join('; ')}). ${how}`,

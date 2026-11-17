@@ -47,7 +47,7 @@ export function recordCheck(configDir, sid, { checkKey, passed, issues = [], now
   let alert = null
   if (streak === SAME_ERROR_TIMES && !state.warned.includes(`check:${checkKey}`)) {
     const example = issues.find((i) => norm(i.message) === (same[0] ?? messages[0]))
-    alert = `[Faundr] Loop: the same error showed up ${streak} times in a row in \`${short(checkKey, 80)}\` this session${example ? ` (${short(example.message)}${example.file ? `, in ${example.file}` : ''})` : ''}. Stop trying similar fixes: tell the user, in plain language, what is failing and what you already tried; look for the cause (not the symptom), reading the whole error and the code around it; and, if the attempts made the code worse, suggest going back to a restore point (/faundr:undo) and planning before going on.`
+    alert = `[Faundr] Loop: the same error showed up ${streak} times in a row in \`${short(checkKey, 80)}\` this session${example ? ` (${short(example.message)}${example.file ? `, in ${example.file}` : ''})` : ''}. Stop trying similar fixes: tell the user, in plain language, what is failing and what you already tried; look for the cause (not the symptom), reading the whole error and the code around it; and, if the attempts made the code worse, suggest going back to a checkpoint (/faundr:undo) and planning before going on.`
     state.alerts.push(alert)
     state.warned.push(`check:${checkKey}`)
   }
@@ -63,7 +63,7 @@ export function editLoopNote(configDir, sid, { rel, priorEdits }) {
   if (!failing.length || state.warned.includes(`file:${rel}`)) return null
   state.warned.push(`file:${rel}`)
   write(configDir, sid, state)
-  return `[Faundr] Loop: this is change #${priorEdits + 1} to ${rel} this session, and \`${short(failing[0], 80)}\` is still failing. If you are fixing the same thing again, stop for a moment: explain to the user what you are trying and what you already tried, look for the cause (not the symptom) and, if the attempts made the code worse, suggest going back to a restore point (/faundr:undo).`
+  return `[Faundr] Loop: this is change #${priorEdits + 1} to ${rel} this session, and \`${short(failing[0], 80)}\` is still failing. If you are fixing the same thing again, stop for a moment: explain to the user what you are trying and what you already tried, look for the cause (not the symptom) and, if the attempts made the code worse, suggest going back to a checkpoint (/faundr:undo).`
 }
 
 // ---- Prova de que funciona: no fim da resposta, código mudado sem nenhuma checagem passando depois ----------
