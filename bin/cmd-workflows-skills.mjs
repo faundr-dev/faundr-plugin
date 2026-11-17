@@ -6,6 +6,7 @@ import { parseItem } from './workflows.mjs'
 import { AGENT_SESSION_ID, flag, flags, linkedProject, readState, textArg, writeState } from './cli-core.mjs'
 import { ownerSaid, runOf, saveRun } from './workflow-run.mjs'
 import { machineName } from './live.mjs'
+import { teamQuote } from './rules.mjs'
 
 // Workflows do projeto: o Claude lista, lê os passos e cria rascunho; aprovar e editar ficam com o dono no painel.
 async function workflowApi(body) {
@@ -54,12 +55,39 @@ async function workflowShow(rest) {
   if (!query) throw new Error(WORKFLOW_USAGE)
   const w = await workflowApi({ action: 'show', query })
   console.log(w.text)
+  const absent = absentSkills(w.skills, scanSkills(linkedProject().root), w.ref)
+  if (absent) console.log(`\n${absent}`)
   if (w.status === 'active')
     console.log(
       `\nFollow the steps in order, one at a time, and mark each one when you really do it (the team sees it on the canvas): start with faundr workflow run ${w.ref} --why "<request>", move on with faundr workflow step ${w.ref} <n> --done, and close with faundr workflow done ${w.ref}. A question step: ask it, mark it --wait, end your response and, when the owner answers, mark it --done --answer "<their words>" (if the request already answered it, quote those words). Skipping a step needs the owner's OK: --skip --answer "<their words>". Never mark a step you did not do.`,
     )
   if (w.status === 'draft') console.log('\n(Draft: not in effect yet. The owner approves it on the dashboard, in Workflows.)')
   if (w.status === 'off') console.log('\n(Turned off by the owner: do not follow it unless they ask.)')
+}
+
+/**
+ * Skills do workflow que não estão neste computador (lidas das pastas daqui, sem rede): a IA avisa de onde vem cada
+ * uma e não improvisa no lugar dela. Nomes só com os caracteres de um nome; quem tem e o plugin entre «».
+ */
+export function absentSkills(wanted, local, ref = 'W-n') {
+  if (!Array.isArray(wanted) || !wanted.length) return null
+  const here = new Set((local ?? []).map((s) => s.name))
+  const plain = (v) => String(v ?? '').replace(/[^\w:.-]/g, '')
+  const names = (who) => (who?.length ? who.map((n) => teamQuote(n, 40)).join(' and ') : 'nobody on the team right now')
+  const lines = wanted
+    .filter((s) => s?.name && !here.has(s.name))
+    .map((s) => {
+      const n = plain(s.name)
+      if (s.source === 'pessoal') return `- /${n}: a personal skill of ${names(s.who)}. Its instructions only exist on their computer: tell the person to ask ${names(s.who)} for it.`
+      if (s.source === 'plugin') return `- /${n}: from the plugin ${teamQuote(s.plugin ?? '?', 60)}, installed by ${names(s.who)}. Tell the person to install that plugin (Claude Code: /plugin; Codex: its plugin settings).`
+      if (s.source === 'projeto') return `- /${n}: a skill from the project's repository that is not in this folder (probably another branch). Tell the person to update or switch the branch.`
+      return `- /${n}: never connected to the project, so nobody knows where it comes from. Tell the person.`
+    })
+  if (!lines.length) return null
+  return [
+    `[Faundr] Not installed on this computer (checked just now): when you reach their steps, do not improvise or imitate them. Tell the person, and skip the step only with their OK (faundr workflow step ${String(ref).replace(/[^\w-]/g, '')} <n> --skip --answer "<their words>").`,
+    ...lines,
+  ].join('\n')
 }
 
 async function workflowDraft(rest) {
