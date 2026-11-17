@@ -1,6 +1,7 @@
 // Pontos de volta e equipe: faundr checkpoint, checkpoints, checkpoints-sync, restore, inbox, msg, listen, browse,
 // browse-key e team.
 
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { FAUNDR_DIR, FILES } from './paths.mjs'
@@ -183,13 +184,21 @@ export function checkpointsList(args) {
   if (all.length > shown.length) console.log(t(`  … and ${all.length - shown.length} more (--limit ${all.length})`, `  … e mais ${all.length - shown.length} (--limit ${all.length})`))
 }
 
+/**
+ * Este computador e esta pasta ("notebook#3fa2"): os checkpoints moram no git da pasta, então a linha do tempo e o
+ * "ainda existe" são por computador e pasta (uma cópia em outra pasta, como o worktree do parallel, é outra linha).
+ */
+export const checkpointMachine = (repo, config) =>
+  `${machineName(config) ?? 'computer'}#${createHash('sha256').update(String(repo).toLowerCase()).digest('hex').slice(0, 4)}`
+
 // Manda ao painel os 20 pontos de volta mais recentes e o que mudou depois de cada um (só nomes de arquivo).
 // Só quando há ponto novo ou os arquivos mudaram desde o último envio.
 export async function checkpointsSync(args) {
   const { root, projectId, config } = linkedProject()
   const repo = gitRoot(root)
   if (!repo) return
-  const all = listCheckpoints(repo).slice(0, 20)
+  const everything = listCheckpoints(repo)
+  const all = everything.slice(0, 20)
   if (!all.length) return
   const now = currentTree(repo)
   const last = readState(root).checkpointsSynced
@@ -202,7 +211,8 @@ export async function checkpointsSync(args) {
   const res = await fetch(`${config.apiUrl}/api/cli/checkpoints`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${config.token}` },
-    body: JSON.stringify({ projectId, action: 'sync', agent: AGENT, checkpoints }),
+        // keep: todos os que ainda existem neste computador (ele guarda só os 50 mais recentes); o painel tira os outros.
+    body: JSON.stringify({ projectId, action: 'sync', agent: AGENT, machine: checkpointMachine(repo, config), keep: everything.map((c) => c.commit), checkpoints }),
     signal: AbortSignal.timeout(20_000),
   })
   const data = await res.json().catch(() => ({}))
