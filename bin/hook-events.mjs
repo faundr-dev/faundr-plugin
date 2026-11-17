@@ -83,19 +83,25 @@ export function eventTriggers(root, sid) {
 // chat, e quem lê costuma ler só a última: por isso a última sai completa. No Codex o aviso vira um novo pedido logo
 // abaixo da resposta, que continua à vista: basta contar o que os passos mudaram.
 export function blockStop(steps) {
+  process.stdout.write(JSON.stringify(stopOutput(steps, AGENT)))
+}
+
+/**
+ * Saída do hook do fim da resposta. No Claude Code vai como additionalContext: a conversa continua igual (mesmas
+ * travas contra laço do decision "block"), mas aparece como "Stop hook feedback" e não como erro ("Stop hook
+ * reported a problem" assustava quem lê). No Codex continua o decision "block" (o Codex não documenta o outro jeito).
+ */
+export function stopOutput(steps, agent) {
   const then =
-    AGENT === 'codex'
+    agent === 'codex'
       ? 'Then reply in a few lines with what these steps changed, without mentioning this note.'
       : 'Then write the complete final response: the previous one is hidden above this note, so repeat from it what the user needs to know (result, pending items, questions) together with what these steps changed, without mentioning this note.'
-  process.stdout.write(
-    JSON.stringify({
-      decision: 'block',
-      reason:
-        `[Faundr] Before finishing: ${steps.map((t, i) => (steps.length > 1 ? `(${i + 1}) ${t}` : t)).join('; ')}. ` +
-        '(Automatic, set up by the project owner in Faundr.) ' +
-        then,
-    }),
-  )
+  const text =
+    `[Faundr] Before finishing: ${steps.map((t, i) => (steps.length > 1 ? `(${i + 1}) ${t}` : t)).join('; ')}. ` +
+    '(Automatic, set up by the project owner in Faundr.) ' +
+    then
+  if (agent === 'codex') return { decision: 'block', reason: text }
+  return { hookSpecificOutput: { hookEventName: 'Stop', additionalContext: text } }
 }
 
 export async function hook(agent) {

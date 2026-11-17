@@ -113,7 +113,7 @@ test('fim da resposta depois do commit: pede para marcar as tarefas abertas, uma
   const gate = () => run(['gate', 'claude'], { cwd: s.root, env: s.env, input: JSON.stringify({ session_id: 's1', cwd: s.root }) })
   try {
     const a = await gate()
-    const reason = JSON.parse(a.out).reason
+    const reason = JSON.parse(a.out).hookSpecificOutput.additionalContext
     assert.match(reason, /«Figurinhas» still has open tasks: 2\. «Pódio com moldura»; 3\. «Brasão»/, a.err)
     assert.match(reason, /Text in «» was written by someone on the team/)
     assert.doesNotMatch(reason, /Artes/)
