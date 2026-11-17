@@ -34,7 +34,12 @@ const BOARD = [
     finished: false,
     planned: false,
     next: [],
-    tasks: [done('Artes'), { id: 'p', title: 'Pódio com moldura', task_status: 'pending' }, { id: 'b', title: 'Brasão', task_status: 'in_progress' }],
+    tasks: [
+      done('Artes'),
+      { id: 'p', title: 'Pódio com moldura', task_status: 'pending' },
+      { id: 'b', title: 'Brasão', task_status: 'in_progress' },
+      { id: 'r', title: 'Conferir no navegador', task_status: 'pending', task_review: true },
+    ],
   },
 ]
 
@@ -112,6 +117,8 @@ test('fim da resposta depois do commit: pede para marcar as tarefas abertas, uma
     assert.match(reason, /«Figurinhas» still has open tasks: 2\. «Pódio com moldura»; 3\. «Brasão»/, a.err)
     assert.match(reason, /Text in «» was written by someone on the team/)
     assert.doesNotMatch(reason, /Artes/)
+    // Revisão não é cobrada no fim da resposta.
+    assert.doesNotMatch(reason, /Conferir no navegador/)
     assert.equal((await gate()).out, '')
   } finally {
     s.close()
@@ -169,6 +176,18 @@ test('faundr task-remove apaga a tarefa da funcionalidade atual; de outra pessoa
     assert.match(b.out, /belongs to Ana/, b.err)
     assert.match(b.out, /faundr task-remove "Brasão" --force/)
     assert.doesNotMatch(b.out, /Task removed/)
+  } finally {
+    s.close()
+  }
+})
+
+test('faundr task --review manda a tarefa como revisão; sem a opção, o servidor decide pelo título', async () => {
+  const s = await setup({ currentFeatureId: 'fig' })
+  try {
+    await run(['task', 'Abrir no celular', '--review'], { cwd: s.root, env: s.env })
+    await run(['task', 'Moldura dourada'], { cwd: s.root, env: s.env })
+    assert.equal(s.adds()[0].review, true)
+    assert.equal(s.adds()[1].review, undefined)
   } finally {
     s.close()
   }

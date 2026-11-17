@@ -203,7 +203,8 @@ async function committedTasks(root, sid, signal) {
     })
     if (!res.ok) return { text: null }
     const f = (await res.json()).features?.[0]
-    const open = (f?.tasks ?? []).map((t, i) => ({ ...t, n: i + 1 })).filter((t) => t.task_status !== 'completed')
+    // Revisões (conferir, testar) não são cobradas: ficam para quando o usuário quiser.
+    const open = (f?.tasks ?? []).map((t, i) => ({ ...t, n: i + 1 })).filter((t) => t.task_status !== 'completed' && !t.task_review)
     return { text: open.length ? committedTasksText(f.title, open) : null }
   } catch (err) {
     // Sem rede ou painel fora do ar: o lembrete fica para o próximo fim de resposta.

@@ -25,7 +25,7 @@ Do not mark anything yet. Spend at most 3 searches per feature.
 
 ## 2. Show the proposal and wait for the OK
 
-In plain language, a short table per group (Done, Discard, Keep, Don't know), with: name, what to do, and the proof in a few words. Remember that a feature only moves to Completed with **all** its tasks done: under "Done", say which open tasks will be marked. If a task is left over and will not be done (e.g. a test nobody will run), propose removing that task, discarding the feature or keeping the task, and let the owner choose.
+In plain language, a short table per group (Done, Discard, Keep, Don't know), with: name, what to do, and the proof in a few words. Remember that a feature moves to Completed when **all its build tasks** are done (open review tasks, marked `(review)` in `faundr board`, only leave the "review pending" badge and are not a reason to keep it open): under "Done", say which open build tasks will be marked. If a task is left over and will not be done (e.g. a test nobody will run), propose removing that task, discarding the feature or keeping the task, and let the owner choose.
 
 Ask: **"Can I apply it? If you want to change any, tell me which."** Do not apply anything before the answer.
 

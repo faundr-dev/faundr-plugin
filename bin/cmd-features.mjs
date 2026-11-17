@@ -67,12 +67,12 @@ function printFeature(f, byId, people) {
   const prev = f.after && byId?.get(f.after)
   const name = (id) => (id && people?.[id]) || null
   console.log(
-    `${f.title}  (${done}/${f.tasks.length} done)${f.planned ? '  [planned]' : ''}${name(f.assignee_id) ? `  · owner: ${name(f.assignee_id)}` : ''}${prev ? `  · comes after "${prev.title}"` : ''}`,
+    `${f.title}  (${done}/${f.tasks.length} done)${f.planned ? '  [planned]' : ''}${f.reviewPending ? '  [built, review pending]' : ''}${name(f.assignee_id) ? `  · owner: ${name(f.assignee_id)}` : ''}${prev ? `  · comes after "${prev.title}"` : ''}`,
   )
   // Tarefa passada para outra pessoa (não a dona da funcionalidade) mostra com quem está.
   f.tasks.forEach((t, i) =>
     console.log(
-      `  ${String(i + 1).padStart(2)}. ${MARK[t.task_status] ?? '[ ]'} ${t.title}${t.done_dirty ? '  (not committed)' : ''}${t.assignee_id && t.assignee_id !== f.assignee_id && name(t.assignee_id) ? `  (with ${name(t.assignee_id)})` : ''}`,
+      `  ${String(i + 1).padStart(2)}. ${MARK[t.task_status] ?? '[ ]'} ${t.title}${t.task_review ? '  (review)' : ''}${t.done_dirty ? '  (not committed)' : ''}${t.assignee_id && t.assignee_id !== f.assignee_id && name(t.assignee_id) ? `  (with ${name(t.assignee_id)})` : ''}`,
     ),
   )
   if (!f.tasks.length) console.log('  (no tasks yet — faundr task "<description>")')
@@ -267,11 +267,12 @@ async function workCriteriaCheck({ args, current, text }) {
 }
 
 async function workTask({ args, current, text }) {
-  if (!text) throw new Error('usage: faundr task "<description>" [--feature "<stage name>"] [--force]')
+  if (!text) throw new Error('usage: faundr task "<description>" [--feature "<stage name>"] [--review] [--force]')
   const target = flag(args, '--feature')
   const parent = target ? await findFeature(target, current) : null
   if (!parent && current && !args.includes('--force') && (await finishedWithEmptyNext(current, text))) return
-  const r = await memoryApi({ action: 'add', kind: 'task', title: text, parentId: parent?.id ?? current, force: args.includes('--force') })
+  // --review: tarefa de conferir/testar (não segura a funcionalidade). Sem ele, o verbo do título decide no servidor.
+  const r = await memoryApi({ action: 'add', kind: 'task', title: text, parentId: parent?.id ?? current, force: args.includes('--force'), ...(args.includes('--review') && { review: true }) })
   if (ownerBlocked(r.blocked, `faundr task "${text}"${target ? ` --feature "${target}"` : ''} --force`)) return
   if (parent) return console.log(`Task added to "${parent.title}": ${text}`)
   return console.log(current ? `Task added: ${text}` : `Task added (no current feature — use faundr feature "<title>" to group it): ${text}`)
