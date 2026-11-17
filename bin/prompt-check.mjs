@@ -15,7 +15,7 @@ import fs from 'node:fs'
 import { faundrPath, findDirWith, readStdin } from './paths.mjs'
 import { readJsonObject, writeJsonAtomic } from './json-file.mjs'
 import { featureIntent, featureNudge, ruleIntent, ruleNudge } from './intent.mjs'
-import { memoryNote, readMemoryIndex, relevantMemory } from './rules.mjs'
+import { featureItems, memoryNote, readMemoryIndex, relevantMemory } from './rules.mjs'
 import { readTeam, teamPromptNote } from './team.mjs'
 import { takeInbox } from './inbox.mjs'
 import { workflowsForRequest } from './workflows.mjs'
@@ -42,7 +42,10 @@ function relevantOnce(root, sid, prompt) {
   if (!sid) return null
   const state = readState(root)
   const ids = state.rulesShown?.session === sid ? state.rulesShown.ids : []
-  const items = relevantMemory(readMemoryIndex(root), prompt, ids)
+  const index = readMemoryIndex(root)
+  // As da funcionalidade atual que ainda não chegaram (ela pode ter trocado no meio da sessão) vêm junto com as do assunto.
+  const ofFeature = featureItems(index, state.featureMemory, ids)
+  const items = [...ofFeature, ...relevantMemory(index, prompt, [...ids, ...ofFeature.map((m) => m.id)])]
   if (!items.length) return null
   const file = faundrPath(root, 'state')
   writeJsonAtomic(file, { ...readJsonObject(file), rulesShown: { session: sid, ids: [...ids, ...items.map((m) => m.id)] } }, 2)

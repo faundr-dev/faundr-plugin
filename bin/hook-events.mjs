@@ -24,7 +24,7 @@ import { contentLangLine, ensureContentLang, languageGuidance, validContentLang 
 import { toolEdits } from './agent.mjs'
 import { codexLauncher, syncCodexRules } from './codex-rules.mjs'
 import { isCodexRollout, rolloutMeters } from './codex-transcript.mjs'
-import { AGENT, CONFIG_DIR, CONFIG_FILE, CONTEXT_EVENTS, currentFeature, DESIGN_GUIDANCE, EDIT_TOOLS, findUp, flag, gitBranch, gitHead, GRAPH_GUIDANCE, LINK_FILE, linkedProject, loadConfig, log, LOG_FILE, NO_DESIGN_GUIDANCE, pinSessionFeature, readJson, readState, readStdin, setCurrentFeature, spawnBackground, WORK_GUIDANCE, writeState } from './cli-core.mjs'
+import { AGENT, CONFIG_DIR, CONFIG_FILE, CONTEXT_EVENTS, CONTEXT_MAX, fitContext, currentFeature, DESIGN_GUIDANCE, EDIT_TOOLS, findUp, flag, gitBranch, gitHead, GRAPH_GUIDANCE, LINK_FILE, linkedProject, loadConfig, log, LOG_FILE, NO_DESIGN_GUIDANCE, pinSessionFeature, readJson, readState, readStdin, setCurrentFeature, spawnBackground, WORK_GUIDANCE, writeState } from './cli-core.mjs'
 import { editedFile, markSessionEdited } from './hook-stop.mjs'
 import { captureErrors } from './cmd-dev-errors.mjs'
 import { checkPending } from './cmd-security.mjs'
@@ -141,6 +141,8 @@ export async function hook(agent) {
       at: startedAt,
       ack: takeAcks(root, payload.session_id),
       currentFeatureId: currentFeature(root, payload.session_id),
+      // Assinatura da cópia local da memória: o servidor só manda a memória de novo quando ela mudou.
+      memoryStamp: readState(root).memoryStamp ?? null,
       // Só os campos que o servidor lê: conteúdo de arquivo e saída das ferramentas ficam aqui (ver hook-payload.mjs).
       payload: hookPayload(payload),
       usage,
@@ -340,6 +342,15 @@ function saveAnswer(answer, root, sid) {
   if (Array.isArray(answer.skills)) writeSkillIndex(root, answer.skills)
   // Plano aprovado virou funcionalidade: passa a ser a atual desta pasta.
   if (answer.currentFeatureId) setCurrentFeature(root, answer.currentFeatureId, sid)
+  // Memória mudou com a sessão aberta (decisão nova, editada ou substituída): cópias locais novas, já no próximo
+  // pedido e na próxima edição. No início da sessão, sessionStartContext já gravou as duas.
+  if (answer.memoryStamp) {
+    if (Array.isArray(answer.anchoredRules)) writeRules(root, answer.anchoredRules)
+    if (Array.isArray(answer.memoryIndex)) writeMemoryIndex(root, answer.memoryIndex)
+    writeState(root, { memoryStamp: answer.memoryStamp })
+  }
+  // Regras e decisões da funcionalidade atual (pode ter trocado no meio da sessão): o hook do pedido entrega.
+  if (answer.featureMemory) writeState(root, { featureMemory: answer.featureMemory })
   // Língua do conteúdo do projeto: chega no início e a cada pedido (o painel pode trocar no meio da sessão); os
   // comandos *-context leem a cópia local sem rede.
   if (answer.contentLang !== undefined) writeState(root, { contentLang: validContentLang(answer.contentLang) })
@@ -384,7 +395,12 @@ function sessionStartContext(answer, root, sid, additionalContext, contentLang) 
     writeMemoryIndex(root, answer.memoryIndex)
     writeState(root, { rulesShown: { session: sid, ids: answer.memoryShown ?? [] } })
   }
-  return [AGENT === 'codex' && CODEX_GUIDANCE(), additionalContext, languageGuidance(contentLang), WORK_GUIDANCE, hasGraph && GRAPH_GUIDANCE, designNote(root), inventoryNote(root)].filter(Boolean).join('\n\n')
+  // As orientações do plugin ficam inteiras; o que passar do teto sai do fim do texto do painel (os alertas), nunca as
+  // regras, que vêm no começo dele.
+  const extras = [languageGuidance(contentLang), WORK_GUIDANCE, hasGraph && GRAPH_GUIDANCE, designNote(root), inventoryNote(root)].filter(Boolean)
+  const codex = AGENT === 'codex' ? CODEX_GUIDANCE() : ''
+  const room = CONTEXT_MAX - [codex, ...extras].reduce((n, t) => n + t.length + 2, 0)
+  return [codex, additionalContext && fitContext(additionalContext, room), ...extras].filter(Boolean).join('\n\n')
 }
 
 // As skills e os avisos do Faundr foram escritos para o Claude Code: no Codex, o comando faundr não está no PATH e

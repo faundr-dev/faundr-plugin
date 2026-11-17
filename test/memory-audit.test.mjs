@@ -39,3 +39,26 @@ test('regra que vale em todo lugar (**) vai para os subagentes como as sem arqui
   ]
   assert.deepEqual(globalRules(index).map((r) => r.id), ['1', '2'])
 })
+
+test('decisões da funcionalidade atual chegam uma vez, até 4 por pedido', async () => {
+  const { featureItems } = await import('../bin/rules.mjs')
+  const index = ['a', 'b', 'c', 'd', 'e', 'f'].map((id) => ({ id, kind: 'decision', title: id, body: '' }))
+  const fm = { featureId: 'F', ids: ['a', 'b', 'c', 'd', 'e', 'x'] }
+  assert.deepEqual(featureItems(index, fm, ['a']).map((m) => m.id), ['b', 'c', 'd', 'e'])
+  assert.deepEqual(featureItems(index, null, []), [])
+})
+
+test('caminho com maiúscula diferente casa no Windows e no Mac, não no Linux', async () => {
+  const { matchesPath } = await import('../bin/rules.mjs')
+  assert.equal(matchesPath('src/Server/**', 'src/server/a.ts', { caseInsensitive: true }), true)
+  assert.equal(matchesPath('src/Server', 'src/server/a.ts', { caseInsensitive: true }), true)
+  assert.equal(matchesPath('src/Server/**', 'src/server/a.ts', { caseInsensitive: false }), false)
+})
+
+test('texto de hook nunca passa do teto do Claude Code', async () => {
+  const { CONTEXT_MAX, fitContext } = await import('../bin/cli-core.mjs')
+  assert.equal(fitContext('curto'), 'curto')
+  const long = fitContext('x'.repeat(20000))
+  assert.ok(long.length <= CONTEXT_MAX)
+  assert.match(long, /cut off to fit/)
+})

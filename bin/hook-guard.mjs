@@ -13,7 +13,7 @@ import { editLoopNote, takeLoopAlerts } from './loop.mjs'
 import { fileWarning, readTeam } from './team.mjs'
 import { toolEdits } from './agent.mjs'
 import { ensureSessionCheckpoint } from './checkpoints.mjs'
-import { CONFIG_DIR, findUp, LINK_FILE, log, readState, readStdin, writeState } from './cli-core.mjs'
+import { CONFIG_DIR, findUp, fitContext, LINK_FILE, log, readState, readStdin, writeState } from './cli-core.mjs'
 import { editedFile } from './hook-stop.mjs'
 import { takeSecurityAlert } from './cmd-security.mjs'
 
@@ -167,5 +167,5 @@ export async function guard() {
       !isNew && dependentsOnce(root, payload.session_id, rel),
     ]),
   ].filter(Boolean)
-  if (context.length) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: context.join('\n\n') } }))
+  if (context.length) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: fitContext(context.join('\n\n')) } }))
 }

@@ -241,3 +241,11 @@ export function linkedProject() {
 
 export const textArg = (args) => args.filter((a, i) => !a.startsWith('--') && !(i > 0 && args[i - 1].startsWith('--'))).join(' ').trim()
 export const MARK = { completed: '[x]', in_progress: '[~]', pending: '[ ]' }
+
+// O Claude Code só põe no contexto até 10.000 caracteres de cada hook; acima disso, só uma prévia de 2.000 (e as
+// regras do time podiam sumir). Todo texto de hook passa por aqui antes de sair.
+export const CONTEXT_MAX = 9800
+export function fitContext(text, max = CONTEXT_MAX) {
+  if (text.length <= max) return text
+  return `${text.slice(0, Math.max(0, max - 70))}\n… (cut off to fit; see the Faundr dashboard)`
+}

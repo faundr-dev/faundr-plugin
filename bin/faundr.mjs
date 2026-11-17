@@ -24,7 +24,7 @@
 //     --file <file or pattern>                 (rule and decision, repeatable) links to files: reaches the agent before it edits them
 //     --replaces "<id or snippet>"             (rule and decision) retires the rule or decision this one replaces
 //     --global                                 (decision) does not link itself to the files the session edited
-//   faundr memory-edit "<id or snippet>" [--rule|--decision] [--file …] [--global] [--obsolete]  changes a rule or decision
+//   faundr memory-edit "<id or snippet>" [--rule|--decision] [--file …] [--global] [--title …] [--why …] [--forbid …|--no-forbid] [--obsolete]  changes a rule or decision
 //   faundr concern "<title>" [--why "..."]     records a concern to review later
 //   faundr resolve [P-<n> | snippet]           marks a concern as resolved (no argument: lists the open ones)
 //   faundr focus "<name>"                      switches the current feature

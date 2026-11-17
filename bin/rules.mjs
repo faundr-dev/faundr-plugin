@@ -33,15 +33,18 @@ function globPart(part) {
 }
 
 /** `src/server/**`, `*.sql`, `plugin/bin/faundr.mjs` ou uma pasta (`src/server` vale para tudo dentro dela). */
-export function matchesPath(pattern, rel) {
-  const p = pattern.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/$/, '')
-  if (!isGlob(p)) return rel === p || rel.startsWith(`${p}/`)
+export function matchesPath(pattern, rel, { caseInsensitive = process.platform === 'win32' || process.platform === 'darwin' } = {}) {
+  // Windows e Mac não diferenciam maiúscula em caminho: "src/Server" e "src/server" são a mesma pasta.
+  const fold = (s) => (caseInsensitive ? s.toLowerCase() : s)
+  const p = fold(pattern.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/$/, ''))
+  const file = fold(rel)
+  if (!isGlob(p)) return file === p || file.startsWith(`${p}/`)
   const re = p
     .split(/(\*\*\/?|\*|\?)/)
     .map(globPart)
     .join('')
   // Sem barra no padrão (`*.sql`), vale em qualquer pasta.
-  return new RegExp(`^${p.includes('/') ? '' : '(?:.*/)?'}${re}$`).test(rel)
+  return new RegExp(`^${p.includes('/') ? '' : '(?:.*/)?'}${re}$`).test(file)
 }
 
 /** Caminhos exatos da regra que não existem mais no projeto (a regra pode ter ficado para trás). */
@@ -229,3 +232,9 @@ export function memoryNote(items) {
 
 /** Regras do time sem arquivo ligado: valem sempre (vão também para os subagentes). */
 export const globalRules = (index) => index.filter((m) => m.kind === 'rule' && (!m.paths?.length || m.paths.every((p) => p === '**')))
+
+/** Regras e decisões ligadas à funcionalidade atual, ainda não mostradas nesta sessão (no máximo 4 por pedido). */
+export function featureItems(index, featureMemory, shownIds) {
+  const wanted = new Set(Array.isArray(featureMemory?.ids) ? featureMemory.ids : [])
+  return index.filter((m) => wanted.has(m.id) && !shownIds.includes(m.id)).slice(0, 4)
+}

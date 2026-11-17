@@ -110,18 +110,26 @@ export async function memoryEdit(args) {
   const kind = firstOf([[args.includes('--rule'), 'rule'], [args.includes('--decision'), 'decision']], undefined)
   const obsolete = args.includes('--obsolete')
   const paths = firstOf([[args.includes('--global'), []], [files.length, files]], undefined)
-  if (!query || (!kind && !obsolete && paths === undefined))
-    throw new Error('usage: faundr memory-edit "<id or title snippet>" [--rule | --decision] [--file "<path>"]... [--global] [--obsolete]')
-  const r = await memoryApi({ action: 'memory-edit', query, kind, paths, obsolete })
+  // Texto e padrão: --title, --why (o porquê), --forbid "<padrão>" ou --no-forbid (tira o padrão).
+  const title = flag(args, '--title')
+  const body = flag(args, '--why')
+  const forbid = args.includes('--no-forbid') ? '' : flag(args, '--forbid')
+  const changes = { ...(title !== undefined && { title }), ...(body !== undefined && { body }), ...(forbid !== undefined && { forbid }) }
+  if (!query || (!kind && !obsolete && paths === undefined && !Object.keys(changes).length))
+    throw new Error(
+      'usage: faundr memory-edit "<id or title snippet>" [--rule | --decision] [--file "<path>"]... [--global] [--title "<new title>"] [--why "<new reason>"] [--forbid "<pattern>" | --no-forbid] [--obsolete]',
+    )
+  const r = await memoryApi({ action: 'memory-edit', query, kind, paths, obsolete, ...changes })
   // Cópias locais: o guard e o hook do pedido passam a ver a mudança já nesta sessão.
   const index = readMemoryIndex(root)
   const item = index.find((m) => m.id === r.id)
-  writeMemoryIndex(root, obsolete ? index.filter((m) => m.id !== r.id) : index.map((m) => (m.id === r.id ? { ...m, kind: r.kind, paths: r.paths } : m)))
+  const edited = (m) => ({ ...m, kind: r.kind, paths: r.paths, title: r.title, ...(r.body !== undefined && { body: String(r.body).slice(0, 300) }) })
+  writeMemoryIndex(root, obsolete ? index.filter((m) => m.id !== r.id) : index.map((m) => (m.id === r.id ? edited(m) : m)))
   const rules = readRules(root).filter((x) => x.id !== r.id)
   // Com o padrão proibido e o autor: sem eles, o aviso "o código não pode ter" parava e a regra de um colega vinha sem «».
   const before = readRules(root).find((x) => x.id === r.id)
   if (!obsolete && r.paths.length)
-    rules.push({ id: r.id, kind: r.kind, title: r.title, body: item?.body ?? '', paths: r.paths, forbid: r.forbid ?? before?.forbid ?? null, by: item?.by ?? before?.by })
+    rules.push({ id: r.id, kind: r.kind, title: r.title, body: r.body ?? before?.body ?? item?.body ?? '', paths: r.paths, forbid: r.forbid ?? null, by: item?.by ?? before?.by })
   writeRules(root, rules)
   const name = r.kind === 'rule' ? 'Rule' : 'Decision'
   if (obsolete) return console.log(`Retired: ${r.title}`)
