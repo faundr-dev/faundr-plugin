@@ -16,6 +16,8 @@
 //   faundr graph-grep "<pattern>"              text search grouped by function, most used first (--in folder, -i)
 //   faundr feature "<title>" [--desc "..."] [--done-when "a; b"]  creates a feature (with its Done when) and makes it the current one
 //     --after <current | name>                 records it as the next stage of another (stays planned; does not become current)
+//     --later                                  an idea or work for later (not started; stays out of In progress; does not become current)
+//   faundr feature-done "<id or name>" [--reopen]  closes a feature by hand as done, even with open tasks (only with the owner's OK)
 //   faundr criteria ["<criterion>"] [--remove <n>] | criteria-check <n> --met|--not-met [--note]   Done when of the current feature
 //   faundr task "<description>" [--feature name] [--review]  adds a task to the checklist of the current feature (or of another stage)
 //   faundr start|done "<snippet or #>"         marks a task as in progress / done
@@ -31,6 +33,7 @@
 //   faundr board [--all | --memory | --review] shows the checklist (--memory: confirmed rules and decisions; --review: everything open, for the board skill)
 //   faundr feature-discard "<id or name>"      discards a feature (leaves the tabs and the context; can be brought back)
 //   faundr task-remove "<task, # or id>"        removes a task that won't be done (leaves the checklist; can't be undone)
+//   faundr task-review "<task, # or id>" [--off]  marks a task as a review (checking, testing: it does not hold the feature); --off: build task again
 //   faundr feature-restore "<id or name>"      brings back a discarded feature
 //   faundr overview-context                    context for the agent to write the Project overview
 //   faundr overview-save [file]                validates and sends the Project overview (default: .faundr/painel/overview.json)
@@ -69,7 +72,7 @@
 //   faundr security-import <file>              imports Snyk (--json), SARIF from any tool or the Supabase Security Advisor
 //   faundr security-supabase [--ref <ref>]     Supabase Security Advisor through the API (token in SUPABASE_ACCESS_TOKEN)
 //   faundr db-test [--ref <ref>] [--sql | --result <file>] [--no-send]   tests the database as a visitor and as another person (all undone)
-//   faundr launch-check [--url <site>] [--skip-code] [--no-send]  "Ready to launch?": build, tests, security, headers, rate limit, payment webhook, privacy, database tested; ends with CAN LAUNCH: YES/NO
+//   faundr launch-check [--url <site>] [--skip-code] [--no-send] [--confirm-db] [--exclude a,b]  "Ready to launch?": build, tests, security, headers, rate limit, payment webhook, privacy, database tested; ends with CAN LAUNCH: YES/NO
 //   faundr privacy [--no-send]                 privacy (LGPD): personal data collected, companies that receive it, policy, terms, cookies and account deletion
 //   faundr security-report [--out file.md]     security report in Markdown (default: .faundr/relatorios/relatorio-seguranca.md)
 //   faundr quality-scan [--files a,b]          quality check without AI (hidden failure, types, complexity, too much code); --edited: only what was edited
@@ -308,14 +311,14 @@ function isNetworkError(err) {
 
 function printCommands() {
   console.log(
-    'commands: setup | login | logout | link | status | config | browse | browse-key | checkpoint | checkpoints | restore | team | inbox | msg | map | graph | graph-query | graph-path | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | memory-edit | workflow | skills | concern | resolve | start | done | task-remove | focus | board | feature-discard | feature-restore | criteria | criteria-check | handoff | handover | weekly | resume | diagram-save | architecture-check | stack-scan | env-check | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | skill-report | security-import | security-supabase | db-test | launch-check | privacy | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-recipe | error-archive | parallel | error-reopen | errors-dsn | errors-sdk | errors-uptime | errors-import-sentry | hook',
+    'commands: setup | login | logout | link | status | config | browse | browse-key | checkpoint | checkpoints | restore | team | inbox | msg | map | graph | graph-query | graph-path | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | memory-edit | workflow | skills | concern | resolve | start | done | task-remove | task-review | focus | board | feature-discard | feature-restore | feature-done | criteria | criteria-check | handoff | handover | weekly | resume | diagram-save | architecture-check | stack-scan | env-check | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | skill-report | security-import | security-supabase | db-test | launch-check | privacy | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-recipe | error-archive | parallel | error-reopen | errors-dsn | errors-sdk | errors-uptime | errors-import-sentry | hook',
   )
 }
 
 // Cada comando da CLI e o que ele roda (recebe os argumentos depois do nome do comando).
 function cliCommands() {
   const toWork = (name) => (a) => work(name, a)
-  const workCommands = ['feature', 'task', 'decision', 'rule', 'concern', 'resolve', 'done', 'start', 'claim', 'release', 'own', 'disown', 'focus', 'board', 'criteria', 'criteria-check', 'feature-discard', 'feature-restore', 'task-remove']
+  const workCommands = ['feature', 'task', 'decision', 'rule', 'concern', 'resolve', 'done', 'start', 'claim', 'release', 'own', 'disown', 'focus', 'board', 'criteria', 'criteria-check', 'feature-discard', 'feature-restore', 'feature-done', 'task-remove', 'task-review']
   return {
     login: (a) => login(a),
     logout: () => logout(),

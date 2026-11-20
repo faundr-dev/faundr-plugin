@@ -69,6 +69,26 @@ export function saveRun(root, sid, ref, outline, { startedAt, closed = false } =
   write(root, { workflowRuns: { session: sid, runs } })
 }
 
+/**
+ * Execução concluída sem funcionalidade no quadro: fica anotada para o fim da resposta lembrar uma vez (se a sessão
+ * mudou arquivos, aquilo foi trabalho que o time não está vendo). `linked` tira a anotação (faundr workflow link).
+ */
+export function noteOffBoard(root, sid, ref, linked = false) {
+  if (!sid || !ref) return
+  const state = read(root)
+  const refs = state.workflowOffBoard?.session === sid ? state.workflowOffBoard.refs : []
+  const next = linked ? refs.filter((r) => r !== ref) : [...new Set([...refs, ref])]
+  if (next.length !== refs.length) write(root, { workflowOffBoard: { session: sid, refs: next } })
+}
+
+/** As execuções concluídas fora do quadro nesta sessão; esvazia a lista (o lembrete sai uma vez). */
+export function takeOffBoard(root, sid) {
+  const state = read(root)
+  if (!sid || state.workflowOffBoard?.session !== sid || !state.workflowOffBoard.refs?.length) return []
+  write(root, { workflowOffBoard: { session: sid, refs: [] } })
+  return state.workflowOffBoard.refs
+}
+
 export function runOf(root, sid, ref) {
   const state = read(root)
   if (state.workflowRuns?.session !== sid) return null

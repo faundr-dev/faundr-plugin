@@ -1,8 +1,8 @@
 // Funcionalidades, tarefas e decisões: faundr feature, task, start, done, criteria, decision, rule, concern, resolve,
-// claim/release, own/disown, focus, board, feature-discard/restore e memory-edit.
+// claim/release, own/disown, focus, board, feature-discard/restore, feature-done e memory-edit.
 
 import path from 'node:path'
-import { readMemoryIndex, readRules, writeMemoryIndex, writeRules } from './rules.mjs'
+import { readMemoryIndex, readRules, teamQuote, writeMemoryIndex, writeRules } from './rules.mjs'
 import { statusFromBoard } from './statusline.mjs'
 import { t } from './i18n.mjs'
 import { AGENT_SESSION_ID, currentFeature, firstOf, flag, flags, gitHead, linkedProject, log, MARK, readState, setCurrentFeature, textArg, uncommittedChanges, writeState } from './cli-core.mjs'
@@ -69,7 +69,7 @@ function printFeature(f, byId, people) {
   const prev = f.after && byId?.get(f.after)
   const name = (id) => (id && people?.[id]) || null
   console.log(
-    `${f.title}  (${done}/${f.tasks.length} done)${f.planned ? '  [planned]' : ''}${f.reviewPending ? '  [built, review pending]' : ''}${name(f.assignee_id) ? `  · owner: ${name(f.assignee_id)}` : ''}${prev ? `  · comes after "${prev.title}"` : ''}`,
+    `${f.title}  (${done}/${f.tasks.length} done)${f.planned ? '  [planned]' : ''}${f.reviewPending ? '  [built, review pending]' : ''}${DONE_TAG[f.doneBy] ?? ''}${name(f.assignee_id) ? `  · owner: ${name(f.assignee_id)}` : ''}${prev ? `  · comes after "${prev.title}"` : ''}`,
   )
   // Tarefa passada para outra pessoa (não a dona da funcionalidade) mostra com quem está.
   f.tasks.forEach((t, i) =>
@@ -77,12 +77,15 @@ function printFeature(f, byId, people) {
       `  ${String(i + 1).padStart(2)}. ${MARK[t.task_status] ?? '[ ]'} ${t.title}${t.task_review ? '  (review)' : ''}${t.done_dirty ? '  (not committed)' : ''}${t.assignee_id && t.assignee_id !== f.assignee_id && name(t.assignee_id) ? `  (with ${name(t.assignee_id)})` : ''}`,
     ),
   )
-  if (!f.tasks.length) console.log('  (no tasks yet — faundr task "<description>")')
+  if (!f.tasks.length && !f.finished) console.log('  (no tasks yet — faundr task "<description>")')
   if (f.criteria?.length)
     console.log(`  Done when: ${f.criteria.map((c, i) => `${i + 1}. ${c.text}${firstOf([[c.met === true, ' [met]'], [c.met === false, ' [not met]']], '')}`).join(' ')}`)
   const next = (f.next ?? []).map((id) => byId?.get(id)).filter(Boolean)
   if (next.length) console.log(`  → next stage: ${next.map((n) => `"${n.title}"${n.finished ? ' (done)' : ''}`).join(', ')}`)
 }
+
+// Concluída sem ser pelas tarefas: pelos critérios de pronto (não tem tarefa) ou fechada à mão.
+const DONE_TAG = { criteria: '  [done: every Done when met]', manual: '  [done: closed by hand]' }
 
 // Arquivos que esta sessão editou, para ligar a decisão a eles: só quando são poucos (1 a 5) e específicos. Arquivo
 // que já tem 3+ regras e decisões ligadas é central demais (mexe-se nele o tempo todo) e fica de fora.
@@ -147,7 +150,7 @@ function memoryReach(r) {
 export async function work(command, args) {
   await workCommand(command, args)
   // A barra de status lê o resumo do arquivo de estado: atualiza depois de mexer no quadro.
-  if (['feature', 'task', 'done', 'start', 'claim', 'own', 'disown', 'focus', 'concern', 'resolve', 'feature-discard', 'feature-restore', 'task-remove'].includes(command)) await refreshStatus().catch((err) => log(`status: ${err?.message ?? err}`))
+  if (['feature', 'task', 'done', 'start', 'claim', 'own', 'disown', 'focus', 'concern', 'resolve', 'feature-discard', 'feature-restore', 'feature-done', 'task-remove', 'task-review'].includes(command)) await refreshStatus().catch((err) => log(`status: ${err?.message ?? err}`))
 }
 
 /** Guarda em .faundr/state.json o resumo que a barra de status mostra (projeto, funcionalidade, passo, preocupações). */
@@ -168,9 +171,11 @@ async function workCommand(command, args) {
 }
 
 async function workFeature({ args, root, current, text }) {
-  if (!text) throw new Error('usage: faundr feature "<title>" [--desc "..."] [--done-when "a; b"] [--after current|"<name of the previous stage>"] [--existing --parts "a; b"]')
+  if (!text) throw new Error('usage: faundr feature "<title>" [--desc "..."] [--done-when "a; b"] [--after current|"<name of the previous stage>"] [--later] [--existing --parts "a; b"]')
   const after = flag(args, '--after')
-  if (!args.includes('--existing') && (await reusePlannedStage(root, args, text, after))) return
+  // --later: ideia ou trabalho para depois. Fica registrada sem começar (Próximas etapas) e não vira a atual.
+  const later = args.includes('--later')
+  if (!args.includes('--existing') && (await reusePlannedStage(root, args, text, after || later))) return
   if (after) {
     // Próxima etapa: fica planejada, ligada à anterior; a funcionalidade atual não muda.
     const prev = await findFeature(after, current)
@@ -184,10 +189,34 @@ async function workFeature({ args, root, current, text }) {
   }
   if (args.includes('--existing')) return workExistingFeature(args, text)
   const criteria = (flag(args, '--done-when') ?? '').split(';').map((c) => c.trim()).filter(Boolean)
-  const { id } = await memoryApi({ action: 'add', kind: 'feature', title: text, body: flag(args, '--desc'), criteria })
-  setCurrentFeature(root, id)
+  if (later) {
+    const { id } = await memoryApi({ action: 'add', kind: 'feature', title: text, body: flag(args, '--desc'), criteria, later: true })
+    writeState(root, { lastStepId: id })
+    console.log(`Recorded for later (not started; it stays out of In progress and the current feature does not change): ${text}\nWhen the work on it starts: faundr focus "${text}".`)
+    if (criteria.length) console.log(`Done when: ${criteria.map((c, i) => `${i + 1}. ${c}`).join(' ')}`)
+    return
+  }
+  // A sessão vai junto: se ela segue um workflow que ainda não está no quadro, os passos viram as tarefas desta funcionalidade.
+  const { id, workflows = [] } = await memoryApi({ action: 'add', kind: 'feature', title: text, body: flag(args, '--desc'), criteria, agentSessionId: AGENT_SESSION_ID ?? null })
+  setCurrentFeature(root, id, undefined, 'created')
   console.log(`Feature created and set as current: ${text}`)
   if (criteria.length) console.log(`Done when: ${criteria.map((c, i) => `${i + 1}. ${c}`).join(' ')}`)
+  console.log(createdNext(workflows))
+}
+
+/** Depois de criar: de onde vêm as tarefas (sem elas a funcionalidade não mostra o trabalho no quadro). */
+export function createdNext(workflows) {
+  if (workflows?.length)
+    return workflows
+      .map((w) => `Its checklist is the ${w.tasks} step(s) of ${String(w.ref).replace(/[^\w-]/g, '')}, with what is already done: keep marking them with faundr workflow step (no faundr task for them).`)
+      .join('\n')
+  return 'Next: one faundr task "<step>" per step, before building (following a workflow, its steps become the tasks by themselves). The board only shows the work through its tasks.'
+}
+
+// A sessão começou a tocar a funcionalidade: no quadro ela deixa de ser "não começou". Sem rede (ou com o servidor
+// ainda sem esse pedido), segue: a primeira tarefa marcada faz o mesmo.
+async function markStarted(id) {
+  await memoryApi({ action: 'feature-start', featureId: id }).catch((err) => log(`feature-start: ${err?.message ?? err}`))
 }
 
 // Já existe uma etapa com esse nome, ainda sem terminar: usa ela em vez de criar outra igual (a etapa planejada ficava
@@ -200,7 +229,8 @@ async function reusePlannedStage(root, args, text, after) {
     console.log(`Already recorded: "${same.title}" (${same.planned ? 'planned stage' : 'in progress'}). Nothing new created.`)
     return true
   }
-  setCurrentFeature(root, same.id)
+  setCurrentFeature(root, same.id, undefined, 'focused')
+  await markStarted(same.id)
   const criteria = (flag(args, '--done-when') ?? '').split(';').map((c) => c.trim()).filter(Boolean)
   const added = []
   for (const c of criteria) {
@@ -276,7 +306,22 @@ async function workCriteriaCheck({ args, current, text }) {
   const r = await memoryApi({ action: 'criteria-check', featureId: f.id, index: n, met, note: flag(args, '--note'), force: args.includes('--force') })
   if (ownerBlocked(r.blocked, `faundr criteria-check ${n} ${met ? '--met' : '--not-met'} --force`)) return
   const open = r.criteria.filter((c) => c.met !== true).length
-  return console.log(`Criterion ${n} of "${r.title}": ${met ? 'met' : 'not met'}. ${open ? `${open} not met yet.` : 'All met.'}`)
+  console.log(`Criterion ${n} of "${r.title}": ${met ? 'met' : 'not met'}. ${open ? `${open} not met yet.` : 'All met.'}`)
+  const note = open ? null : allMetNote(r.state)
+  if (note) console.log(note)
+}
+
+/**
+ * Todos os critérios atendidos: como a funcionalidade ficou no quadro. Com tarefa de construir ainda aberta ela não
+ * conclui: a IA marca as que já foram feitas ou tira as que não valem mais, na hora, em vez de deixar a funcionalidade
+ * presa em "Em andamento" com o trabalho pronto.
+ */
+export function allMetNote(state) {
+  if (!state) return null
+  if (state.finished) return state.doneBy === 'criteria' ? 'It has no tasks, so it now counts as done on the board (every Done when is met).' : 'The feature is done on the board.'
+  if (!state.openBuild?.length) return null
+  const list = state.openBuild.map((t) => `${t.n}. ${teamQuote(t.title)}`).join('; ')
+  return `Not done on the board yet: ${state.openBuild.length} build task(s) still open: ${list}. Mark with faundr done <#> each one that is really done, remove with faundr task-remove <#> what no longer applies, and tell the user what is really left.`
 }
 
 async function workTask({ args, current, text }) {
@@ -287,8 +332,10 @@ async function workTask({ args, current, text }) {
   // --review: tarefa de conferir/testar (não segura a funcionalidade). Sem ele, o verbo do título decide no servidor.
   const r = await memoryApi({ action: 'add', kind: 'task', title: text, parentId: parent?.id ?? current, force: args.includes('--force'), ...(args.includes('--review') && { review: true }) })
   if (ownerBlocked(r.blocked, `faundr task "${text}"${target ? ` --feature "${target}"` : ''} --force`)) return
-  if (parent) return console.log(`Task added to "${parent.title}": ${text}`)
-  return console.log(current ? `Task added: ${text}` : `Task added (no current feature — use faundr feature "<title>" to group it): ${text}`)
+  // Entrou como revisão (pelo --review ou pelo título): a IA vê e acerta na hora se for de construir.
+  const kind = r.review ? ' (review: it does not hold the feature; if it is a build step, faundr task-review "<task>" --off)' : ''
+  if (parent) return console.log(`Task added to "${parent.title}": ${text}${kind}`)
+  return console.log(current ? `Task added: ${text}${kind}` : `Task added (no current feature — use faundr feature "<title>" to group it): ${text}${kind}`)
 }
 
 // A atual já terminou e a próxima etapa está vazia: a tarefa nova quase sempre é dessa etapa (o trabalho da etapa
@@ -440,7 +487,9 @@ async function workFocus({ root, text }) {
   const { features, people, me } = await memoryApi({ action: 'board' })
   // Nome exato antes de "contém": "Stacks de startups" não pode cair em "Hub fase 2: stacks de startups e montador".
   const f = pickFeatureByName(features, text)
-  setCurrentFeature(root, f.id)
+  setCurrentFeature(root, f.id, undefined, 'focused')
+  // Escolher a funcionalidade é começar a trabalhar nela: sai de "não começou" (Próximas etapas) no painel.
+  if (f.planned) await markStarted(f.id)
   console.log('Current feature:')
   printFeature(f, new Map(features.map((x) => [x.id, x])), people)
   if (f.assignee_id && f.assignee_id !== me)
@@ -477,7 +526,8 @@ function printReview(all, current) {
   if (!open.length) return console.log('Nothing open on the board: all features are done.')
   const groups = [
     ['In progress', open.filter((f) => !f.planned)],
-    ['Next stages (planned)', open.filter((f) => f.planned)],
+    // Não começou: etapa seguinte de outra, ideia guardada para depois ou criada no painel.
+    ['Not started (planned stages and ideas for later)', open.filter((f) => f.planned)],
   ]
   for (const [label, list] of groups) {
     if (!list.length) continue
@@ -491,10 +541,23 @@ function printReview(all, current) {
       )
       if (f.body) console.log(`    ${f.body}`)
       f.tasks.filter((t) => t.task_status !== 'completed').forEach((t) => console.log(`    ${MARK[t.task_status] ?? '[ ]'} [${t.id.slice(0, 8)}] ${t.title}`))
-      if (!f.tasks.length) console.log('    (no tasks)')
+      if (!f.tasks.length) console.log(`    (no tasks${(f.criteria ?? []).length ? `; Done when: ${f.criteria.filter((c) => c.met === true).length}/${f.criteria.length} met` : ''})`)
     }
     console.log('')
   }
+}
+
+// Acertar o tipo: revisão (conferir, testar, a pessoa comprar de verdade: não segura a funcionalidade) ou construir.
+async function workTaskReview({ args, current, text }) {
+  if (!text) throw new Error('usage: faundr task-review "<snippet of the task name, # or id>" [--off] [--force]   (--off: back to a build task)')
+  const review = !args.includes('--off')
+  const r = await memoryApi({ action: 'task-review', query: text, featureId: current, review, force: args.includes('--force') })
+  if (ownerBlocked(r.blocked, `faundr task-review "${text}"${review ? '' : ' --off'} --force`)) return
+  return console.log(
+    review
+      ? `Review task: ${r.title} (it no longer holds the feature; the owner checks it, or you do when they ask).`
+      : `Build task: ${r.title} (it holds the feature until it is done).`,
+  )
 }
 
 // Tarefa que não vai ser feita (passo de plano antigo, teste que ninguém vai rodar): sai do checklist.
@@ -511,6 +574,24 @@ async function workDiscard({ command, args, text }) {
   const r = await memoryApi({ action: 'feature-discard', query: text, restore, force: args.includes('--force') })
   if (ownerBlocked(r.blocked, `faundr ${command} "${text}" --force`)) return
   return console.log(restore ? `Restored: ${r.title}` : `Discarded: ${r.title} (leaves the tabs; to bring it back: faundr feature-restore "${r.id.slice(0, 8)}")`)
+}
+
+// Fechar à mão: a pessoa decidiu que está pronta (mesmo com tarefa aberta ou sem tarefa). Só com o OK dela.
+async function workFeatureDone({ args, current, text }) {
+  const query = text || current
+  if (!query) throw new Error('usage: faundr feature-done "<feature name or id>" [--reopen] [--force]   (closing by hand is the owner\'s call: only with their OK)')
+  const reopen = args.includes('--reopen')
+  const r = await memoryApi({ action: 'feature-done', query, reopen, force: args.includes('--force') })
+  if (ownerBlocked(r.blocked, `faundr feature-done "${query}"${reopen ? ' --reopen' : ''} --force`)) return
+  if (reopen)
+    return console.log(
+      r.reopened
+        ? `Reopened: ${r.title} (back to In progress; its tasks stay as they were).`
+        : `"${r.title}" was not closed by hand, so there is nothing to undo: to reopen it, reopen one of its tasks on the dashboard or add a new one (faundr task).`,
+    )
+  console.log(`Closed as done: ${r.title}`)
+  if (r.open?.length)
+    console.log(`${r.open.length} task(s) stay open in it (${r.open.map((t) => teamQuote(t)).join('; ')}): it counts as done anyway. To undo: faundr feature-done "${r.id.slice(0, 8)}" --reopen`)
 }
 
 function printDecisions(decisions) {
@@ -543,5 +624,7 @@ const WORK_HANDLERS = {
   board: workBoard,
   'feature-discard': workDiscard,
   'feature-restore': workDiscard,
+  'feature-done': workFeatureDone,
   'task-remove': workTaskRemove,
+  'task-review': workTaskReview,
 }

@@ -45,7 +45,7 @@ export async function login(args) {
   }
   const wait = args.includes('--wait')
   if (!wait) await startLogin(apiUrl)
-  if (!args.includes('--start')) await waitLogin()
+  if (!args.includes('--start')) await waitLogin({ showCode: wait })
 }
 
 async function startLogin(apiUrl) {
@@ -72,10 +72,19 @@ async function startLogin(apiUrl) {
   )
 }
 
-async function waitLogin() {
+// showCode: com --wait sozinho, repete o código e o link antes de esperar. A saída do --start fica dentro das
+// instruções da skill (o usuário não vê); se o agente esquecer de repetir o código, ele aparece aqui.
+async function waitLogin({ showCode = false } = {}) {
   const pending = readJson(PENDING_LOGIN_FILE)
   if (!pending?.token || pending.expiresAt < Date.now())
     throw new Error(t('No pending sign-in (the code is valid for 10 minutes). Run /faundr:login again.', 'Nenhum login pendente (o código vale 10 minutos). Rode /faundr:login de novo.'))
+  if (showCode)
+    console.log(
+      t(
+        `Code: ${pending.code}. Open ${pending.apiUrl}/autorizar, type this code and click Authorize. Waiting for approval…`,
+        `Código: ${pending.code}. Abra ${pending.apiUrl}/autorizar, digite este código e clique em Autorizar. Esperando a aprovação…`,
+      ),
+    )
   const until = Math.min(Date.now() + LOGIN_WAIT_MS, pending.expiresAt)
   while (Date.now() < until) {
     try {

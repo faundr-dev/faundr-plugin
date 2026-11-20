@@ -3,8 +3,8 @@
 import { createHash } from 'node:crypto'
 import { readSkillIndex, scanSkills, writeSkillIndex } from './skills.mjs'
 import { parseItem } from './workflows.mjs'
-import { AGENT_SESSION_ID, flag, flags, linkedProject, readState, textArg, writeState } from './cli-core.mjs'
-import { ownerSaid, runOf, saveRun } from './workflow-run.mjs'
+import { AGENT_SESSION_ID, currentFeatureRef, flag, flags, linkedProject, readState, textArg, writeState } from './cli-core.mjs'
+import { noteOffBoard, ownerSaid, runOf, saveRun } from './workflow-run.mjs'
 import { machineName } from './live.mjs'
 import { teamQuote } from './rules.mjs'
 
@@ -31,6 +31,8 @@ const WORKFLOW_USAGE = `usage:
      (a question step only closes with --answer: the owner's reply after you asked, or the words of the request that
       already answered it; skipping any step needs --answer with the owner's OK. The words must be in their messages.)
   faundr workflow done <W-n> [--note "<result>"]   |   faundr workflow stop <W-n>
+  faundr workflow link <W-n> [--feature "<name or id>"] [--run <start of the run id>]
+     (puts the run on the Features board: its steps become the tasks of that feature, or of the current one)
 Step: free text (a task) or with a type in front: "skill: faundr:design", "agents 3: read the code", "command: npm test", "ask: which repository?", "wait: the tests pass". At the same time: "parallel: skill: faundr:design | command: npm test". Detail after " — ".`
 
 export async function workflowCommand(args) {
@@ -39,6 +41,7 @@ export async function workflowCommand(args) {
   if (sub === 'show') return workflowShow(rest)
   if (sub === 'draft') return workflowDraft(rest)
   if (['run', 'step', 'done', 'stop'].includes(sub)) return workflowMark(sub, rest)
+  if (sub === 'link') return workflowLink(rest)
   throw new Error(WORKFLOW_USAGE)
 }
 
@@ -59,7 +62,7 @@ async function workflowShow(rest) {
   if (absent) console.log(`\n${absent}`)
   if (w.status === 'active')
     console.log(
-      `\nFollow the steps in order, one at a time, and mark each one when you really do it (the team sees it on the canvas): start with faundr workflow run ${w.ref} --why "<request>", move on with faundr workflow step ${w.ref} <n> --done, and close with faundr workflow done ${w.ref}. A question step: ask it, mark it --wait, end your response and, when the owner answers, mark it --done --answer "<their words>" (if the request already answered it, quote those words). Skipping a step needs the owner's OK: --skip --answer "<their words>". Never mark a step you did not do.`,
+      `\nFollow the steps in order, one at a time, and mark each one when you really do it (the team sees it on the canvas): start with faundr workflow run ${w.ref} --why "<request>", move on with faundr workflow step ${w.ref} <n> --done, and close with faundr workflow done ${w.ref}. A question step: ask it, mark it --wait, end your response and, when the owner answers, mark it --done --answer "<their words>" (if the request already answered it, quote those words). Skipping a step needs the owner's OK: --skip --answer "<their words>". Never mark a step you did not do.\nOn the Features board, these steps become the tasks of the feature of this work: create it (faundr feature "<title>" --done-when "<…>") or, for a feature that already exists, faundr workflow link ${w.ref} --feature "<name>". Do not repeat the steps with faundr task.`,
     )
   if (w.status === 'draft') console.log('\n(Draft: not in effect yet. The owner approves it on the dashboard, in Workflows.)')
   if (w.status === 'off') console.log('\n(Turned off by the owner: do not follow it unless they ask.)')
@@ -136,11 +139,15 @@ async function workflowMark(sub, rest) {
     note: flag(rest, '--note') ?? '',
     ...(answer && { answer }),
     agentSessionId: AGENT_SESSION_ID ?? null,
+    // A funcionalidade atual da sessão e como ela chegou a ela: o servidor põe os passos como tarefas dela.
+    feature: sessionFeature(),
   })
   // Os passos ficam no computador: o hook dos comandos avisa quando um comando passa na frente deles (sem rede).
   try {
     const { root } = linkedProject()
     saveRun(root, AGENT_SESSION_ID, r.ref, r.outline, { ...(sub === 'run' && { startedAt: Date.now() }), closed: sub === 'done' || sub === 'stop' })
+    // Concluída fora do quadro: o fim da resposta lembra uma vez de registrar o trabalho.
+    if (sub === 'done' && r.board && !r.board.feature) noteOffBoard(root, AGENT_SESSION_ID, r.ref)
   } catch {
     // Sem guardar, só o aviso antes do comando deixa de sair; o resto segue.
   }
@@ -148,6 +155,56 @@ async function workflowMark(sub, rest) {
   console.log(`${r.ref} ${STATUS[r.status] ?? r.status}: ${r.progress}.${r.status === 'waiting' ? " The canvas shows it is the owner's turn." : ''}`)
   // Avisos do time: outra pessoa seguindo o mesmo workflow agora, ou o workflow mudou no painel depois que começou.
   for (const note of r.notes ?? []) console.log(note)
+  const board = boardNote(sub, r)
+  if (board) console.log(board)
+}
+
+// A funcionalidade atual desta sessão (qual, como a sessão chegou a ela e quando), ou null sem pasta ligada.
+function sessionFeature() {
+  try {
+    return currentFeatureRef(linkedProject().root, AGENT_SESSION_ID)
+  } catch {
+    return null
+  }
+}
+
+const plainRef = (ref) => String(ref ?? '').replace(/[^\w-]/g, '')
+
+/**
+ * O que a marcação mudou no quadro de Funcionalidades (ou null quando não há o que dizer). Servidor antigo não manda
+ * `board`: nada sai. O título da funcionalidade é texto do time: entre «».
+ */
+export function boardNote(sub, r) {
+  if (r.board === undefined || r.board === null) return null
+  const ref = plainRef(r.ref)
+  const f = r.board.feature
+  if (!f) {
+    if (sub === 'run')
+      return `Board: this run is not on the Features board yet. If it is a piece of work (it changes the project), create its feature now (faundr feature "<title>" --done-when "<how to tell it is done>"): the steps become its tasks. To use a feature that already exists: faundr workflow link ${ref} --feature "<name>".`
+    if (sub === 'done')
+      return `Board: this run is not on the Features board. If it was a piece of work the team should see, record it: faundr feature "<title>" --done-when "<…>", then faundr workflow link ${ref} (the steps go in as done tasks). A routine check needs nothing.`
+    return null
+  }
+  const title = teamQuote(f.title)
+  if (sub === 'link') return `Board: the ${r.board.tasks} step(s) of ${ref} are now the checklist of ${title}, with what is already done.`
+  if (r.board.linkedNow) return `Board: the ${r.board.tasks} step(s) of ${ref} are now the checklist of ${title}: keep marking them here (no faundr task for them).`
+  if (sub === 'stop') return `Board: the steps not done stay as open tasks of ${title}: do them, or remove what no longer applies (faundr task-remove "<step>").`
+  return null
+}
+
+// faundr workflow link: põe a execução (a aberta desta sessão, a última dela, ou a de --run) no quadro, na
+// funcionalidade de --feature ou na atual.
+async function workflowLink(rest) {
+  const [query] = rest.filter((a, i) => !a.startsWith('--') && !(i > 0 && ['--feature', '--run'].includes(rest[i - 1])))
+  if (!query) throw new Error(WORKFLOW_USAGE)
+  const r = await workflowApi({ action: 'link', query, to: flag(rest, '--feature') ?? null, run: flag(rest, '--run') ?? null, agentSessionId: AGENT_SESSION_ID ?? null, feature: sessionFeature() })
+  try {
+    noteOffBoard(linkedProject().root, AGENT_SESSION_ID, r.ref, true)
+  } catch {
+    // Sem guardar, o lembrete do fim da resposta ainda pode sair uma vez; o quadro já está certo.
+  }
+  console.log(`${r.ref}: ${r.progress}.`)
+  console.log(boardNote('link', r))
 }
 
 // Skills conectadas (/faundr:skills): lê as skills do computador e liga ao projeto no Faundr.

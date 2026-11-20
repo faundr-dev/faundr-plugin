@@ -149,3 +149,11 @@ test('segurança no veredito: mesmo filtro do painel (ignorado, suprimido, dev e
   assert.match(critical.detail, /^1 problema/)
   assert.deepEqual(securityItems([]).map((i) => i.status), ['ok', 'ok', 'ok'])
 })
+
+test('launch-check repassa aos testes a confirmação do banco e os arquivos deixados de fora', async () => {
+  const { testsArgs } = await import('../bin/cmd-launch-check.mjs')
+  assert.deepEqual(testsArgs([]), [])
+  assert.deepEqual(testsArgs(['--url', 'https://x.dev']), [])
+  assert.deepEqual(testsArgs(['--confirm-db']), ['--confirm-db'])
+  assert.deepEqual(testsArgs(['--exclude', 'a,b', '--confirm-db']), ['--confirm-db', '--exclude', 'a,b'])
+})

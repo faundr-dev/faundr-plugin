@@ -8,7 +8,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { findDesignMd, uiFiles } from './design.mjs'
 import { ensureFaundrPath, faundrPath, organizeFaundrDir } from './paths.mjs'
-import { hookPayload } from './hook-payload.mjs'
+import { commitTextOf, hookPayload } from './hook-payload.mjs'
+import { noteCommit } from './task-match.mjs'
 import { rememberTranscript, transcriptUsage, transcriptsToSync } from './usage.mjs'
 import { onlyUser, readSkillIndex, skillMoment, writeSkillIndex } from './skills.mjs'
 import { readWorkflows, workflowMoment, writeWorkflows } from './workflows.mjs'
@@ -302,6 +303,8 @@ async function bashEvents(event, payload, root, projectId, cfg) {
     if (done) pushEvent(root, payload.session_id, done)
     // Commit ou push: o fim da resposta pede para marcar as tarefas que ele terminou.
     if (done && payload.session_id) writeState(root, { committedTasks: payload.session_id, commitAt: Date.now() })
+    // A mensagem do commit fica guardada (só aqui): com ela o fim da resposta acha a tarefa de outra funcionalidade.
+    if (done === 'commit') noteCommit(root, payload.session_id, commitTextOf(payload.tool_input?.command))
   }
   if ((event === 'PostToolUse' || event === 'PostToolUseFailure') && !stepOff(root, 'run.errors'))
     await captureErrors(payload, root, projectId, cfg).catch((err) => log(`errors: ${err.message}`))
@@ -353,7 +356,7 @@ function saveAnswer(answer, root, sid) {
     writeState(root, { skillsStamp: answer.skillsStamp ?? null })
   }
   // Plano aprovado virou funcionalidade: passa a ser a atual desta pasta.
-  if (answer.currentFeatureId) setCurrentFeature(root, answer.currentFeatureId, sid)
+  if (answer.currentFeatureId) setCurrentFeature(root, answer.currentFeatureId, sid, 'plan')
   // Memória mudou com a sessão aberta (decisão nova, editada ou substituída): cópias locais novas, já no próximo
   // pedido e na próxima edição. No início da sessão, sessionStartContext já gravou as duas.
   if (answer.memoryStamp) {

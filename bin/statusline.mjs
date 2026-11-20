@@ -10,7 +10,10 @@ export function statusFromBoard(board, currentFeatureId, projectName, now = Date
   const all = board.allFeatures ?? board.features ?? []
   const f = all.find((x) => x.id === currentFeatureId)
   const tasks = f?.tasks ?? []
-  const next = tasks.find((t) => t.task_status === 'in_progress') ?? tasks.find((t) => t.task_status === 'pending')
+  // O próximo passo: a tarefa em andamento; senão a primeira de construir a fazer (é ela que segura a
+  // funcionalidade); só sem nenhuma de construir, a primeira revisão. A mesma ordem do painel (nextTask).
+  const pending = tasks.filter((t) => t.task_status === 'pending')
+  const next = tasks.find((t) => t.task_status === 'in_progress') ?? pending.find((t) => !t.task_review) ?? pending[0]
   return {
     projectName: projectName ?? null,
     feature: f ? { title: f.title, done: tasks.filter((t) => t.task_status === 'completed').length, total: tasks.length, next: next?.title ?? null } : null,

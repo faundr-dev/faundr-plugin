@@ -46,15 +46,36 @@ export function commitDone(payload) {
  * servidor): -m "…", -m '…', -m palavra ou heredoc (-F - <<'EOF' … EOF). Sem mensagem legível, "commit".
  */
 export function commitMessageOf(command) {
+  const raw = rawCommitMessage(command)
+  if (raw === null) return null
+  const first = raw.replace(/\\n/g, '\n').split('\n').map((l) => l.trim()).find(Boolean) ?? ''
+  return (first.startsWith('$(') ? '' : first).slice(0, 120) || 'commit'
+}
+
+// A mensagem como veio no comando (-m "…", -m '…', -m palavra ou heredoc); null quando não é um git commit.
+function rawCommitMessage(command) {
   const cmd = String(command ?? '')
   const at = cmd.search(/\bgit\b[^\n|;&]*\bcommit\b/)
   if (at < 0) return null
   const rest = cmd.slice(at)
   const m = rest.match(/\s-m\s+(?:"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+))/)
   const heredoc = rest.match(/<<-?\s*['"]?(\w+)['"]?[^\n]*\n([\s\S]*?)\n\s*\1\b/)
-  const raw = m ? (m[1] ?? m[2] ?? m[3] ?? '') : (heredoc?.[2] ?? '')
-  const first = raw.replace(/\\n/g, '\n').split('\n').map((l) => l.trim()).find(Boolean) ?? ''
-  return (first.startsWith('$(') ? '' : first).slice(0, 120) || 'commit'
+  return m ? (m[1] ?? m[2] ?? m[3] ?? '') : (heredoc?.[2] ?? '')
+}
+
+/**
+ * A mensagem inteira do commit (título e corpo, até 600 caracteres, sem a linha de coautoria). Fica só no computador:
+ * o fim da resposta procura nela a tarefa aberta que o commit terminou (task-match.mjs).
+ */
+export function commitTextOf(command) {
+  const raw = rawCommitMessage(command)
+  if (!raw || raw.trim().startsWith('$(')) return ''
+  return raw
+    .replace(/\\n/g, '\n')
+    .replace(/^\s*Co-Authored-By:.*$/gim, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 600)
 }
 
 /** Número da tarefa que o TaskCreate criou (o TaskUpdate depois se refere a ele). */

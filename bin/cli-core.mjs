@@ -36,7 +36,7 @@ export const GRAPH_LOCK_MS = 5 * 60_000
 // língua do conteúdo do projeto (languageGuidance, em content-lang.mjs).
 
 // Orientação de acompanhamento: o agente registra o que constrói (skill "track").
-export const WORK_GUIDANCE = `[Faundr] Record the work so the team can follow it on the dashboard: when you start something with several steps (a new feature, a big improvement, a new phase), before building, run faundr feature "<title>" --done-when "<how to tell it is done>" and one faundr task "<step>" per step; if the request is vague (does not say who it is for, what is left out or when it is done), first ask 2 or 3 short questions in a single round; faundr done "<step>" when you finish one; faundr decision "<decision>" --why "<reason>" for technical choices (if it changes an earlier decision, add --replaces "<snippet of the old title>"). Work in stages (phases, MVP and then the rest): record the next stages right at the start with faundr feature "<stage>" --after current --desc "<what goes in>"; when you finish a stage, tell the user which one is next.`
+export const WORK_GUIDANCE = `[Faundr] Record the work so the team can follow it on the dashboard: when you start something with several steps (a new feature, a big improvement, a new phase), before building, run faundr feature "<title>" --done-when "<how to tell it is done>" and one faundr task "<step>" per step (a step that only checks the result, like testing in the browser or the owner trying it, is a review: add --review); if the request is vague (does not say who it is for, what is left out or when it is done), first ask 2 or 3 short questions in a single round; faundr done "<step>" when you finish one, including a task of another feature that your work finished (faundr done <id>); faundr decision "<decision>" --why "<reason>" for technical choices (if it changes an earlier decision, add --replaces "<snippet of the old title>"). Following a project workflow: create the feature and mark the workflow steps; they become its tasks by themselves (no faundr task for them). Never leave the feature you are working on without tasks: the board only shows work through them. Work in stages (phases, MVP and then the rest): record the next stages right at the start with faundr feature "<stage>" --after current --desc "<what goes in>"; an idea for later that is not a next stage: faundr feature "<title>" --later; when you finish a stage, tell the user which one is next.`
 
 // Orientação "sempre ligada" (equivalente à regra de CLAUDE.md do graphify): consultar o grafo antes de varrer arquivos.
 export const GRAPH_GUIDANCE = `[Faundr] This project has a knowledge graph in .faundr/mapa/ (code + docs, with communities and links).
@@ -209,15 +209,25 @@ const KEPT_SESSIONS = 20
 const sessionIdOf = (sid) => sid ?? AGENT_SESSION_ID ?? null
 
 export function currentFeature(root, sid) {
-  const state = readState(root)
-  const own = state.featureBySession?.[sessionIdOf(sid)]
-  return own?.id ?? state.currentFeatureId ?? null
+  return currentFeatureRef(root, sid).id
 }
 
-export function setCurrentFeature(root, id, sid) {
+/**
+ * A funcionalidade atual e como a sessão chegou a ela: 'created' (faundr feature), 'focused' (faundr focus), 'plan'
+ * (plano aprovado) ou 'pinned' (herdada da pasta, sem a sessão escolher). O servidor só põe os passos de um workflow
+ * numa funcionalidade que a sessão escolheu, e o fim da resposta só cobra o registro nela.
+ */
+export function currentFeatureRef(root, sid) {
+  const state = readState(root)
+  const own = state.featureBySession?.[sessionIdOf(sid)]
+  if (own?.id) return { id: own.id, how: own.how ?? 'pinned', at: own.at ?? null }
+  return { id: state.currentFeatureId ?? null, how: state.currentFeatureId ? 'pinned' : null, at: null }
+}
+
+export function setCurrentFeature(root, id, sid, how = 'focused') {
   const key = sessionIdOf(sid)
   const bySession = { ...(readState(root).featureBySession ?? {}) }
-  if (key) bySession[key] = { id, at: Date.now() }
+  if (key) bySession[key] = { id, at: Date.now(), how }
   const kept = Object.entries(bySession)
     .sort(([, a], [, b]) => b.at - a.at)
     .slice(0, KEPT_SESSIONS)
@@ -228,7 +238,7 @@ export function setCurrentFeature(root, id, sid) {
 export function pinSessionFeature(root, sid) {
   const state = readState(root)
   if (!sid || state.featureBySession?.[sid] || !state.currentFeatureId) return
-  setCurrentFeature(root, state.currentFeatureId, sid)
+  setCurrentFeature(root, state.currentFeatureId, sid, 'pinned')
 }
 
 export function linkedProject() {

@@ -125,7 +125,7 @@ export async function launchCheck(args) {
   const supabase = { ref: flag(args, '--ref') ?? supabaseTarget(root)?.ref ?? null, token: process.env.SUPABASE_ACCESS_TOKEN ?? null }
   const send = !args.includes('--no-send')
   // O código: compila, testes e segurança rodam agora, para o veredito não depender de uma rodada antiga.
-  const code = args.includes('--skip-code') ? [] : await launchCodeChecks(root, send)
+  const code = args.includes('--skip-code') ? [] : await launchCodeChecks(root, send, testsArgs(args))
   const checks = await launchChecks(root, files, { ...(flag(args, '--url') ? { url: flag(args, '--url') } : {}), supabase })
   const items = [...code, ...checks]
   for (const c of items) console.log(`[${LAUNCH_TEXT[c.status]}] ${LAUNCH_NAME[c.key]}: ${c.detail}`)
@@ -146,7 +146,14 @@ export async function launchCheck(args) {
 // Itens que o painel já monta com os próprios dados (segurança e testes): não vão no relatório.
 const PANEL_OWNED = new Set(['testes', 'segredos', 'seguranca-critica', 'seguranca-alta'])
 
-async function launchCodeChecks(root, send) {
+// O que o launch-check repassa aos testes: a confirmação do banco de produção e os arquivos deixados de fora, como o
+// próprio tests-run pede na mensagem de recusa.
+export function testsArgs(args) {
+  const i = args.indexOf('--exclude')
+  return [...(args.includes('--confirm-db') ? ['--confirm-db'] : []), ...(i >= 0 && args[i + 1] ? ['--exclude', args[i + 1]] : [])]
+}
+
+async function launchCodeChecks(root, send, testArgs = []) {
   console.log('Checking the code (build, tests and security)…')
   const build = checkBuild(root)
   // tests-run e security-scan sempre gravam no painel: com --no-send, os testes ficam de fora e a segurança
@@ -154,7 +161,7 @@ async function launchCodeChecks(root, send) {
   let tests = { key: 'testes', status: 'nao-verificado', detail: 'Not run with --no-send.' }
   if (send) {
     try {
-      tests = testsVerdict(await testsRun([]))
+      tests = testsVerdict(await testsRun(testArgs))
     } catch (e) {
       tests = { key: 'testes', status: 'aviso', detail: `Tests did not run: ${e.message}` }
     }

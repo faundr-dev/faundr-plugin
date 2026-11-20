@@ -128,3 +128,18 @@ test('medidores para o painel: contexto e janelas arredondados; sem nenhum, null
   })
   assert.equal(metersSnapshot({ model: { display_name: 'Opus' } }), null)
 })
+
+test('o próximo passo da barra é a tarefa de construir aberta, não a revisão que vem antes dela', async () => {
+  const { statusFromBoard } = await import('../bin/statusline.mjs')
+  const tasks = [
+    { title: 'Preço pelo país', task_status: 'completed' },
+    { title: 'Compra real de cada plano', task_status: 'pending', task_review: true },
+    { title: 'Checkout em inglês', task_status: 'pending' },
+  ]
+  const board = { allFeatures: [{ id: 'f', title: 'Cobrança', tasks }], concerns: [] }
+  assert.equal(statusFromBoard(board, 'f', 'Faundr', 1).feature.next, 'Checkout em inglês')
+  // Só revisão aberta: é ela o próximo passo. Em andamento vem sempre primeiro.
+  assert.equal(statusFromBoard({ allFeatures: [{ id: 'f', title: 'C', tasks: tasks.slice(0, 2) }] }, 'f', 'F', 1).feature.next, 'Compra real de cada plano')
+  const doing = [...tasks, { title: 'Conferir no Stripe', task_status: 'in_progress', task_review: true }]
+  assert.equal(statusFromBoard({ allFeatures: [{ id: 'f', title: 'C', tasks: doing }] }, 'f', 'F', 1).feature.next, 'Conferir no Stripe')
+})

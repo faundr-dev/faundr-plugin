@@ -12,7 +12,9 @@ import { matchesPath, TEAM_TEXT_GUARD, teamQuote } from './rules.mjs'
 import { proofNeeded } from './loop.mjs'
 import { projectSize, takeSkillCosts } from './ai-cost.mjs'
 import { takeInbox } from './inbox.mjs'
-import { AGENT, CONFIG_DIR, currentFeature, findUp, LINK_FILE, loadConfig, log, readJson, readState, readStdin, writeState } from './cli-core.mjs'
+import { AGENT, CONFIG_DIR, currentFeature, currentFeatureRef, findUp, LINK_FILE, loadConfig, log, readJson, readState, readStdin, writeState } from './cli-core.mjs'
+import { takeOffBoard } from './workflow-run.mjs'
+import { hintsSeen, matchOpenTasks, rememberHints, sessionWorkText } from './task-match.mjs'
 import { blockStop, eventTriggers } from './hook-events.mjs'
 import { designAuditFiles, newDesignFindings } from './cmd-design.mjs'
 
@@ -155,15 +157,18 @@ export async function gate() {
   const edited = !!projectId && !!token && fs.existsSync(editedFile(sid))
   if (edited) cleanEditedMarkers()
   const budget = AbortSignal.timeout(GATE_BUDGET_MS)
+  // Tarefas de outras funcionalidades que o trabalho da sessão terminou: quando ela mexeu em arquivos ou fez commit.
+  const lookAround = !!projectId && !!token && (edited || readState(root).committedTasks === sid) && !stepOff(root, 'stop.other_tasks')
   // Primeiro a rede, em paralelo, sem consumir nada local.
-  const [, tasks, remote] = await Promise.all([
+  const [, tasks, remote, others] = await Promise.all([
     sendSkillCosts(root, sid, budget),
     committedTasks(root, sid, budget),
     edited ? stopFetches(root, sid, projectId, token, apiUrl, budget) : null,
+    lookAround ? otherTasks(root, sid, { projectId, token, apiUrl }, budget) : null,
   ])
   // Daqui em diante, sem rede: o que é consumido (caixa de entrada, eventos, skills que rodaram) sai nesta resposta.
   const s = edited ? stopSignals(root, sid, remote) : null
-  const { inboxStep, eventSteps } = earlyStopSteps(root, sid, tasks)
+  const { inboxStep, eventSteps } = earlyStopSteps(root, sid, tasks, others)
   const steps = s ? stopSteps(root, sid, s, inboxStep, eventSteps) : [inboxStep, ...eventSteps].filter(Boolean)
   if (!steps.length) return
   if (s) rememberNudges(root, sid, s)
@@ -171,7 +176,7 @@ export async function gate() {
 }
 
 // O que vale no fim da resposta mesmo sem arquivo mexido.
-function earlyStopSteps(root, sid, tasks) {
+function earlyStopSteps(root, sid, tasks, others) {
   // Pedido, recado ou nota que chegou enquanto o agente trabalhava: entrega agora, mesmo sem arquivo mudado.
   const inbox = takeInbox(root, sid)
   const inboxStep = inbox.length ? `this arrived from the dashboard while you were working; handle it before finishing: ${inbox.join(' ')}` : null
@@ -180,8 +185,42 @@ function earlyStopSteps(root, sid, tasks) {
   // costuma só ler, então vale mesmo sem arquivo mexido.
   const eventSteps = [...takeSkillsRan(root, sid), ...eventTriggers(root, sid)]
   if (tasks) writeState(root, { committedTasks: null })
+  // Cada tarefa é apontada uma vez por sessão, e o mesmo texto não é conferido de novo.
+  if (others) rememberHints(root, sid, others.hits.map((t) => t.id), others.text)
+  if (others?.hits.length) eventSteps.unshift(otherTasksText(others.hits))
   if (tasks?.text) eventSteps.unshift(tasks.text)
   return { inboxStep, eventSteps }
+}
+
+/**
+ * Tarefas de construir abertas em OUTRAS funcionalidades que parecem ser o que esta sessão fez (pelas mensagens de
+ * commit e pelos últimos pedidos). Sem isso, o que era feito de passagem ia para o git e a tarefa ficava aberta.
+ * Devolve { hits, text } ou null (sem rede, painel antigo ou nada novo para conferir: fica para o próximo fim).
+ */
+async function otherTasks(root, sid, { projectId, token, apiUrl }, signal) {
+  const text = sessionWorkText(root, sid)
+  const seen = hintsSeen(root, sid)
+  if (!text || text === seen.text) return null
+  try {
+    const res = await fetch(`${apiUrl}/api/cli/memory`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ projectId, action: 'open-tasks' }),
+      signal,
+    })
+    if (!res.ok) return null
+    const { tasks = [] } = await res.json()
+    return { hits: matchOpenTasks(tasks, { currentId: currentFeature(root, sid), text, skip: seen.ids }), text }
+  } catch (err) {
+    log(`other tasks: ${err?.message ?? err}`)
+    return null
+  }
+}
+
+/** Títulos e nomes vêm do quadro do time: entre «». O id curto serve no faundr done de qualquer funcionalidade. */
+export function otherTasksText(hits) {
+  const list = hits.map((t) => `[${String(t.id).slice(0, 8)}] ${teamQuote(t.title)}${t.feature ? ` (feature ${teamQuote(t.feature, 80)})` : ''}`).join('; ')
+  return `open tasks of other features look like what this session did: ${list}. If this session's work really finished one of them, mark it with faundr done <id> (the short id in brackets; add --already-committed if the work is already in a commit) and tell the user in one line what you marked; if none is finished, mark nothing`
 }
 
 // Depois de um commit ou push: as tarefas ainda abertas da funcionalidade atual, para marcar as que ele terminou.
@@ -219,6 +258,8 @@ function committedTasksText(title, open) {
 
 // Marca nesta sessão os avisos que já foram dados (não repetir na próxima resposta).
 function rememberNudges(root, sid, s) {
+  if (s.board?.empty) writeState(root, { emptyNudged: `${sid}:${s.featureId}` })
+  if (s.heldOpen) writeState(root, { heldNudged: `${sid}:${s.featureId}` })
   if (s.untracked) writeState(root, { untrackedNudged: sid })
   if (s.stale) writeState(root, { overviewNudgedSession: sid })
   if (s.stackStale) writeState(root, { stackNudgedSession: sid })
@@ -276,8 +317,37 @@ function stopSignals(root, sid, { featureId, step, stale, stackStale }) {
   // Prova: código mudou e nenhuma checagem passou depois (uma vez por leva de mudanças, só se há o que rodar).
   const proof = on('stop.proof') && hasChecks(root) ? proofNeeded(CONFIG_DIR, sid) : null
   const untracked = on('stop.untracked') ? untrackedWork(root, sid) : null
+  // O quadro mostra o trabalho da sessão? Funcionalidade escolhida sem tarefas, workflow concluído fora do quadro e
+  // critérios todos atendidos com tarefa de construir aberta: cada um, uma vez por funcionalidade na sessão.
+  const chosen = CHOSEN.has(currentFeatureRef(root, sid).how)
+  const board = on('stop.board') ? boardGap(root, sid, featureId, chosen ? step?.feature : null) : null
+  const heldOpen = on('stop.open_tasks') && chosen ? heldByOpenTasks(root, sid, featureId, step?.feature) : null
   const triggered = stopTriggers(root, sid)
-  return { on, handoff, finished, designFiles, stale, stackStale, proof, untracked, triggered }
+  return { on, featureId, handoff, finished, designFiles, stale, stackStale, proof, untracked, board, heldOpen, triggered }
+}
+
+// A sessão escolheu a funcionalidade (criou, focou ou veio de um plano aprovado). A herdada da pasta pode não ter nada
+// a ver com o pedido de agora: nela o fim da resposta não cobra o quadro.
+const CHOSEN = new Set(['created', 'focused', 'plan'])
+
+/**
+ * O que o quadro não está mostrando: a funcionalidade que a sessão escolheu segue sem nenhuma tarefa (o time não vê o
+ * que foi feito, e sem tarefas ela não conclui), ou a sessão concluiu um workflow que não está no quadro.
+ */
+export function boardGap(root, sid, featureId, feature) {
+  const nudged = readState(root).emptyNudged === `${sid}:${featureId}`
+  const empty = feature && !feature.finished && !feature.tasks?.length && !nudged ? feature : null
+  const offBoard = takeOffBoard(root, sid)
+  return empty || offBoard.length ? { empty, offBoard } : null
+}
+
+/** Todos os critérios de pronto atendidos, mas tarefa de construir aberta segura a funcionalidade em "Em andamento". */
+export function heldByOpenTasks(root, sid, featureId, feature) {
+  if (!feature || feature.finished || readState(root).heldNudged === `${sid}:${featureId}`) return null
+  const criteria = feature.criteria ?? []
+  if (!criteria.length || !criteria.every((c) => c.met === true)) return null
+  const open = (feature.tasks ?? []).map((t, i) => ({ ...t, n: i + 1 })).filter((t) => t.task_status !== 'completed' && !t.task_review)
+  return open.length ? { title: feature.title, open } : null
 }
 
 /** Os passos do fim da resposta, na ordem em que o agente deve fazer. */
@@ -288,6 +358,7 @@ function stopSteps(root, sid, s, inboxStep, eventSteps) {
     steps.push(
       `this session changed ${s.untracked} files and nothing was recorded in Faundr: if it was a feature, improvement or phase with several steps, record what was done now (faundr feature "<title>" --desc "<goal>", one faundr task "<step>" per step and faundr done "<step>" for what is already done; if it belongs to the current feature, only the tasks); if it was a small tweak, record nothing`,
     )
+  steps.push(...boardSteps(s))
   if (s.proof)
     steps.push(
       (s.proof.failing.length ? `\`${s.proof.failing[0]}\` is still failing: fix it or tell the user clearly that it is not working. ` : '') +
@@ -302,6 +373,26 @@ function stopSteps(root, sid, s, inboxStep, eventSteps) {
   if (s.stackStale) steps.push(`update the Project stack (${s.stackStale}) using Faundr's "stack" skill and following its instructions`)
   steps.push(...s.triggered, ...eventSteps)
   if (s.stale) steps.push(`update the Project overview, which is out of date (${s.stale}), using Faundr's "overview" skill and following its instructions`)
+  return steps
+}
+
+/** Os passos que põem o quadro em dia com o trabalho feito. Títulos vêm do quadro do time: entre «». */
+export function boardSteps(s) {
+  const steps = []
+  if (s.board?.empty)
+    steps.push(
+      `the feature you are working on, ${teamQuote(s.board.empty.title)}, has no tasks on the board, so the team cannot see what was done or what is left (and it never shows as done): record each thing already done as a task and mark it (faundr task "<step>", then faundr done "<step>") and add what is still to do as tasks; if you followed a workflow for it, link it instead (faundr workflow link <W-n>) and its steps become the tasks. Only what is really done; if this session's work belongs to another feature, switch with faundr focus "<name>"`,
+    )
+  if (s.board?.offBoard?.length) {
+    const refs = s.board.offBoard.map((r) => String(r).replace(/[^\w-]/g, '')).filter(Boolean)
+    steps.push(
+      `this session finished workflow ${refs.join(', ')} and it is not on the Features board: if it was a piece of work the team should see, record it (faundr feature "<title>" --done-when "<how to tell it is done>", then faundr workflow link ${refs[0]}: its steps go in as done tasks); if it was only a routine check, do nothing`,
+    )
+  }
+  if (s.heldOpen)
+    steps.push(
+      `every Done when of ${teamQuote(s.heldOpen.title)} is met, but it stays in progress on the board because of open build tasks: ${s.heldOpen.open.map((t) => `${t.n}. ${teamQuote(t.title)}`).join('; ')}. Mark with faundr done <#> each one that is really done, remove with faundr task-remove <#> what no longer applies, and tell the user in one line what is really left`,
+    )
   return steps
 }
 
@@ -331,11 +422,13 @@ function finishedSteps(finished, on) {
       `before calling ${title} done, check the Done when agreed with the user: ${unchecked.map((c) => `${c.n}. ${teamQuote(c.text)}`).join(' ')}. For each one, really check it (run, open, test) and record it with faundr criteria-check <#> --met or --not-met --note "<how you checked>"; tell the user what was met and what was not`,
     )
   const next = finished.next[0]
+  // Sem tarefas, concluiu pelos critérios de pronto: não há checklist para anunciar.
+  const done = finished.feature.tasks?.length ? `the checklist of ${title} is finished` : `${title} is done (every Done when is met)`
   if (on('stop.next_step'))
     steps.push(
       next
-        ? `the checklist of ${title} is finished: tell the user, in 1 to 2 lines, that the next recorded stage is ${teamQuote(next.title)}${next.body ? ` (${teamQuote(next.body)})` : ''} and ask whether to go on with it (to start: faundr focus "<that stage's title>")`
-        : `the checklist of ${title} is finished and there is no next stage recorded: if this work continues (another phase, something left out on purpose), record each stage with faundr feature "<stage>" --after current --desc "<what goes in>" and tell the user which one is next; if not, say the feature is complete`,
+        ? `${done}: tell the user, in 1 to 2 lines, that the next recorded stage is ${teamQuote(next.title)}${next.body ? ` (${teamQuote(next.body)})` : ''} and ask whether to go on with it (to start: faundr focus "<that stage's title>")`
+        : `${done} and there is no next stage recorded: if this work continues (another phase, something left out on purpose), record each stage with faundr feature "<stage>" --after current --desc "<what goes in>" and tell the user which one is next; if not, say the feature is complete`,
     )
   return steps
 }
