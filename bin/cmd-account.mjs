@@ -165,8 +165,8 @@ const projectLabel = (p) => `"${p.name}"${p.org ? t(` (organization ${p.org})`, 
 // O histórico mora no painel, não na pasta: ligar só aponta a pasta para ele.
 const HISTORY_KEPT = () =>
   t(
-    "Everything the team already recorded in this project (features, tasks, rules, decisions, past sessions) stays in place and now applies here. Only this computer's local files (the code map) are rebuilt.",
-    'Tudo o que o time já registrou no projeto (funcionalidades, tarefas, regras, decisões, sessões anteriores) continua lá e passa a valer aqui. Só os arquivos locais deste computador (o mapa do código) são gerados de novo.',
+    "Everything the team already recorded in this project (features, tasks, rules, decisions, past sessions) stays in place and now applies here. This computer's code map is built on its own, in seconds, when you send Claude your first message.",
+    'Tudo o que o time já registrou no projeto (funcionalidades, tarefas, regras, decisões, sessões anteriores) continua lá e passa a valer aqui. O mapa do código deste computador é montado sozinho, em segundos, quando você manda a primeira mensagem para o Claude.',
   )
 
 // Depois do login, diz se a pasta atual já está ligada (o .faundr.json veio no clone), liga quando o nome da pasta
