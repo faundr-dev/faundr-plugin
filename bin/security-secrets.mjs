@@ -467,7 +467,7 @@ export function publicSecretValueFindings(root) {
 const definesVar = (text, index, name) => new RegExp(`^\\s*(export\\s+)?${name}\\s*=\\s*\\S`).test(lineText(text, index))
 
 // Chaves e variáveis públicas com segredo num arquivo do projeto.
-function secretsInFile(root, rel, tracked) {
+function secretsInFile(root, rel, tracked, knownOnly = false) {
   if (BINARY.test(rel) || LOCKFILES.test(rel)) return []
   if (isRuleDefinitionPath(rel)) return []
   const text = readText(root, rel)
@@ -477,6 +477,7 @@ function secretsInFile(root, rel, tracked) {
   // .env fora do git é o lugar certo da chave; o problema é ele ir para o git (checado em envFileFinding).
   const known = !env || tracked?.has(rel) ? findSecrets(text, rel) : []
   for (const s of known) out.push(secretFinding(rel, text, s))
+  if (knownOnly) return out
   // Formatos comuns (senha escrita, URL com usuário:senha…). No .env o achado é o arquivo inteiro (env-in-git).
   if (!env) for (const s of findCommonSecrets(text, rel, known)) out.push(commonSecretFinding(rel, text, s))
   for (const m of text.matchAll(PUBLIC_ENV)) {
@@ -533,7 +534,9 @@ function ignoredEnvFindings(root, files, envDir) {
   return out
 }
 
-export function scanSecrets(root, files, { tracked, envDir }) {
+/** `knownOnly`: só chaves em formato conhecido (pastas do .faundrignore), sem .env, senhas escritas nem nomes de variável. */
+export function scanSecrets(root, files, { tracked, envDir, knownOnly = false }) {
+  if (knownOnly) return files.flatMap((rel) => secretsInFile(root, rel, tracked, true))
   const out = files.flatMap((rel) => secretsInFile(root, rel, tracked))
   // .env que está (ou vai estar) no git.
   if (tracked)

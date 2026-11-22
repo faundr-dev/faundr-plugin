@@ -512,3 +512,22 @@ test('banco: update com using de "está logado" acusa mesmo com with check de do
   // O contrário (using de dono, with check fraco) não é este problema.
   assert.deepEqual(await db(`${NOTES}create policy "upd" on public.notes for update to authenticated using ((select auth.uid()) = user_id) with check (auth.uid() is not null);`), [])
 })
+
+test('.faundrignore: a pasta tirada do Faundr fica fora das regras, menos das chaves em formato conhecido', async () => {
+  const flaws = {
+    'supabase/migrations/0001.sql': 'create table public.notes (id uuid primary key, body text);\n',
+    'src/db.ts': `export const url = "postgresql://app:${PW}@db.acme.io:5432/app"\nconst key = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY\n`,
+  }
+  const inExamples = Object.fromEntries(Object.entries(flaws).map(([rel, text]) => [`evals/demo/project/${rel}`, text]))
+  const files = { ...flaws, ...inExamples, 'evals/demo/project/src/pay.ts': `export const STRIPE_SECRET_KEY = "sk_live_${KEY}${KEY}"\n` }
+
+  const without = await findingsOf(files)
+  assert.ok(without.some((f) => f.file?.startsWith('evals/demo/') && f.rule_id === 'url-with-credentials'), 'sem .faundrignore a pasta é checada')
+
+  const found = await findingsOf({ ...files, '.faundrignore': '# exemplos\nevals/demo\n' })
+  // Fora da pasta ignorada, tudo continua igual.
+  const outside = (list) => list.filter((f) => !f.file?.startsWith('evals/')).map((f) => `${f.rule_id}@${f.file}`).sort()
+  assert.deepEqual(outside(found), outside(without))
+  // Dentro dela, só a chave do Stripe (formato conhecido): nada de senha escrita, nome de variável nem banco.
+  assert.deepEqual(found.filter((f) => f.file?.startsWith('evals/')).map((f) => `${f.source}@${f.file}`), ['secret@evals/demo/project/src/pay.ts'])
+})

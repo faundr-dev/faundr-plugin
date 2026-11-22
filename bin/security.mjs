@@ -15,7 +15,7 @@ import path from 'node:path'
 import { LANG_LOCKFILE } from './lockfiles-langs.mjs'
 import { LANG_TECH, langDeps } from './stack-langs.mjs'
 import { LOCKFILE } from './lockfiles.mjs'
-import { allDeps } from './parts.mjs'
+import { allDeps, faundrIgnore, ignoredBy } from './parts.mjs'
 import { remoteDatabaseFindings } from './env-target.mjs'
 import { t } from './i18n.mjs'
 import { lower, hash, BINARY, LOCKFILES, projectFiles, readText, lineText, mask, TEST_PATH, EXAMPLE_PATH, DOC_PATH, isEnvFile, startReadLog, unreadFiles } from './security-base.mjs'
@@ -25,6 +25,18 @@ import { scanDependencies } from './security-deps.mjs'
 import { CODE_FILE, OTHER_CODE, SERVER_ROUTE, scanCode, maskSecretsIn } from './security-code.mjs'
 import { HEADER_FILES, scanConfig } from './security-config.mjs'
 export { projectFiles, mask, fileScoped, isEnvFile } from './security-base.mjs'
+
+/**
+ * Arquivos que a checagem olha: os do projeto menos o que o dono tirou do Faundr no .faundrignore (exemplos com
+ * falhas de propósito, código de terceiros copiado). `ignored` são os que ficaram de fora: neles só se procuram
+ * chaves em formato conhecido, porque uma chave de verdade vaza do mesmo jeito em qualquer pasta.
+ */
+export function scannedFiles(root) {
+  const { files, tracked } = projectFiles(root)
+  const skip = faundrIgnore(root)
+  if (!skip.length) return { files, ignored: [], tracked }
+  return { files: files.filter((f) => !ignoredBy(skip, f)), ignored: files.filter((f) => ignoredBy(skip, f)), tracked }
+}
 export { maskPayload, findSecrets, publicSecretValueFindings, guardContent } from './security-secrets.mjs'
 export { destructiveMigration, splitSql } from './security-database.mjs'
 export { compareVersions, cvss3 } from './security-deps.mjs'
@@ -68,6 +80,7 @@ export function scanHistory(root, { maxCommits = 3000, since = null } = {}) {
   }
   if (r.status !== 0) throw new Error(`git log failed: ${(r.stderr || r.error?.message || '').trim().slice(0, 200)}`)
   const current = new Set(projectFiles(root).files)
+  const skip = faundrIgnore(root)
   const seen = new Map()
   let commit = null
   let date = null
@@ -85,7 +98,8 @@ export function scanHistory(root, { maxCommits = 3000, since = null } = {}) {
     }
     // Senha, segredo, URL com usuário e senha e segredo de webhook escritos por extenso: a regra por provedor não os
     // conhece, e um .env que já foi para o git é exatamente onde eles moram.
-    for (const s of findCommonSecrets(text, file, known)) {
+    // Pasta tirada do Faundr no .faundrignore (exemplos): só as chaves em formato conhecido.
+    for (const s of ignoredBy(skip, file) ? [] : findCommonSecrets(text, file, known)) {
       if (seen.has(s.secret)) continue
       seen.set(s.secret, { ...s, common: true, confidence: 'medium', commit, date, file, line: lineText(text, s.index) })
     }
@@ -222,7 +236,7 @@ const TOPICS = [
 
 /** O que a revisão com IA precisa saber para começar: stack, onde estão as portas de entrada e que temas ler. */
 export function projectMap(root) {
-  const { files } = projectFiles(root)
+  const { files } = scannedFiles(root)
   const deps = { ...pythonDeps(root, files), ...allDeps(root) }
   const langFrameworks = [...langDeps(root, files).keys()].map((k) => LANG_TECH[k]).filter((t) => t?.[1] === 'framework').map((t) => t[0])
   // Linguagem sem framework conhecido também puxa o tema dela (PHP puro, Dart, Go, Rust, C/C++…).
@@ -261,7 +275,7 @@ export function projectMap(root) {
 
 /** Arquivos que a revisão com IA lê: código, migrações e regras de banco; sem testes nem tipos gerados. */
 export function reviewFiles(root) {
-  return projectFiles(root)
+  return scannedFiles(root)
     .files.filter((f) => (CODE_FILE.test(f) || OTHER_CODE.test(f) || /\.(sql|rules)$/i.test(f)) && !TEST_PATH.test(f) && !/\.d\.ts$/.test(f))
     .sort()
 }
@@ -274,7 +288,7 @@ const bare = (raw) => sqlName(raw).replace(/^public\./, '')
  * definer", políticas por tabela, gatilhos e buckets. É o mapa de onde a revisão com IA precisa olhar; quem
  * decide se está certo é ela.
  */
-export function databaseInventory(root, files = projectFiles(root).files) {
+export function databaseInventory(root, files = scannedFiles(root).files) {
   const definers = new Map() // função → onde
   const policies = new Map() // tabela → Map(política → { command, where })
   const triggers = new Map() // "gatilho on tabela" → onde
@@ -357,11 +371,12 @@ export async function scanProject(root, { only = null, deps = true, history = fa
   const started = Date.now()
   const readAt = new Date(started).toISOString()
   startReadLog()
-  const { files: all, tracked } = projectFiles(root)
+  const { files: all, ignored, tracked } = scannedFiles(root)
   const files = only ? all.filter((f) => only.includes(f)) : all
+  const ignoredHere = only ? ignored.filter((f) => only.includes(f)) : ignored
   // Os escopos de chave e de código (por arquivo) fecham no fim, quando se sabe o que não deu para ler.
   const scopes = []
-  const secrets = scanSecrets(root, files, { tracked, envDir: only ? null : root })
+  const secrets = [...scanSecrets(root, files, { tracked, envDir: only ? null : root }), ...scanSecrets(root, ignoredHere, { tracked, knownOnly: true })]
     // Variável pública com segredo num .env que não está no git: é do computador desta pessoa.
     .map((f) => (f.rule_id === 'public-env-secret' && f.file && isEnvFile(f.file) && !tracked?.has(f.file) ? { ...f, local: true } : f))
   const findings = [...secrets, ...scanCode(root, files)]
