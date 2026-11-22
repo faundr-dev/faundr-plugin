@@ -84,14 +84,18 @@ const COMMON_SECRETS = [
   [/\b(AKIA|ASIA)[0-9A-Z]{16}\b/g, '$1***'],
   [/\b(sk-ant-|sk-proj-|sk-|sk_live_|sk_test_|rk_live_|pk_live_|ghp_|gho_|ghs_|ghu_|github_pat_|glpat-|xox[abprs]-|AIza|SG\.|sbp_|sb_secret_)[A-Za-z0-9_\-.]{12,}/g, '$1***'],
   [/\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, 'eyJ***'],
-  [/\b([a-z][a-z0-9+.-]*:\/\/[^:\/\s@]+:)[^@\s\/]{3,}@/gi, '$1***@'],
-  [/\b((?:password|passwd|senha|secret|api[_-]?key|access[_-]?token|auth[_-]?token|private[_-]?key|client[_-]?secret)["']?\s*[:=]\s*["']?)[^\s"',;&]{6,}/gi, '$1***'],
+  // Daqui para baixo todo quantificador do começo do padrão tem limite, e o esquema da URL começa ancorado
+  // (lookbehind): sem isso um texto grande e repetitivo ("a.a.a.…", "key_key_…") faz a regex recomeçar em cada
+  // posição e a máscara leva dezenas de segundos (o texto vem de fora: saída de comando, arquivo lido).
+  [/(?<![a-z0-9+.-])([a-z][a-z0-9+.-]{0,30}:\/\/[^:\/\s@]{1,256}:)[^@\s\/]{3,512}@/gi, '$1***@'],
+  [/\b((?:password|passwd|senha|secret|api[_-]?key|access[_-]?token|auth[_-]?token|private[_-]?key|client[_-]?secret)["']?\s{0,40}[:=]\s{0,40}["']?)[^\s"',;&]{6,}/gi, '$1***'],
   // Variável de ambiente com o nome no meio de outro (PGPASSWORD=, export DB_PASSWORD=, STRIPE_SECRET_KEY=,
-  // SUPABASE_ACCESS_TOKEN=): o `\b` da regra acima não casa depois de letra ou `_`.
-  [/(?<![A-Za-z0-9_])([A-Za-z0-9_]*(?:password|passwd|secret|token|_key|key_|_pwd|pwd_)[A-Za-z0-9_]*\s*=\s*["']?)[^\s"',;&]{4,}/gi, '$1***'],
-  [/(?<![A-Za-z0-9_])([A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|_KEY|KEY_|_PWD|PWD_)[A-Z0-9_]*\s*:\s*["']?)[^\s"',;&]{4,}/g, '$1***'],
+  // SUPABASE_ACCESS_TOKEN=): o `\b` da regra acima não casa depois de letra ou `_`. O começo do nome não entra
+  // no padrão (ele continua no texto como está); só o que vem da palavra em diante.
+  [/((?:password|passwd|secret|token|_key|key_|_pwd|pwd_)[A-Za-z0-9_]{0,64}\s{0,40}=\s{0,40}["']?)[^\s"',;&]{4,}/gi, '$1***'],
+  [/(?<![A-Za-z0-9_])([A-Z0-9_]{0,64}(?:PASSWORD|PASSWD|SECRET|TOKEN|_KEY|KEY_|_PWD|PWD_)[A-Z0-9_]{0,64}\s{0,40}:\s{0,40}["']?)[^\s"',;&]{4,}/g, '$1***'],
   // Senha colada no -p do mysql/mariadb (mysql -u root -pSenha).
-  [/(\b(?:mysql|mysqldump|mysqladmin|mariadb)\b[^\n|;&]*?\s-p)(?=[^\s-])\S+/g, '$1***'],
+  [/(\b(?:mysql|mysqldump|mysqladmin|mariadb)\b[^\n|;&]{0,300}?\s-p)(?=[^\s-])\S+/g, '$1***'],
 ]
 export function maskPayload(value) {
   if (typeof value === 'string') {
@@ -189,6 +193,196 @@ function secretFinding(rel, text, s) {
     file: rel,
     line: lineOf(text, s.index),
     snippet: lineText(text, s.index).replace(s.secret, masked).trim().slice(0, 240),
+    // Chave privada de várias linhas: o mesmo arquivo com CRLF (Git do Windows) e com LF é a mesma chave.
+    fingerprint: `secret|${s.ruleId}|${rel}|${hash(s.ruleId.startsWith('private-key') ? s.secret.replace(/\r\n/g, '\n') : s.secret)}`,
+  }
+}
+
+// ---- senhas e segredos em formato comum (sem prefixo de provedor) ------------------------------
+//
+// As regras por provedor acima só pegam chave com "cara" conhecida (sk_live_, ghp_…). Aqui entram os formatos que
+// qualquer projeto usa: senha escrita (`password = "…"`, `DB_PASSWORD=…`, `password:` em YAML/JSON), URL com
+// usuário:senha, `mysql -pSenha`, `Authorization: Bearer …` e o segredo de webhook do Stripe (whsec_…).
+// Para não trocar falso negativo por alarme falso, o valor precisa ter jeito de segredo (tamanho, variedade de
+// caracteres) e o nome não pode ser de tela, tipo, tradução ou configuração (passwordLabel, TOKEN_URL…).
+
+/** Arquivos que só definem regras de segurança (os do próprio Faundr): o texto das regras casa com as regras. */
+export const isRuleDefinitionPath = (rel) => /(^|\/)(?:engine|plugin\/dist)\/secret-rules\.mjs$|(^|\/)plugin\/bin\/security(?:-[\w-]+)?\.mjs$/.test(rel)
+
+// Traduções e textos de interface: "password": "Senha" não é segredo.
+const LOCALE_PATH = /(^|\/)(locales?|i18n|l10n|lang|langs|languages?|translations?|messages)(\/|\.)|(^|\/)[a-z]{2}([-_][A-Za-z]{2})?\.(json|ya?ml|po)$/
+// Onde "NOME=valor" e "nome: valor" sem aspas são configuração (em código, sem aspas é sempre leitura de variável).
+const UNQUOTED_ENV = /\.(sh|bash|zsh|fish|ps1|bat|cmd|ya?ml|properties|ini|conf|cfg|tfvars|service)$|(^|\/)(Makefile|Procfile|Jenkinsfile)$/i
+const YAML_FILE = /\.ya?ml$/i
+const DOCKER_FILE = /(^|\/)(Dockerfile[\w.-]*|[\w.-]+\.dockerfile)$/i
+
+// Palavras do nome que fazem dele um segredo, e as que mostram que ele é outra coisa (rótulo, limite, endereço…).
+const PASSWORD_WORD = /^(?:\w*password|\w*passwd|pwd|pass|senha|\w*senha)$/
+const SECRET_WORD = /^(?:\w*secret|\w*token|\w*apikey|credentials?)$/
+const NOT_SECRET_WORDS = new Set(
+  (
+    'label placeholder hint title message msg error errors text field fields input name names type types regex regexp pattern rule rules policy min max len length ' +
+    'strength required valid invalid mismatch url uri link path route page endpoint param params header headers prefix suffix format column col attr prop props ' +
+    'selector file filename dir desc description help tooltip expiry expires expiration expire ttl timeout age rounds cost algo algorithm alg issuer audience ' +
+    'enabled disabled visible show hide toggle icon class style ref existing env var id ids count size schema table public publishable anon example sample ' +
+    'test mock fake dummy hash hashed salt reset forgot confirm confirmation change update new old current previous strategy mode kind scope store storage ' +
+    'cookie tokenizer limit limits budget usage cache prompt prompts step steps state status event events handler callback button form modal view screen'
+  ).split(' '),
+)
+
+function nameKind(name) {
+  const words = name.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
+  if (!words.length || words.some((w) => NOT_SECRET_WORDS.has(w))) return null
+  // TOKEN_KEY, passwordKey: o nome da chave onde o valor fica guardado (localStorage, cookie), não o valor.
+  if (words.at(-1) === 'key' && /token$|password$|senha$/.test(words.at(-2) ?? '')) return null
+  if (words.some((w) => PASSWORD_WORD.test(w))) return 'password'
+  if (words.some((w) => SECRET_WORD.test(w))) return 'secret'
+  // api_key, apiKey, private_key, access_key (a palavra "key" sozinha é ampla demais).
+  if (words.some((w, i) => w === 'key' && /^(api|private|secret|access|auth|signing|encryption|master)$/.test(words[i - 1] ?? ''))) return 'secret'
+  return null
+}
+
+// Valores que todo mundo usa de exemplo, e valores que são uma referência (variável, argumento), não o segredo.
+const WEAK_VALUE = /^(?:pass(?:word|wd)?\d{0,3}|senha\d{0,3}|secret\d{0,3}|admin\d{0,3}|root|toor|postgres|mysql|mariadb|user(?:name)?|guest|default|qwerty\w*|letmein|abc123|foo|bar|baz|test\w*|demo\w*|todo|tbd|null|none|nil|undefined|true|false|string|value|token|key|apikey|api[-_]key|supersecret|mysecret|my[-_]\w+|your\w*|seu[-_]\w+|sua[-_]\w+|insert\w*|replace\w*|enter\w*|put[-_]\w+|\w*[-_]here|aqui|development|dev|local|localhost|docker|supabase|minioadmin|rabbitmq|redis)$/i
+const REFERENCE_VALUE = /^(?:process\.env|import\.meta|os\.environ|env[.[(]|ENV\[|getenv|System\.getenv|secrets?\.|vars?\.|config\.|settings\.)|\$\{|\$\(|\{\{|\}\}|^\$[A-Za-z_]|%[sdv]\b|^%\w+%$|<[^>]*>|\(.*\)|`|^#\{/
+const NOT_A_VALUE = /^https?:\/\/[^@]*$|^[./~]|^[A-Za-z]:[\\/]|\.(?:pem|key|crt|cer|json|ya?ml|txt|env|p12|pfx|jks)$/i
+
+/** O valor tem jeito de senha ou chave de verdade? `kind`: password | secret | bearer | url. */
+function plausibleSecret(value, kind, name = '') {
+  if (PLACEHOLDER.test(value) || WEAK_VALUE.test(value) || REFERENCE_VALUE.test(value) || NOT_A_VALUE.test(value)) return false
+  if (/\s/.test(value) || /^(pk_(live|test)_|sb_publishable_)/.test(value)) return false
+  const plain = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
+  if (name && (plain(value) === plain(name) || plain(name).endsWith(plain(value)))) return false
+  // Uma palavra só ("Senha", "Passwort", "obrigatorio") ou um caminho de palavras (auth.password.label,
+  // current-password): texto de interface, chave de tradução, nome de campo.
+  if (/^[\p{L}]+$/u.test(value) && value.length < 16) return false
+  if (/^[a-z]+(?:[._:/-][a-z]+)+$/i.test(value)) return false
+  const min = { password: [6, 2], url: [6, 2], secret: [12, 3], bearer: [20, 3.5] }[kind]
+  if (value.length < min[0] || entropy(value) < min[1]) return false
+  if (kind !== 'password' && kind !== 'url' && /^\d+$/.test(value)) return false
+  return true
+}
+
+const QUOTED_ASSIGN = /["']?(?<![A-Za-z0-9_$-])([A-Za-z_][A-Za-z0-9_-]{0,60})["']?\s{0,20}(?:=>|:=|={1,3}|:)\s{0,20}(["'`])([^"'`\n]{4,200})\2/g
+const ENV_ASSIGN = /^[ \t]*(?:export[ \t]+|set[ \t]+|-[ \t]+)?([A-Za-z_][A-Za-z0-9_.-]{0,80})[ \t]{0,4}=[ \t]{0,4}([^\s"'#`]{4,200})[ \t\r]*(?:#.*)?$/
+const YAML_ASSIGN = /^[ \t-]*([A-Za-z_][A-Za-z0-9_.-]{0,60})[ \t]{0,4}:[ \t]{1,8}([^\s"'#]{4,200})[ \t\r]*(?:#.*)?$/
+const URL_CREDENTIALS = /(?<![a-z0-9+.-])([a-z][a-z0-9+.-]{1,20}):\/\/([^\s:/@'"`<>]{0,64}):([^\s@/'"`<>]{3,128})@([\w.-]{1,255})/gi
+const WEBHOOK_SECRET = /(?<![A-Za-z0-9_])whsec_[A-Za-z0-9+/=]{24,200}/g
+const BEARER = /\bAuthorization["']?\s{0,4}[:=,]\s{0,4}["'`]?\s{0,2}Bearer\s{1,3}([A-Za-z0-9._~+/=-]{20,500})/gi
+const MYSQL_PASSWORD = /\b(?:mysql|mysqldump|mysqladmin|mariadb)\b[^\n|;&]{0,300}?\s(?:-p|--password=)(?=[^\s-])([^\s"'|;&]{3,100})/g
+const LOCAL_HOST = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|host\.docker\.internal|db|database|postgres|mysql|mongo|redis)$/i
+
+/**
+ * Senhas e segredos em formato comum. Devolve [{ ruleId, secret, index, name }].
+ * `known`: o que as regras por provedor já acharam neste texto (para não repetir o mesmo valor).
+ */
+export function findCommonSecrets(text, rel = '', known = []) {
+  const out = []
+  const seen = new Set()
+  const add = (ruleId, secret, index, name = null) => {
+    if (seen.has(secret) || known.some((k) => k.secret.includes(secret) || secret.includes(k.secret))) return
+    seen.add(secret)
+    out.push({ ruleId, secret, index, name })
+  }
+  // Exemplo, teste e documentação: valor de mentira (os de gravidade alta passam e o filtro de ruído rebaixa).
+  const sample = EXAMPLE_PATH.test(rel) || TEST_PATH.test(rel) || DOC_PATH.test(rel)
+  // No Dockerfile a regra docker-secret-in-image já cobre ENV/ARG.
+  const generic = !sample && !LOCALE_PATH.test(rel) && !DOCKER_FILE.test(rel)
+  const unquoted = UNQUOTED_ENV.test(rel)
+  let offset = 0
+  for (const line of text.split('\n')) {
+    const start = offset
+    offset += line.length + 1
+    if (line.length > 5000 || !/[:=@_-]/.test(line)) continue
+    for (const m of line.matchAll(WEBHOOK_SECRET)) if (!PLACEHOLDER.test(m[0]) && entropy(m[0]) >= 3) add('stripe-webhook-secret', m[0], start + m.index)
+    for (const m of line.matchAll(URL_CREDENTIALS)) {
+      if (LOCAL_HOST.test(m[4]) || !plausibleSecret(m[3], 'url') || /^(user(name)?|usuario)$/i.test(m[2]) && m[3].length < 12) continue
+      add('url-with-credentials', m[3], start + m.index + m[0].indexOf(`:${m[3]}@`) + 1)
+    }
+    if (!generic) continue
+    for (const m of line.matchAll(BEARER)) if (plausibleSecret(m[1], 'bearer')) add('hardcoded-bearer-token', m[1], start + m.index + m[0].lastIndexOf(m[1]))
+    for (const m of line.matchAll(MYSQL_PASSWORD)) if (plausibleSecret(m[1], 'password')) add('hardcoded-password', m[1], start + m.index + m[0].lastIndexOf(m[1]), 'mysql -p')
+    const assign = (name, value, at) => {
+      const kind = nameKind(name)
+      if (kind && plausibleSecret(value, kind, name)) add(kind === 'password' ? 'hardcoded-password' : 'hardcoded-secret', value, start + at, name)
+    }
+    for (const m of line.matchAll(QUOTED_ASSIGN)) assign(m[1], m[3], m.index + m[0].lastIndexOf(m[3]))
+    if (unquoted) {
+      const m = line.match(ENV_ASSIGN) ?? (YAML_FILE.test(rel) ? line.match(YAML_ASSIGN) : null)
+      if (m) assign(m[1], m[2], m.index + m[0].lastIndexOf(m[2]))
+    }
+  }
+  return out
+}
+
+/** Mostra só o começo do valor: segredo de até 20 caracteres nunca mostra mais de 4. */
+export function maskShort(secret) {
+  if (secret.length <= 8) return `${secret.slice(0, 1)}…`
+  if (secret.length <= 20) return `${secret.slice(0, 3)}…`
+  return `${secret.slice(0, 4)}…${secret.slice(-2)}`
+}
+
+const COMMON_TEXT = {
+  'url-with-credentials': {
+    severity: 'high',
+    title: ['Address with user and password written in the code', 'Endereço com usuário e senha escrito no código'],
+    what: ['an address (URL) that carries the user and the password inside it', 'um endereço (URL) que leva o usuário e a senha dentro dele'],
+    fix: ['the database or the service this address points to', 'no banco ou no serviço para onde esse endereço aponta'],
+  },
+  'stripe-webhook-secret': {
+    severity: 'high',
+    title: ['Stripe webhook secret in the code', 'Segredo do webhook do Stripe no código'],
+    what: ['the Stripe webhook signing secret (whsec_…)', 'o segredo de assinatura do webhook do Stripe (whsec_…)'],
+    fix: ['Stripe (Developers → Webhooks → roll the secret)', 'no Stripe (Developers → Webhooks → gerar novo segredo)'],
+  },
+  'hardcoded-password': {
+    severity: 'medium',
+    title: ['Password written in the code', 'Senha escrita no código'],
+    what: ['a password written out', 'uma senha escrita por extenso'],
+    fix: ['the service that uses this password', 'no serviço que usa essa senha'],
+  },
+  'hardcoded-secret': {
+    severity: 'medium',
+    title: ['Secret or key written in the code', 'Segredo ou chave escrita no código'],
+    what: ['a secret, token or API key written out', 'um segredo, token ou chave de API escrito por extenso'],
+    fix: ['the service that issued it', 'no serviço que emitiu esse valor'],
+  },
+  'hardcoded-bearer-token': {
+    severity: 'medium',
+    title: ['Access token written in an Authorization header', 'Token de acesso escrito num cabeçalho Authorization'],
+    what: ['an access token written straight into "Authorization: Bearer …"', 'um token de acesso escrito direto em "Authorization: Bearer …"'],
+    fix: ['the service that issued the token', 'no serviço que emitiu o token'],
+  },
+}
+
+function commonSecretFinding(rel, text, s) {
+  const c = COMMON_TEXT[s.ruleId]
+  const masked = maskShort(s.secret)
+  const named = s.name ? t(` (${s.name})`, ` (${s.name})`) : ''
+  return {
+    source: 'secret',
+    rule_id: s.ruleId,
+    severity: c.severity,
+    confidence: 'medium',
+    title: t(c.title[0], c.title[1]),
+    detail: t(`I found ${c.what[0]}${named} in the file: ${masked}.`, `Encontrei ${c.what[1]}${named} no arquivo: ${masked}.`),
+    impact:
+      s.ruleId === 'stripe-webhook-secret'
+        ? t(
+            'With this secret anyone can forge Stripe notices that your site accepts as real: mark a payment as done, unlock a plan without paying.',
+            'Com esse segredo qualquer pessoa monta avisos do Stripe que o seu site aceita como verdadeiros: marcar pagamento como feito, liberar plano sem pagar.',
+          )
+        : t(
+            'Anyone with access to the code (or to a copy of the repository) can use this value to get into the service as you.',
+            'Quem tiver acesso ao código (ou a uma cópia do repositório) pode usar esse valor para entrar no serviço em seu nome.',
+          ),
+    fix: t(
+      `1. Take the value out of the file: put it in .env (which does not go to git) and read it from the environment variable. 2. Replace it on ${c.fix[0]}: it may already have leaked. 3. If the file already went to git, the old value stays in the history; that is why step 2 is required.`,
+      `1. Tire o valor do arquivo: coloque-o no .env (que não vai para o git) e leia da variável de ambiente. 2. Troque-o ${c.fix[1]}: ele já pode ter vazado. 3. Se o arquivo já foi para o git, o valor antigo continua no histórico; por isso o passo 2 é obrigatório.`,
+    ),
+    file: rel,
+    line: lineOf(text, s.index),
+    snippet: lineText(text, s.index).replaceAll(s.secret, masked).trim().slice(0, 240),
     fingerprint: `secret|${s.ruleId}|${rel}|${hash(s.secret)}`,
   }
 }
@@ -270,12 +464,16 @@ const definesVar = (text, index, name) => new RegExp(`^\\s*(export\\s+)?${name}\
 // Chaves e variáveis públicas com segredo num arquivo do projeto.
 function secretsInFile(root, rel, tracked) {
   if (BINARY.test(rel) || LOCKFILES.test(rel)) return []
+  if (isRuleDefinitionPath(rel)) return []
   const text = readText(root, rel)
   if (!text || text.startsWith('// Gerado por engine/secret-rules.mjs')) return []
   const out = []
   const env = isEnvFile(rel)
   // .env fora do git é o lugar certo da chave; o problema é ele ir para o git (checado em envFileFinding).
-  if (!env || tracked?.has(rel)) for (const s of findSecrets(text, rel)) out.push(secretFinding(rel, text, s))
+  const known = !env || tracked?.has(rel) ? findSecrets(text, rel) : []
+  for (const s of known) out.push(secretFinding(rel, text, s))
+  // Formatos comuns (senha escrita, URL com usuário:senha…). No .env o achado é o arquivo inteiro (env-in-git).
+  if (!env) for (const s of findCommonSecrets(text, rel, known)) out.push(commonSecretFinding(rel, text, s))
   for (const m of text.matchAll(PUBLIC_ENV)) {
     // Em código, só quando a variável é lida (process.env.X / import.meta.env.X); em .env, quando é definida.
     const before = text.slice(Math.max(0, m.index - 16), m.index)

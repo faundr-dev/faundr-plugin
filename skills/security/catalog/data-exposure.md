@@ -1,5 +1,5 @@
 # Data and exposure
-When to read: always, in a quick pass. Especially if there is custom error handling, logs, debug/test routes, deploy configuration (`vercel.json`, `netlify.toml`, `wrangler.toml`/`wrangler.jsonc`, `next.config.*`, `_headers`, `nginx.conf`), custom cookies or API responses that return database records.
+When to read: always. Especially if there is custom error handling, logs, debug/test routes, deploy configuration (`vercel.json`, `netlify.toml`, `wrangler.toml`/`wrangler.jsonc`, `next.config.*`, `_headers`, `nginx.conf`), custom cookies or API responses that return database records.
 
 Calibration: missing headers, version in a header and source maps are, on their own, low. Don't paint them high without a concrete path to restricted data. A response that returns another user's data or a password hash, on the other hand, is high or critical.
 

@@ -457,10 +457,309 @@ function authorInsertFindings(tables) {
   return out
 }
 
-// Um comando SQL: atualiza o mapa de tabelas (criada, RLS ligado, apagada) ou devolve um achado (null se nenhum).
-function databaseStatement(stmt, rel, tables, fns) {
+// ---- o estado final depois de todas as migrações -------------------------------------------------
+//
+// Política só com "está logado", leitura liberada em tabela com dado pessoal, view sem security_invoker,
+// permissão de escrita para o visitante e função security definer aberta sem conferir quem chama: nada disso se
+// decide num comando só, porque uma migração posterior pode desfazer (drop policy, revoke, alter view, drop).
+
+const newState = () => ({
+  immediate: new Map(), // achados de um comando só (por impressão digital), até uma migração desfazer
+  views: new Map(), // public.nome → { file, line, invoker, body }
+  access: new Map(), // tabela ou view → permissões escritas nas migrações, por papel
+  schema: { anon: new Set(), authenticated: new Set(), service_role: new Set(), at: null }, // "on all tables in schema public"
+  defaults: { anon: true, authenticated: true }, // quem pode chamar uma função recém-criada
+})
+
+const invokerOn = (options) => /security_invoker(?! ?= ?(?:false|off|0)\b)/i.test(options)
+
+const ROLES = ['anon', 'authenticated', 'service_role']
+const WRITE = ['insert', 'update', 'delete', 'truncate']
+
+function accessOf(state, name) {
+  if (!state.access.has(name))
+    state.access.set(name, { anon: new Set(), authenticated: new Set(), service_role: new Set(), selectCols: { anon: null, authenticated: null }, at: null })
+  return state.access.get(name)
+}
+
+// grant/revoke em tabelas e views: guarda o que cada papel recebeu por escrito (o Supabase já dá tudo por padrão;
+// aqui interessa o que a migração escreveu) e as colunas de leitura quando a permissão é por coluna.
+function trackGrants(s, state, where) {
+  const m = s.match(/^(grant|revoke) (?:grant option for )?(.+?) on (?:table )?(.+?) (?:to|from) ([\w", ]+?)(?: with grant option| cascade| restrict| granted by \w+)*$/i)
+  if (!m || /^(?:all )?(?:function|functions|routine|procedure|schema|sequence|sequences|type|domain|database|language|foreign|large|parameter|tablespace)\b/i.test(m[3])) return
+  const grant = m[1].toLowerCase() === 'grant'
+  const roles = m[4].toLowerCase().replace(/"/g, '').split(',').map((r) => r.trim())
+  // "select (a, b), update" → [{ priv: 'select', cols: ['a', 'b'] }, { priv: 'update' }]
+  const privs = splitTop(m[2]).map((x) => {
+    const p = x.match(/^(\w+)(?: privileges)?(?: ?\(([^)]*)\))?$/i)
+    return p ? { priv: p[1].toLowerCase(), cols: p[2]?.split(',').map((c) => c.trim().replace(/"/g, '').toLowerCase()) ?? null } : null
+  })
+  if (privs.some((x) => !x)) return
+  const all = m[3].match(/^all tables in schema ([\w", ]+)$/i)
+  if (all && !/\bpublic\b/i.test(all[1])) return
+  const targets = all ? [state.schema] : m[3].split(',').map((raw) => tableName(raw.trim())).filter((t) => t.schema === 'public').map((t) => accessOf(state, t.name))
+  for (const acc of targets)
+    for (const role of ROLES) {
+      if (!roles.includes(role)) continue
+      for (const { priv, cols } of privs) {
+        if (grant) {
+          acc[role].add(priv)
+          if (role === 'anon' && (priv === 'all' || WRITE.includes(priv))) acc.at = where
+        } else if (priv === 'all') acc[role].clear()
+        else {
+          acc[role].delete(priv)
+          // Tirar uma permissão de quem tinha "all" deixa as outras.
+          if (acc[role].delete('all')) for (const other of ['select', ...WRITE]) if (other !== priv) acc[role].add(other)
+        }
+        if (acc.selectCols && role !== 'service_role' && (priv === 'select' || priv === 'all')) {
+          if (!grant) acc.selectCols[role] = new Set()
+          else if (cols && acc.selectCols[role]) for (const c of cols) acc.selectCols[role].add(c)
+          else if (!cols) acc.selectCols[role] = null
+        }
+      }
+    }
+}
+
+// O corpo da função (entre $tag$ … $tag$), ou o que vem depois do "as" quando não há.
+function functionBody(s) {
+  const tag = s.match(/\bas (\$\w*\$)/i)?.[1]
+  if (!tag) return s.replace(/^.*?\b(?:as|return|begin atomic)\b/i, '')
+  const start = s.indexOf(tag) + tag.length
+  const end = s.indexOf(tag, start)
+  return s.slice(start, end === -1 ? undefined : end)
+}
+
+// O corpo confere quem está chamando: auth.uid()/auth.role()/auth.jwt(), o usuário da sessão, ou uma função de
+// permissão ou de "quem sou eu" do próprio projeto (is_admin(…), has_role(…), org_role(…), my_email(…)).
+const CALLER_CHECK =
+  /\bauth ?\. ?(?:uid|role|jwt|email) ?\(|current_setting ?\( ?'(?:request\.|role)|\b(?:current_user|session_user|current_role)\b|(?<![\w.])(?<!\b(?:into|from|join|update|table|only) )(?:\w+\.)?(?:(?:is|has|can|check|assert|require|ensure|verify|my|current|caller|auth|jwt)_\w+|\w*(?:role|member|admin|owner|permission|allowed|authoriz)\w*) ?\(/i
+
+function openDefinerFinding(fn) {
+  const who = fn.anon ? t('anyone, even without logging in', 'qualquer pessoa, mesmo sem login') : t('any logged-in user', 'qualquer usuário logado')
+  return {
+    source: 'database',
+    rule_id: 'definer-open-without-caller-check',
+    severity: fn.anon ? 'high' : 'medium',
+    confidence: 'medium',
+    title: t(`Function ${fn.name} runs with full power and ${who} can call it`, `Função ${fn.name} roda com poder total e ${who} pode chamá-la`),
+    detail: t(
+      `The function ${fn.name} is "security definer" (it bypasses the access rules of the tables), it is in the public schema (callable from the browser with supabase.rpc) and its body never checks who is calling (no auth.uid(), no role check). No migration takes the permission away (revoke execute … from public, anon, authenticated).`,
+      `A função ${fn.name} é "security definer" (ignora as regras de acesso das tabelas), fica no schema public (dá para chamar do navegador com supabase.rpc) e o corpo dela não confere quem está chamando (sem auth.uid(), sem conferência de papel). Nenhuma migração tira a permissão (revoke execute … from public, anon, authenticated).`,
+    ),
+    impact: t(
+      `${fn.anon ? 'Anyone with the public key of the app' : 'Any logged-in account'} calls the function directly, with the arguments they want, and does what it does on any row: the RLS of the tables does not apply inside it.`,
+      `${fn.anon ? 'Qualquer pessoa com a chave pública do app' : 'Qualquer conta logada'} chama a função direto, com os argumentos que quiser, e faz o que ela faz em qualquer linha: a RLS das tabelas não vale dentro dela.`,
+    ),
+    fix: t(
+      `In a new migration: if only the server (service_role, triggers, cron) uses it, "revoke execute on function public.${fn.name} from public, anon, authenticated"; if the app calls it, start the body by checking the caller (if (select auth.uid()) is null then raise exception …, and compare with the owner of the row).`,
+      `Numa nova migration: se só o servidor (service_role, gatilhos, cron) usa, "revoke execute on function public.${fn.name} from public, anon, authenticated"; se o app chama, comece o corpo conferindo quem chama (if (select auth.uid()) is null then raise exception …, e compare com o dono da linha).`,
+    ),
+    file: fn.file,
+    line: fn.line,
+    snippet: fn.snippet,
+    fingerprint: `database|definer-open-without-caller-check|${fn.name}`,
+  }
+}
+
+// Coluna com dado pessoal ou segredo (o que não pode ficar legível para todo mundo).
+const PERSONAL_COL =
+  /^(?:e_?mail|\w+_e?mail|e?mail_\w+|phone\w*|\w+_phone|telefone|celular|whatsapp|cpf|cnpj|ssn|tax_id|document_number|(?:\w+_)?address(?:_\w+)?|endereco|cep|zip_?code|postal_code|birth\w*|date_of_birth|dob|nascimento|(?:\w+_)?token(?:_hash)?|\w*password\w*|senha\w*|(?:\w+_)?secret(?:_\w+)?|\w*api_key\w*|stripe_\w+|ip|ip_address|\w+_ip|card_\w+|iban)$/
+
+// A condição da política: 'true' (sempre), 'logged' (só confere que há alguém logado) ou null (confere algo mais).
+function weakCondition(expr) {
+  const e = expr.toLowerCase().replace(/::\w+/g, '').replace(/[\s()]/g, '')
+  if (e === 'true' || e === '1=1') return 'true'
+  if (/^(?:select)?auth\.uid(?:isnotnull|<>null|!=null)$/.test(e)) return 'logged'
+  if (/^(?:select)?auth\.role='authenticated'$|^'authenticated'=(?:select)?auth\.role$|^(?:select)?auth\.jwt->>'role'='authenticated'$/.test(e)) return 'logged'
+  return null
+}
+
+function policyParts(rest) {
+  return {
+    cmd: (rest.match(/ for (all|select|insert|update|delete)\b/i)?.[1] ?? 'all').toLowerCase(),
+    roles: rest.match(/ to ([\w", ]+?)(?: using| with check|$)/i)?.[1]?.toLowerCase() ?? 'public',
+    using: rest.match(/ using (\(.*?\))(?= with check |$)/i)?.[1] ?? null,
+    check: rest.match(/ with check (\(.*\))$/i)?.[1] ?? null,
+    restrictive: / as restrictive\b/i.test(rest),
+  }
+}
+
+// As colunas pessoais que o papel consegue ler (todas, se a permissão de leitura não é por coluna).
+function readablePersonal(tbl, acc, roles) {
+  const personal = [...tbl.cols].filter((c) => PERSONAL_COL.test(c))
+  const who = [/anon|public/.test(roles) ? 'anon' : null, /authenticated|public/.test(roles) ? 'authenticated' : null].filter(Boolean)
+  return personal.filter((c) => who.some((role) => !acc?.selectCols[role] || acc.selectCols[role].has(c)))
+}
+
+function policyStateFindings(tables, state) {
+  const out = []
+  for (const [name, tbl] of tables) {
+    // Sem RLS as políticas nem valem (o achado é rls-disabled).
+    if (!tbl.rls) continue
+    for (const [policy, p] of tbl.policies) {
+      const { cmd, roles, using, check, restrictive } = policyParts(p.rest)
+      if (restrictive || /service_role|postgres|supabase_admin/.test(roles)) continue
+      const anyone = /anon|public/.test(roles)
+      const base = { source: 'database', file: p.file, line: p.line, snippet: `create policy "${policy}" on public.${name}${p.rest}`.slice(0, 240) }
+
+      // Leitura liberada para todos numa tabela com dado pessoal.
+      if (cmd === 'select' && using && weakCondition(using)) {
+        const open = anyone && weakCondition(using) === 'true'
+        const cols = readablePersonal(tbl, state.access.get(name), open ? roles : 'authenticated')
+        if (cols.length)
+          out.push({
+            ...base,
+            rule_id: 'rls-select-all-personal-data',
+            severity: open ? 'high' : 'medium',
+            confidence: 'medium',
+            title: t(
+              `${open ? 'Anyone' : 'Any logged-in user'} can read every row of ${name} (${cols.slice(0, 3).join(', ')})`,
+              `${open ? 'Qualquer pessoa' : 'Qualquer usuário logado'} lê todas as linhas de ${name} (${cols.slice(0, 3).join(', ')})`,
+            ),
+            detail: t(
+              `The policy "${policy}" lets ${open ? 'everyone, even without logging in,' : 'every logged-in account'} read all rows of ${name}, and the table has personal or secret columns: ${cols.join(', ')}.`,
+              `A política "${policy}" deixa ${open ? 'todo mundo, mesmo sem login,' : 'toda conta logada'} ler todas as linhas de ${name}, e a tabela tem colunas pessoais ou secretas: ${cols.join(', ')}.`,
+            ),
+            impact: t(
+              `${open ? 'Anyone with the public key of the app' : 'Anyone who creates an account'} downloads the whole table: the data of every user, not only their own.`,
+              `${open ? 'Qualquer pessoa com a chave pública do app' : 'Qualquer pessoa que criar uma conta'} baixa a tabela inteira: os dados de todos os usuários, não só os dela.`,
+            ),
+            fix: t(
+              `In a new migration (drop policy + create policy): let each one read only their own rows, for example using ((select auth.uid()) = user_id). If part of the table is public on purpose, put the public columns in a view or give select only on those columns (revoke select … ; grant select (col1, col2) …).`,
+              `Numa nova migration (drop policy + create policy): deixe cada um ler só as próprias linhas, por exemplo using ((select auth.uid()) = user_id). Se parte da tabela é pública de propósito, ponha as colunas públicas numa view ou dê select só nessas colunas (revoke select … ; grant select (col1, col2) …).`,
+            ),
+            fingerprint: `database|rls-select-all-personal-data|${name}|${policy}`,
+          })
+        continue
+      }
+
+      // Escrita só com "está logado": qualquer conta mexe nas linhas de todo mundo.
+      const conditions = { update: [using, check ?? using], delete: [using], all: [using, check ?? using], insert: [check] }[cmd] ?? []
+      if (!conditions.length || conditions.some((c) => !c || weakCondition(c) !== 'logged')) continue
+      if (cmd === 'insert') {
+        // Em tabela sem coluna de dono nem de time, "quem está logado insere" costuma ser de propósito (feedback,
+        // eventos); com coluna de autor, o achado insert-author-not-checked já cobre.
+        const cols = [...tbl.cols]
+        if (cols.some((c) => AUTHOR_COL.test(c) && tbl.idCols?.has(c)) || !cols.some((c) => TEAM_COL.test(c))) continue
+      }
+      const verb = { update: t('change', 'alterar'), delete: t('delete', 'apagar'), all: t('read, change and delete', 'ler, alterar e apagar'), insert: t('create', 'criar') }[cmd]
+      out.push({
+        ...base,
+        rule_id: 'rls-policy-logged-in-only',
+        severity: cmd === 'insert' ? 'medium' : 'high',
+        confidence: 'high',
+        title: t(`Policy "${policy}" lets any logged-in user ${verb} rows of ${name}`, `Política "${policy}" deixa qualquer usuário logado ${verb} linhas de ${name}`),
+        detail: t(
+          `The policy "${policy}" on ${name} only checks that someone is logged in (auth.uid() is not null / auth.role() = 'authenticated'). It does not check that the row belongs to that person or to their team.`,
+          `A política "${policy}" de ${name} só confere que há alguém logado (auth.uid() is not null / auth.role() = 'authenticated'). Ela não confere se a linha é dessa pessoa ou do time dela.`,
+        ),
+        impact:
+          cmd === 'insert'
+            ? t(`Anyone who creates an account can create rows in ${name} inside any team.`, `Qualquer pessoa que criar uma conta consegue criar linhas em ${name} dentro de qualquer time.`)
+            : t(`Anyone who creates an account can ${verb} the rows of every other user in ${name}.`, `Qualquer pessoa que criar uma conta consegue ${verb} as linhas de todos os outros usuários em ${name}.`),
+        fix: t(
+          `In a new migration (drop policy + create policy), compare the row with who is asking: using ((select auth.uid()) = user_id)${cmd === 'delete' ? '' : ' with check ((select auth.uid()) = user_id)'}, or the team membership check your project already uses.`,
+          `Numa nova migration (drop policy + create policy), compare a linha com quem pede: using ((select auth.uid()) = user_id)${cmd === 'delete' ? '' : ' with check ((select auth.uid()) = user_id)'}, ou a conferência de time que o projeto já usa.`,
+        ),
+        fingerprint: `database|rls-policy-logged-in-only|${name}|${policy}`,
+      })
+    }
+  }
+  return out
+}
+
+// View no schema public sem security_invoker lendo tabela com RLS: a view roda com o poder de quem a criou e
+// devolve as linhas de todo mundo.
+function viewFindings(tables, state) {
+  const out = []
+  for (const [name, v] of state.views) {
+    if (v.invoker) continue
+    const acc = state.access.get(name)
+    // Fechada para quem usa o app (revoke … from anon, authenticated): só o servidor lê.
+    if (acc && ['anon', 'authenticated'].every((role) => acc.selectCols[role] && acc.selectCols[role].size === 0)) continue
+    const read = [...new Set([...v.body.matchAll(/\b(?:from|join) (?:only )?([\w."]+)/gi)].map((m) => tableName(m[1])).filter((x) => x.schema === 'public' && tables.get(x.name)?.rls).map((x) => x.name))]
+    if (!read.length) continue
+    out.push({
+      source: 'database',
+      rule_id: 'view-without-security-invoker',
+      severity: 'high',
+      confidence: 'medium',
+      title: t(`View ${name} bypasses the access rules of ${read.slice(0, 2).join(', ')}`, `View ${name} ignora as regras de acesso de ${read.slice(0, 2).join(', ')}`),
+      detail: t(
+        `The view public.${name} reads ${read.join(', ')} (protected by RLS) and was created without "security_invoker = true": it runs with the permissions of whoever created it, so the RLS of those tables does not apply to whoever queries the view.`,
+        `A view public.${name} lê ${read.join(', ')} (com RLS) e foi criada sem "security_invoker = true": ela roda com as permissões de quem a criou, então a RLS dessas tabelas não vale para quem consulta a view.`,
+      ),
+      impact: t(
+        `Whoever uses the app (with the public key) queries the view and gets the rows of every user, even though the table itself would refuse.`,
+        `Quem usa o app (com a chave pública) consulta a view e recebe as linhas de todos os usuários, mesmo que a tabela em si recusasse.`,
+      ),
+      fix: t(
+        `In a new migration: alter view public.${name} set (security_invoker = true); or, if only the server uses it, revoke all on public.${name} from anon, authenticated.`,
+        `Numa nova migration: alter view public.${name} set (security_invoker = true); ou, se só o servidor usa, revoke all on public.${name} from anon, authenticated.`,
+      ),
+      file: v.file,
+      line: v.line,
+      snippet: `create view public.${name} as ${v.body}`.slice(0, 240),
+      fingerprint: `database|view-without-security-invoker|${name}`,
+    })
+  }
+  return out
+}
+
+// Permissão de escrita escrita à mão para o visitante sem login (anon). O trio "grant all … to anon, authenticated,
+// service_role" é o padrão do Supabase (aparece em todo dump) e não conta.
+function anonGrantFindings(tables, state) {
+  const out = []
+  const written = (acc) => {
+    const privs = [...acc.anon].filter((p) => p === 'all' || WRITE.includes(p))
+    const trio = acc.anon.has('all') && acc.authenticated.has('all') && acc.service_role.has('all')
+    return trio ? [] : privs
+  }
+  const add = (name, privs, where) => {
+    const tbl = tables.get(name)
+    const view = state.views.get(name)
+    // Tabela sem RLS já é o achado rls-disabled; view sem security_invoker, o view-without-security-invoker.
+    if (name && ((tbl && !tbl.rls) || (view && !view.invoker))) return
+    const target = name ? `public.${name}` : t('every table of the public schema', 'todas as tabelas do schema public')
+    out.push({
+      source: 'database',
+      rule_id: 'grant-write-to-anon',
+      severity: tbl || view ? 'low' : 'medium',
+      confidence: 'medium',
+      title: t(`Visitors without login were given write permission on ${name ?? 'the public schema'}`, `Visitante sem login recebeu permissão de escrita em ${name ?? 'todo o schema public'}`),
+      detail: t(
+        `A migration gives ${privs.join(', ')} on ${target} to the role anon (whoever opens the app without logging in). After that, only the RLS policies stand between a visitor and the data.`,
+        `Uma migração dá ${privs.join(', ')} em ${target} para o papel anon (quem abre o app sem login). Depois disso, só as políticas de RLS ficam entre o visitante e os dados.`,
+      ),
+      impact: t(
+        'One policy that is too open (or a table created later without RLS) and anyone with the public key writes, changes or deletes the data.',
+        'Basta uma política aberta demais (ou uma tabela criada depois sem RLS) para qualquer pessoa com a chave pública gravar, alterar ou apagar os dados.',
+      ),
+      fix: t(
+        `If visitors are not supposed to write there, in a new migration: revoke ${privs.includes('all') ? 'insert, update, delete, truncate' : privs.join(', ')} on ${name ? `public.${name}` : 'all tables in schema public'} from anon. If they are (a contact form), grant only insert and keep a policy that limits what goes in.`,
+        `Se o visitante não deve gravar ali, numa nova migration: revoke ${privs.includes('all') ? 'insert, update, delete, truncate' : privs.join(', ')} on ${name ? `public.${name}` : 'all tables in schema public'} from anon. Se deve (um formulário de contato), dê só insert e mantenha uma política que limite o que entra.`,
+      ),
+      file: where?.file ?? null,
+      line: where?.line ?? null,
+      snippet: `grant ${privs.join(', ')} on ${name ? `public.${name}` : 'all tables in schema public'} to anon`,
+      fingerprint: `database|grant-write-to-anon|${name ?? '*'}`,
+    })
+  }
+  for (const [name, acc] of state.access) {
+    const privs = written(acc)
+    if (privs.length) add(name, privs, acc.at)
+  }
+  const all = written(state.schema)
+  if (all.length) add(null, all, state.schema.at)
+  return out
+}
+
+// Um comando SQL: atualiza o estado (tabelas, políticas, views, permissões, funções) ou devolve um achado (null se
+// nenhum). \`state\` guarda o que só se sabe no fim, depois de todas as migrações.
+function databaseStatement(stmt, rel, tables, fns, state = newState()) {
   const s = strip(stmt.text).replace(/\s+/g, ' ').trim()
   let m
+  trackGrants(s, state, { file: rel, line: stmt.line })
   if ((m = s.match(/^create (?:unlogged )?table (?:if not exists )?([\w."]+)/i)) && !/ partition of /i.test(s)) {
     const t = tableName(m[1])
     if (t.schema === 'public') {
@@ -476,7 +775,12 @@ function databaseStatement(stmt, rel, tables, fns) {
     const t = tableName(m[1])
     if (t.schema === 'public' && tables.has(t.name)) tables.get(t.name).rls = m[2].toLowerCase() !== 'disable'
   } else if ((m = s.match(/^drop table (?:if exists )?([\w.", ]+)/i))) {
-    for (const raw of m[1].split(',')) tables.delete(tableName(raw.trim().split(' ')[0]).name)
+    for (const raw of m[1].split(',')) {
+      const name = tableName(raw.trim().split(' ')[0]).name
+      tables.delete(name)
+      state.access.delete(name)
+      for (const key of [...state.immediate.keys()]) if (key.startsWith(`database|rls-policy-always-true|${name}|`)) state.immediate.delete(key)
+    }
   } else if ((m = s.match(/^create policy ("[^"]+"|\S+) on ([\w."]+)(.*)$/i))) {
     const t = tableName(m[2])
     if (t.schema === 'public') tables.get(t.name)?.policies.set(m[1].replace(/"/g, ''), { rest: m[3], file: rel, line: stmt.line })
@@ -484,6 +788,38 @@ function databaseStatement(stmt, rel, tables, fns) {
   } else if ((m = s.match(/^drop policy (?:if exists )?("[^"]+"|\S+) on ([\w."]+)/i))) {
     const t = tableName(m[2])
     if (t.schema === 'public') tables.get(t.name)?.policies.delete(m[1].replace(/"/g, ''))
+    // A política "true" que uma migração posterior apagou não é mais um problema.
+    state.immediate.delete(`database|rls-policy-always-true|${t.name}|${m[1].replace(/"/g, '')}`)
+  } else if ((m = s.match(/^alter policy ("[^"]+"|\S+) on ([\w."]+)/i))) {
+    // Política alterada: a condição nova não é lida aqui, então ela fica desconhecida (sem achado).
+    const t = tableName(m[2])
+    if (t.schema === 'public') tables.get(t.name)?.policies.delete(m[1].replace(/"/g, ''))
+    state.immediate.delete(`database|rls-policy-always-true|${t.name}|${m[1].replace(/"/g, '')}`)
+  } else if ((m = s.match(/^create (?:or replace )?(?:temp(?:orary)? )?(?:recursive )?view ([\w."]+) ?(?:\([^)]*\) ?)?(?:with ?\(([^)]*)\) ?)?as (.*)$/i))) {
+    // "create or replace view" sem "with (security_invoker…)" volta a view para o padrão (poder do dono).
+    const v = tableName(m[1])
+    if (v.schema === 'public') state.views.set(v.name, { file: rel, line: stmt.line, invoker: invokerOn(m[2] ?? ''), body: m[3] })
+  } else if ((m = s.match(/^alter view (?:if exists )?([\w."]+) (set|reset) ?\(([^)]*)\)/i))) {
+    const v = state.views.get(tableName(m[1]).name)
+    if (v && /security_invoker/i.test(m[3])) v.invoker = m[2].toLowerCase() === 'set' && invokerOn(m[3])
+  } else if ((m = s.match(/^drop view (?:if exists )?([\w.", ]+?)(?: cascade| restrict)?$/i))) {
+    for (const raw of m[1].split(',')) state.views.delete(tableName(raw.trim()).name)
+  } else if ((m = s.match(/^alter default privileges (?:for (?:role|user) [\w", ]+ )?(?:in schema ([\w", ]+) )?(grant|revoke) (?:execute|all(?: privileges)?) on (?:functions|routines) (?:to|from) ([\w", ]+)$/i))) {
+    // Padrão do banco para as funções criadas daqui em diante (a regra do time: nascer fechada).
+    if (!m[1] || /\bpublic\b/i.test(m[1])) {
+      const grant = m[2].toLowerCase() === 'grant'
+      if (/\banon\b/i.test(m[3])) state.defaults.anon = grant
+      if (/\bauthenticated\b/i.test(m[3])) state.defaults.authenticated = grant
+    }
+  } else if ((m = s.match(/^(grant|revoke) (?:execute|all(?: privileges)?) on all (?:functions|routines) in schema ([\w", ]+) (?:to|from) ([\w", ]+)$/i))) {
+    if (/\bpublic\b/i.test(m[2])) {
+      const grant = m[1].toLowerCase() === 'grant'
+      for (const fn of fns.values()) {
+        if (!fn.exposed) continue
+        if (/\banon\b/i.test(m[3])) fn.anon = grant
+        if (/\bauthenticated\b/i.test(m[3])) fn.authenticated = grant
+      }
+    }
   } else if ((m = s.match(/^(grant|revoke) ((?:insert|all)(?: privileges)?)(?: \(([^)]*)\))?(?:, ?[\w ,()]+?)? on (?:table )?([\w."]+) (?:to|from) ([\w", ]+)$/i))) {
     // Insert por coluna: "revoke insert … ; grant insert (a, b) …" deixa o navegador gravar só essas colunas.
     const t = tableName(m[4])
@@ -501,20 +837,32 @@ function databaseStatement(stmt, rel, tables, fns) {
     // A última definição vale (uma migração nova com "create or replace" corrige a antiga).
     const name = fnKey(m[1])
     const definer = /security definer/i.test(s)
+    // "create or replace" mantém as permissões que a função já tinha; função nova nasce com o padrão do banco.
+    const prev = /^create or replace /i.test(s) ? fns.get(name) : null
     fns.set(name, {
       name,
       file: rel,
       line: stmt.line,
       snippet: s.slice(0, 240),
-      trigger: /\breturns\s+trigger\b/i.test(s),
+      trigger: /\breturns\s+(?:event_)?trigger\b/i.test(s),
       guards: definer ? nullGuards(stmt.text) : [],
-      anon: true,
-      authenticated: true,
+      definer,
+      // Só o schema public é servido pela API (funções de outros schemas não são chamadas pelo navegador).
+      exposed: !name.includes('.'),
+      checksCaller: CALLER_CHECK.test(functionBody(s)),
+      anon: prev?.anon ?? state.defaults.anon,
+      authenticated: prev?.authenticated ?? state.defaults.authenticated,
     })
+    const pathKey = `database|security-definer-search-path|${name}`
     if (definer && !/set search_path/i.test(s)) return definerFinding(m, rel, stmt)
+    // A definição nova (com search_path, ou sem security definer) corrige a antiga.
+    state.immediate.delete(pathKey)
   } else if ((m = s.match(/^drop function (?:if exists )?([\s\S]+?)(?: cascade| restrict)?$/i))) {
-    for (const n of functionNames(m[1])) fns.delete(n)
-  } else if ((m = s.match(/^(grant|revoke) execute on function ([\s\S]+?) (?:to|from) ([\w", ]+)$/i))) {
+    for (const n of functionNames(m[1])) {
+      fns.delete(n)
+      state.immediate.delete(`database|security-definer-search-path|${n}`)
+    }
+  } else if ((m = s.match(/^(grant|revoke) (?:execute|all(?: privileges)?) on (?:function|routine|procedure) ([\s\S]+?) (?:to|from) ([\w", ]+?)(?: cascade| restrict)?$/i))) {
     const roles = m[3].toLowerCase()
     const grant = m[1].toLowerCase() === 'grant'
     for (const n of functionNames(m[2])) {
@@ -535,6 +883,8 @@ function functionFindings(fns) {
     const callable = fn.trigger || fn.anon || fn.authenticated
     const guards = fn.guards.filter((g) => (g.kind === 'uid' ? !fn.trigger && fn.anon : callable))
     if (guards.length) out.push(nullGuardFinding({ ...fn, guards }))
+    // Regra do time: função com poder total aberta para quem usa o app confere quem chama, ou fica só para o servidor.
+    if (fn.definer && fn.exposed && !fn.trigger && !fn.checksCaller && (fn.anon || fn.authenticated)) out.push(openDefinerFinding(fn))
   }
   return out
 }
@@ -543,16 +893,19 @@ export function scanDatabase(root, files) {
   const sqlFiles = files.filter((f) => /(^|\/)supabase\/.*\.sql$/i.test(f)).sort()
   const tables = new Map() // public.nome → { file, line, rls }
   const fns = new Map() // nome da função → última definição
-  const findings = []
+  const state = newState()
   for (const rel of sqlFiles) {
     const text = readText(root, rel)
     if (!text) continue
     for (const stmt of splitSql(text)) {
-      const f = databaseStatement(stmt, rel, tables, fns)
-      if (f) findings.push(f)
+      const f = databaseStatement(stmt, rel, tables, fns, state)
+      // Achado de um comando: fica até uma migração posterior desfazer (drop policy, create or replace function…).
+      if (f) state.immediate.set(f.fingerprint, f)
     }
   }
+  const findings = [...state.immediate.values()]
   for (const [name, t] of tables) if (!t.rls) findings.push(rlsDisabledFinding(name, t))
   findings.push(...functionFindings(fns), ...cascadeOwnerFindings(tables), ...authorInsertFindings(tables))
+  findings.push(...policyStateFindings(tables, state), ...viewFindings(tables, state), ...anonGrantFindings(tables, state))
   return { findings, tables: tables.size, files: sqlFiles.length }
 }

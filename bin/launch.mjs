@@ -397,6 +397,8 @@ function packageManager(root, dir) {
 
 // O nome do script vem das regex acima (só letras e hífen), então pode ir no shell sem escapar.
 function runScript(root, dir, name) {
+  // O nome vai para um comando do shell: só os scripts que o lançamento conhece, conferidos aqui mesmo.
+  if (!TYPES_SCRIPT.test(name) && !BUILD_SCRIPT.test(name)) return { ok: false, output: 'script inválido' }
   const r = spawnSync(`${packageManager(root, dir)} run ${name}`, { cwd: path.join(root, dir), shell: true, encoding: 'utf8', windowsHide: true, timeout: 10 * 60_000 })
   return { ok: r.status === 0, output: `${r.stdout ?? ''}\n${r.stderr ?? ''}${r.error ? `\n${r.error.message}` : ''}` }
 }

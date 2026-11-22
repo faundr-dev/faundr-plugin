@@ -3,7 +3,7 @@
 import { DOCKERFILE, LANG_LINE_RULES } from './security-langs.mjs'
 import { t } from './i18n.mjs'
 import { hash, readText, lineOf, lineText, mask, TEST_PATH } from './security-base.mjs'
-import { findSecrets } from './security-secrets.mjs'
+import { findSecrets, findCommonSecrets, maskShort, isRuleDefinitionPath } from './security-secrets.mjs'
 
 // ---- código (padrões perigosos, sem IA) -----------------------------------------------------
 
@@ -20,8 +20,11 @@ const GENERAL_RULE_FILES = /\.(m?[jt]sx?|cjs|cts|vue|svelte|astro|py|php|dart)$/
 const LINE_RULES = [
   {
     id: 'xss-dangerously-set-inner-html',
-    re: /dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*(?!['"`])/,
+    // O (?!\s) depois do \s* impede a regex de "devolver" um espaço para passar pelo lookahead.
+    re: /dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*(?!\s)(?!'[^']*'|"[^"]*"|`[^`$]*`)/,
     ok: /sanitize|DOMPurify|purify|escape/i,
+    // Constante do módulo (ou importada) com texto fixo: não há dado de fora.
+    skip: ({ line, text, m }) => isConstantExpr(untilClose(line.slice(m.index + m[0].length)), text),
     severity: 'medium',
     cwe: 'CWE-79',
     title: ['HTML put on the screen without cleaning (dangerouslySetInnerHTML)', 'HTML inserido na tela sem limpar (dangerouslySetInnerHTML)'],
@@ -31,8 +34,10 @@ const LINE_RULES = [
   },
   {
     id: 'xss-inner-html',
-    re: /\.(innerHTML|outerHTML)\s*[+]?=\s*(?!['"`]\s*[;)]?$)(?!['"][^'"]*['"]\s*;?\s*$)|document\.write\s*\(/,
-    ok: /sanitize|DOMPurify|purify|escape|textContent/i,
+    // Atribuição (não comparação) de algo que não é texto fixo: '' e "<b>fixo</b>" não acusam.
+    re: /\.(innerHTML|outerHTML)\s*\+?=(?!=)\s*(?!\s)(?!['"`]\s*[;)]*\s*$)(?!'[^']*'\s*[;)]*\s*$|"[^"]*"\s*[;)]*\s*$|`[^`$]*`\s*[;)]*\s*$)|document\.write\s*\(/,
+    ok: /sanitize|DOMPurify|purify|escape|textContent|\besc\w*\(/i,
+    skip: ({ line, text, m }) => Boolean(m[1]) && isConstantExpr(untilClose(line.slice(m.index + m[0].length)), text),
     severity: 'medium',
     cwe: 'CWE-79',
     title: ['HTML built with innerHTML', 'HTML montado com innerHTML'],
@@ -43,7 +48,7 @@ const LINE_RULES = [
   {
     id: 'code-eval',
     files: GENERAL_RULE_FILES,
-    re: /(?<![\w.])(eval|new\s+Function)\s*\(\s*(?!['"`][^'"`$]*['"`]\s*\))/,
+    re: /(?<![\w.])(eval|new\s+Function)\s*\(\s*(?!\s)(?!['"`][^'"`$]*['"`]\s*\))/,
     severity: 'high',
     cwe: 'CWE-95',
     title: ['Code run from text (eval / new Function)', 'Código executado a partir de texto (eval / new Function)'],
@@ -56,6 +61,10 @@ const LINE_RULES = [
     files: GENERAL_RULE_FILES,
     re: /\b(exec|execSync|spawn|spawnSync)\s*\(\s*(`[^`]*\$\{|['"][^'"]*['"]\s*\+|[a-zA-Z_$][\w$.]*\s*\+)/,
     ok: /shell\s*:\s*false/,
+    multiline: true,
+    // Tudo o que entra no comando é fixo: constante, texto, função local que só devolve textos fixos, ou valor
+    // conferido logo acima por regex ou lista (.test(x), x.match(…), LISTA.includes(x)).
+    skip: ({ stmt, text, m, at }) => allPartsSafe(firstArg(stmt, m), text, at),
     severity: 'high',
     cwe: 'CWE-78',
     title: ['System command built from variable text', 'Comando do sistema montado com texto variável'],
@@ -67,6 +76,9 @@ const LINE_RULES = [
     id: 'sql-injection',
     files: GENERAL_RULE_FILES,
     re: /\b(query|execute|raw|whereRaw|orderByRaw|\$queryRawUnsafe|\$executeRawUnsafe|unsafe)\s*\(\s*`[^`]*\b(select|insert|update|delete|where|order by)\b[^`]*\$\{/i,
+    multiline: true,
+    // Só constantes (nome de tabela fixo) ou numeração de parâmetro ($${n}): não há texto de fora na consulta.
+    skip: ({ stmt, text, m, at }) => allPartsSafe(firstArg(stmt, m), text, at, { sql: true }),
     severity: 'high',
     cwe: 'CWE-89',
     title: ['SQL query built from variable text', 'Consulta SQL montada com texto variável'],
@@ -89,7 +101,9 @@ const LINE_RULES = [
     id: 'jwt-decode-without-verify',
     // Só JS/TS: no Python, o jwt.decode do PyJWT confere a assinatura (a regra de lá é python-jwt-without-verify).
     files: /\.(m?[jt]sx?|c[jt]s|vue|svelte|astro)$/i,
-    re: /\bjwt\.decode\s*\(|\bjwtDecode\s*\(|\bdecodeJwt\s*\(/,
+    // A declaração da função (function decodeJwt(…)) não é uma leitura de token.
+    re: /\bjwt\.decode\s*\(|(?<!function\s+)\b(?:jwtDecode|decodeJwt)\s*\(/,
+    notInString: true,
     fileOk: /jwt\.verify|jwtVerify|verifyIdToken|getUser\(|getClaims\(/,
     severity: 'medium',
     cwe: 'CWE-347',
@@ -112,6 +126,7 @@ const LINE_RULES = [
   {
     id: 'tls-verification-disabled',
     re: /NODE_TLS_REJECT_UNAUTHORIZED\s*=\s*['"]?0|rejectUnauthorized\s*:\s*false|verify\s*=\s*False/,
+    notInString: true,
     severity: 'medium',
     cwe: 'CWE-295',
     title: ['HTTPS certificate check turned off', 'Conferência de certificado HTTPS desligada'],
@@ -122,6 +137,7 @@ const LINE_RULES = [
   {
     id: 'python-shell-true',
     re: /subprocess\.\w+\([^)]*shell\s*=\s*True/,
+    multiline: true,
     severity: 'high',
     cwe: 'CWE-78',
     title: ['System command with shell=True', 'Comando do sistema com shell=True'],
@@ -146,8 +162,18 @@ const ALL_LINE_RULES = [...LINE_RULES, ...LANG_LINE_RULES]
 // Webhooks do Stripe: assinatura não conferida, conferida com o corpo já convertido, pagamento sem idempotência.
 function webhookRules(rel, text, isRoute) {
   const out = []
+  // O arquivo é mesmo o que recebe o aviso: lê o cabeçalho stripe-signature, é a rota do webhook (pelo caminho) ou
+  // lê o corpo do pedido e decide pelo tipo do evento. Arquivo que só cita "webhook" num comentário não é.
+  const handler =
+    /stripe-signature/i.test(text) ||
+    /webhook/i.test(rel) ||
+    (/\b(?:req|request|c\.req)\s*\.\s*(?:body\b|rawBody\b|json\s*\(|text\s*\()/.test(text) && /\b(?:event|evt)\.type\b/.test(text))
+  // Conferência própria (sem o SDK): função "verify…Signature" ou HMAC do cabeçalho stripe-signature.
+  const ownCheck =
+    /(?:verify|validate|check)\w*signature\w*\s*\(|signature\w*(?:verif|valid)\w*\s*\(/i.test(text) ||
+    (/stripe-signature/i.test(text) && /createHmac|timingSafeEqual|subtle\s*\.\s*(?:verify|sign|importKey)/.test(text))
   // Webhook do Stripe sem conferir a assinatura.
-  if (isRoute && /stripe/i.test(text) && /webhook|stripe-signature/i.test(rel + text) && /(checkout\.session|payment_intent|invoice\.|customer\.subscription|event\.type)/.test(text) && !/constructEvent(Async)?\s*\(/.test(text))
+  if (isRoute && handler && !ownCheck && /stripe/i.test(text) && /(checkout\.session|payment_intent|invoice\.|customer\.subscription|event\.type)/.test(text) && !/constructEvent(Async)?\s*\(/.test(text))
     out.push({
       rule_id: 'stripe-webhook-without-signature',
       severity: 'high',
@@ -243,6 +269,7 @@ function fileRules(rel, text) {
     ...dockerRules(rel, text),
     ...(js && isRoute ? [...storagePathRules(text), ...dbErrorToClientRules(text)] : []),
     ...(js ? secretMaskRules(text) : []),
+    ...(STATEMENT_FILES.test(rel) ? statementRules(rel, text, isRoute) : []),
   ]
 }
 
@@ -377,6 +404,519 @@ function secretMaskRules(text) {
   return out
 }
 
+// ---- a instrução inteira (chamada em várias linhas, valor montado antes, dado que vem do pedido) ---------
+
+const STATEMENT_FILES = /\.(m?[jt]sx?|c[jt]s|vue|svelte|astro)$/i
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+// Posição logo depois do texto entre aspas que começa em `i` (a aspa de abertura).
+function skipString(text, i) {
+  const q = text[i]
+  let j = i + 1
+  while (j < text.length) {
+    const c = text[j]
+    if (c === '\\') j += 2
+    else if (c === q) return j + 1
+    else if (c === '\n' && q !== '`') return j
+    else if (q === '`' && c === '$' && text[j + 1] === '{') j = skipBraces(text, j + 1)
+    else j++
+  }
+  return text.length
+}
+
+// Posição logo depois do "}" que fecha o "{" em `i`.
+function skipBraces(text, i) {
+  let depth = 0
+  let j = i
+  while (j < text.length) {
+    const c = text[j]
+    if (c === '"' || c === "'" || c === '`') {
+      j = skipString(text, j)
+      continue
+    }
+    if (c === '{') depth++
+    else if (c === '}' && --depth === 0) return j + 1
+    j++
+  }
+  return text.length
+}
+
+/** Argumentos da chamada cujo "(" (ou "[") está em `open`: { args, end }; null se ela não fecha por perto. */
+function callArgs(text, open) {
+  const args = []
+  let depth = 0
+  let start = open + 1
+  const limit = Math.min(text.length, open + 4000)
+  let j = open
+  while (j < limit) {
+    const c = text[j]
+    if (c === '"' || c === "'" || c === '`') {
+      j = skipString(text, j)
+      continue
+    }
+    if (c === '/' && text[j + 1] === '/' && text[j - 1] !== ':') {
+      const end = text.indexOf('\n', j)
+      j = end === -1 ? limit : end
+      continue
+    }
+    if (c === '(' || c === '[' || c === '{') depth++
+    else if (c === ')' || c === ']' || c === '}') {
+      if (--depth === 0) {
+        const last = text.slice(start, j).trim()
+        if (last) args.push(last)
+        return { args, end: j + 1 }
+      }
+    } else if (c === ',' && depth === 1) {
+      args.push(text.slice(start, j).trim())
+      start = j + 1
+    }
+    j++
+  }
+  return null
+}
+
+// Divide "a + b + c" nos sinais de fora de aspas e parênteses.
+function splitSum(expr) {
+  const out = []
+  let depth = 0
+  let start = 0
+  let j = 0
+  while (j < expr.length) {
+    const c = expr[j]
+    if (c === '"' || c === "'" || c === '`') {
+      j = skipString(expr, j)
+      continue
+    }
+    if (c === '(' || c === '[' || c === '{') depth++
+    else if (c === ')' || c === ']' || c === '}') depth--
+    else if (c === '+' && depth === 0 && expr[j + 1] !== '+' && expr[j - 1] !== '+' && expr[j + 1] !== '=') {
+      out.push(expr.slice(start, j))
+      start = j + 1
+    }
+    j++
+  }
+  out.push(expr.slice(start))
+  return out.map((x) => x.trim()).filter(Boolean)
+}
+
+const isQuoted = (e) => (e[0] === '"' || e[0] === "'") && skipString(e, 0) === e.length
+const isTemplate = (e) => e[0] === '`' && skipString(e, 0) === e.length
+
+/** Os pedaços variáveis de uma expressão: cada ${…} de um template e cada parcela de uma soma que não é texto. */
+function dynamicParts(expr) {
+  const out = []
+  for (const e of splitSum(expr.trim())) {
+    if (isQuoted(e) || /^-?\d[\d._]*$/.test(e)) continue
+    if (!isTemplate(e)) {
+      out.push({ expr: e, pre: '' })
+      continue
+    }
+    let j = 1
+    while (j < e.length - 1) {
+      if (e[j] === '\\') j += 2
+      else if (e[j] === '$' && e[j + 1] === '{') {
+        const end = skipBraces(e, j + 1)
+        out.push({ expr: e.slice(j + 2, end - 1).trim(), pre: e[j - 1] })
+        j = end
+      } else j++
+    }
+  }
+  return out
+}
+
+// O texto fixo de uma expressão (o que está entre aspas), para procurar palavras de SQL.
+function literalText(expr) {
+  let out = ''
+  for (const e of splitSum(expr.trim())) if (isQuoted(e) || isTemplate(e)) out += ` ${e.slice(1, -1)}`
+  return out
+}
+
+// A expressão que começa em `start` (o valor de um "const x ="): vai até o ";" ou até o fim da linha em que ela
+// está completa.
+function exprAt(text, start) {
+  let depth = 0
+  let j = start
+  const limit = Math.min(text.length, start + 6000)
+  while (j < limit) {
+    const c = text[j]
+    if (c === '"' || c === "'" || c === '`') {
+      j = skipString(text, j)
+      continue
+    }
+    if (c === '(' || c === '[' || c === '{') depth++
+    else if (c === ')' || c === ']' || c === '}') {
+      if (depth === 0) break
+      depth--
+    } else if (depth === 0 && (c === ';' || c === ',')) break
+    else if (depth === 0 && c === '\n') {
+      const sofar = text.slice(start, j).trim()
+      const next = text.slice(j + 1, j + 200).trimStart()
+      if (sofar && !/[+=(?:&|]$/.test(sofar) && !/^[+.?:]/.test(next)) break
+    }
+    j++
+  }
+  return text.slice(start, j).trim()
+}
+
+// O valor até o fim do trecho em que ele está: para no "}" , ")" , "," ou ";" de fora.
+function untilClose(s) {
+  let depth = 0
+  let j = 0
+  while (j < s.length) {
+    const c = s[j]
+    if (c === '"' || c === "'" || c === '`') {
+      j = skipString(s, j)
+      continue
+    }
+    if (c === '(' || c === '[' || c === '{') depth++
+    else if (c === ')' || c === ']' || c === '}') {
+      if (depth === 0) break
+      depth--
+    } else if ((c === ',' || c === ';') && depth === 0) break
+    j++
+  }
+  return s.slice(0, j).trim()
+}
+
+const CONST_NAME = /^[A-Z][A-Z0-9_]*$/
+const IDENT = /^[A-Za-z_$][\w$]*$/
+
+/**
+ * A expressão é texto fixo do próprio código? Texto entre aspas, número, template só com constantes, constante
+ * em maiúsculas importada, ou `const` do arquivo cujo valor é texto fixo.
+ */
+function isConstantExpr(expr, text, depth = 0) {
+  let e = expr.trim().replace(/\s+as\s+const$/, '').replace(/\.trim\(\)$/, '')
+  while (e[0] === '(' && callArgs(e, 0)?.end === e.length) e = e.slice(1, -1).trim()
+  if (!e || depth > 8) return false
+  if (/^(-?\d[\d._]*|true|false|null|undefined)$/.test(e)) return true
+  // chrome.runtime.getURL('arquivo fixo') é o endereço de um arquivo da própria extensão.
+  const wrap = e.match(/^(?:JSON\.stringify|String|encodeURIComponent|(?:chrome|browser)\.runtime\.getURL)\s*\(([\s\S]*)\)$/)
+  if (wrap && callArgs(e, e.indexOf('('))?.end === e.length) return isConstantExpr(wrap[1], text, depth + 1)
+  if (IDENT.test(e)) return constantName(e, text, depth)
+  const parts = dynamicParts(e)
+  if (parts.length === 1 && parts[0].expr === e) return false
+  return parts.every((p) => isConstantExpr(p.expr, text, depth + 1))
+}
+
+function constantName(name, text, depth) {
+  const n = escapeRe(name)
+  // Constante em maiúsculas importada de outro módulo: texto fixo por convenção.
+  if (CONST_NAME.test(name) && new RegExp(`\\bimport\\s+(?:type\\s+)?[^;'"]{0,600}(?<![\\w$])${n}(?![\\w$])[^;'"]{0,600}\\bfrom\\b`).test(text)) return true
+  const defs = [...text.matchAll(new RegExp(`(?<![\\w$.])const\\s+${n}\\s*(?::[^=\\n]{1,80})?=\\s*(?!=)`, 'g'))]
+  if (defs.length !== 1) return false
+  return isConstantExpr(exprAt(text, defs[0].index + defs[0][0].length), text, depth + 1)
+}
+
+// Função do próprio arquivo que só devolve textos fixos (ex.: o nome do gerenciador de pacotes).
+function literalFunction(expr, text) {
+  const name = expr.match(/^([A-Za-z_$][\w$]*)\s*\(/)?.[1]
+  if (!name || callArgs(expr, expr.indexOf('('))?.end !== expr.length) return false
+  const def = text.match(new RegExp(`(?<![\\w$.])function\\s+${escapeRe(name)}\\s*\\(`))
+  if (!def) return false
+  const params = callArgs(text, def.index + def[0].length - 1)
+  const open = params ? text.indexOf('{', params.end) : -1
+  if (open === -1) return false
+  const body = text.slice(open, skipBraces(text, open))
+  const returns = [...body.matchAll(/\breturn\b([^\n;]*)/g)].map((m) => m[1].trim())
+  return returns.length > 0 && returns.every((r) => isQuoted(r))
+}
+
+// O trecho da função antes de `index` (onde procurar de onde um valor veio e se ele foi conferido).
+const scopeBefore = (text, index) => text.slice(Math.max(functionStart(text, index), index - 6000), index)
+
+// O valor foi conferido antes de ser usado: regex (.test(x), x.match(…)), lista (.includes(x), .has(x)) ou número.
+function validated(name, scope) {
+  if (!IDENT.test(name)) return false
+  const n = escapeRe(name)
+  return new RegExp(
+    `\\.test\\(\\s*${n}\\s*\\)|(?<![\\w$.])${n}\\s*\\.\\s*match\\(|\\.(?:includes|has|indexOf)\\(\\s*${n}\\s*\\)|\\b(?:Number|parseInt|parseFloat|BigInt)\\(\\s*${n}\\b|(?<![\\w$.])${n}\\s*=\\s*[^=\\n]{0,200}\\.match\\(`,
+  ).test(scope)
+}
+
+const NUMERIC_CALL = /^(?:Number|parseInt|parseFloat|BigInt|Math\.\w+)\s*\(/
+
+function safePart(part, text, scope, { sql = false } = {}) {
+  // $${n} numa consulta é a numeração do parâmetro ($1, $2…), não um valor.
+  if (sql && part.pre === '$') return true
+  const e = part.expr
+  return isConstantExpr(e, text) || validated(e, scope) || literalFunction(e, text) || NUMERIC_CALL.test(e)
+}
+
+// O primeiro argumento da chamada achada pela regra de linha (m é o resultado da regex na instrução).
+function firstArg(stmt, m) {
+  const open = stmt.indexOf('(', m.index)
+  return open === -1 ? null : (callArgs(stmt, open)?.args[0] ?? null)
+}
+
+// Todos os pedaços variáveis do argumento são fixos ou conferidos (sem pedaço variável não há o que liberar).
+function allPartsSafe(arg, text, at, opts) {
+  if (!arg) return false
+  const parts = dynamicParts(arg)
+  if (!parts.length) return false
+  const scope = scopeBefore(text, at)
+  return parts.every((p) => safePart(p, text, scope, opts))
+}
+
+// Parênteses abertos que a linha deixa sem fechar (fora de aspas).
+function parenDepth(line) {
+  let depth = 0
+  let j = 0
+  while (j < line.length) {
+    const c = line[j]
+    if (c === '"' || c === "'") {
+      j = skipString(line, j)
+      continue
+    }
+    if (c === '(') depth++
+    else if (c === ')') depth--
+    j++
+  }
+  return depth
+}
+
+// Junta a linha com as de baixo até a chamada fechar (no máximo 25 linhas), numa linha só.
+function joinStatement(lines, i) {
+  let stmt = lines[i].trimEnd()
+  let depth = parenDepth(stmt)
+  for (let j = i + 1; depth > 0 && j < lines.length && j <= i + 25; j++) {
+    const next = lines[j].trim()
+    if (/^(\/\/|#(?!\{))/.test(next)) continue
+    stmt += ` ${next}`
+    depth += parenDepth(next)
+  }
+  return stmt
+}
+
+// A posição `index` da linha está dentro de um texto entre aspas (ex.: a explicação de uma regra)?
+function insideString(line, index) {
+  let j = 0
+  while (j < index) {
+    const c = line[j]
+    if (c === '"' || c === "'" || c === '`') {
+      const end = skipString(line, j)
+      if (end > index) return true
+      j = end
+    } else j++
+  }
+  return false
+}
+
+const inComment = (text, index) => /^\s*(\/\/|\*|\/\*)|(^|[^:'"`\\])\/\/(?!.*['"`])/.test(lineText(text, index).slice(0, index - (text.lastIndexOf('\n', index - 1) + 1)))
+
+// ---- dado que vem direto do pedido (req, body, query, params, searchParams, formData) -----------
+
+const REQ = String.raw`(?:req|request|ctx\.req|ctx\.request|c\.req|context\.req|event)`
+const SOURCE = new RegExp(
+  String.raw`^(?:${REQ}\s*\.\s*(?:body|query|params|headers|cookies)\b|${REQ}\s*\.\s*(?:query|param|header|queries)\s*\(|(?:[\w$]+\s*\.\s*)?(?:searchParams|formData|form|query|params)\s*\.\s*get(?:All)?\s*\(|(?:body|query|params|searchParams|formData)\s*(?:\?\.|\.|\[))`,
+)
+const SOURCE_OBJECT = new RegExp(String.raw`^(?:${REQ}\s*\.\s*(?:body|query|params)|await\s+${REQ}\s*\.\s*(?:json|formData)\s*\(\s*\)|(?:await\s+)?params|body|query)$`)
+
+// Tira o que só embrulha o valor: await, String(…), "as string", "!", "?? ''".
+function unwrap(expr) {
+  let e = expr.trim().replace(/^await\s+/, '')
+  e = e.replace(/\s+as\s+[\w.<>[\]| ]+$/, '').replace(/\s*(\?\?|\|\|)\s*(['"`])[^'"`]*\2$/, '').replace(/!$/, '')
+  const wrap = e.match(/^(?:String|decodeURIComponent|decodeURI|new\s+URL)\s*\(([\s\S]*)\)$/)
+  if (wrap && callArgs(e, e.indexOf('('))?.end === e.length) return unwrap(callArgs(e, e.indexOf('(')).args[0] ?? '')
+  return e
+}
+
+/** A expressão é um valor do pedido lido direto (req.body.cmd, searchParams.get('u'), params.id)? */
+function isSource(expr) {
+  const e = unwrap(expr)
+  if (!SOURCE.test(e) || !/^[\w$.?\s[\]'"()-]+$/.test(e)) return false
+  // query.eq(…), params.toString(): chamada de método num objeto com esse nome não é leitura do pedido.
+  if (/^(?:body|query|params|searchParams|formData)\b/.test(e) && /\(/.test(e) && !/\.\s*get(?:All)?\s*\(/.test(e)) return false
+  return true
+}
+
+// Nomes que receberam um valor do pedido no trecho: const cmd = req.body.cmd / const { cmd } = req.body.
+function taintedNames(scope) {
+  const out = new Set()
+  for (const m of scope.matchAll(/(?:const|let|var)\s+([\w$]+)\s*(?::[^=\n]{1,80})?=\s*([^\n;]{1,200})/g)) if (isSource(m[2].replace(/[,)]\s*$/, ''))) out.add(m[1])
+  for (const m of scope.matchAll(/(?:const|let|var)\s*\{([^}]{1,300})\}\s*=\s*([^\n;]{1,200})/g)) {
+    if (!SOURCE_OBJECT.test(m[2].trim().replace(/\s+as\s+[\w.<>[\]{}:;, |]+$/, ''))) continue
+    for (const piece of m[1].split(',')) {
+      const name = piece.replace(/=.*$/s, '').split(':').pop().replace(/^\s*\.\.\./, '').trim()
+      if (IDENT.test(name)) out.add(name)
+    }
+  }
+  return out
+}
+
+/** O valor vem do pedido: lido direto, ou uma variável que recebeu o valor do pedido e não foi conferida. */
+function fromRequest(expr, tainted, scope) {
+  const e = unwrap(expr)
+  if (isSource(e)) return true
+  const m = e.match(/^([A-Za-z_$][\w$]*)((?:\??\.[\w$]+|\[[^\]]{1,40}\])*)$/)
+  return Boolean(m) && tainted.has(m[1]) && !validated(m[1], scope)
+}
+
+// Algum pedaço do argumento (o valor inteiro, uma parcela da soma ou um ${…}) vem do pedido.
+const anyFromRequest = (arg, tainted, scope) => fromRequest(arg, tainted, scope) || dynamicParts(arg).some((p) => fromRequest(p.expr, tainted, scope))
+
+const SQL_WORD = /\b(select|insert|update|delete|where|order by)\b/i
+const SHELL_NAME = /^['"](?:sh|bash|zsh|dash|\/bin\/(?:ba|z|da)?sh|cmd|cmd\.exe|powershell|powershell\.exe|pwsh)['"]$/
+const SHELL_FLAG = /^['"](?:-c|-lc|-ic|\/c|\/C|-Command)['"]$/
+const SERVER_SIDE = /\b(?:req|request)\s*\.\s*(?:body|query|params|headers|url\b|json\s*\()|createServerFn|['"]use server['"]|from\s+['"](?:express|hono|fastify|koa|@nestjs\/)/
+const URL_GUARD = /allow|whitelist|permitid|\.hostname\b|\.host\b|\.origin\b|\.protocol\b|startsWith\(|endsWith\(|isPrivate|isInternal|ssrf|safe\w*url|valid\w*url|assert\w*url|check\w*url/i
+const PATH_GUARD = /basename\(|\.normalize\(|startsWith\(|includes\(\s*['"]\.\.|['"]\.\.['"]|\\\.\\\.|sanitize|safe\w*path|allow|whitelist|isValid\w*|\.test\(|\.match\(|\bz\.\w+\(|Number\(|parseInt\(|\broot\s*:/i
+const FILTER_ESCAPE = /^(?:\w*(?:escape|sanitize|clean|quote|safe)\w*|encodeURIComponent|Number|parseInt)\s*\(|\.replace(?:All)?\(/i
+
+const STATEMENT_TEXT = {
+  'command-injection': {
+    severity: 'high',
+    cwe: 'CWE-78',
+    title: ['System command built from variable text', 'Comando do sistema montado com texto variável'],
+    detail: ['An operating system command receives a value that is not fixed (built over several lines, passed through sh -c, or read straight from the request).', 'Um comando do sistema operacional recebe um valor que não é fixo (montado em várias linhas, passado por sh -c, ou lido direto do pedido).'],
+    impact: ['If the value can come from a user, they can run any command on the server (delete files, steal keys).', 'Se o valor puder vir de um usuário, ele consegue rodar qualquer comando no servidor (apagar arquivos, roubar chaves).'],
+    fix: ['Use execFile/spawn with a separate argument list (no shell, no sh -c) and check the value against a list of what is allowed.', 'Use execFile/spawn com a lista de argumentos separada (sem shell, sem sh -c) e valide o valor contra uma lista do que é permitido.'],
+  },
+  'sql-injection': {
+    severity: 'high',
+    cwe: 'CWE-89',
+    title: ['SQL query built from variable text', 'Consulta SQL montada com texto variável'],
+    detail: ['The SQL query is built by joining text with a variable (${...}, + or a query assembled in a variable before the call).', 'A consulta SQL é montada juntando texto com uma variável (${...}, + ou uma consulta montada numa variável antes da chamada).'],
+    impact: ["If the variable comes from a user, they can change the query and read, change or delete other people's data (SQL injection).", 'Se a variável vier de um usuário, ele pode mudar a consulta e ler, alterar ou apagar dados de outras pessoas (SQL injection).'],
+    fix: ["Use parameters: query(\"... where id = $1\", [id]) or the library's query builder (sql`...` with safely interpolated values, .eq(), where({ id })).", 'Use parâmetros: query("... where id = $1", [id]) ou o construtor de consultas da biblioteca (sql`...` com valores interpolados de forma segura, .eq(), where({ id })).'],
+  },
+  'supabase-filter-injection': {
+    severity: 'medium',
+    cwe: 'CWE-943',
+    title: ['Supabase filter built with text typed by the user', 'Filtro do Supabase montado com texto digitado pelo usuário'],
+    detail: ['The .or() / .filter() filter is a text built with a value from the request or from a search box, without escaping.', 'O filtro .or() / .filter() é um texto montado com um valor do pedido ou de uma busca, sem escapar.'],
+    impact: ['Whoever types the value can add commas and parentheses and write their own conditions: the query returns rows the screen was not supposed to show.', 'Quem digita o valor pode acrescentar vírgulas e parênteses e escrever as próprias condições: a consulta devolve linhas que a tela não devia mostrar.'],
+    fix: ['Use the filter methods with the value as an argument (.ilike("name", `%${q}%`), .eq(), .in()); if you need .or(), strip commas, parentheses and quotes from the value first.', 'Use os métodos de filtro com o valor como argumento (.ilike("nome", `%${q}%`), .eq(), .in()); se precisar do .or(), tire vírgulas, parênteses e aspas do valor antes.'],
+  },
+  'ssrf-user-url': {
+    severity: 'medium',
+    cwe: 'CWE-918',
+    title: ['Server calls an address that comes from the request', 'Servidor chama um endereço que vem do pedido'],
+    detail: ['The server makes an HTTP call to an address read straight from the request, with no list of allowed destinations nearby.', 'O servidor faz uma chamada HTTP para um endereço lido direto do pedido, sem lista de destinos permitidos por perto.'],
+    impact: ['Whoever sends the request makes your server call internal addresses (the cloud metadata service, admin panels, localhost) and can read what comes back.', 'Quem manda o pedido faz o seu servidor chamar endereços internos (o serviço de metadados da nuvem, painéis de admin, localhost) e pode ler o que volta.'],
+    fix: ['Accept only https addresses whose host is in a fixed list (new URL(value).hostname in ALLOWED_HOSTS), or receive an id and look the address up on the server.', 'Aceite só endereços https cujo host está numa lista fixa (new URL(valor).hostname em HOSTS_PERMITIDOS), ou receba um id e busque o endereço no servidor.'],
+  },
+  'path-traversal': {
+    severity: 'high',
+    cwe: 'CWE-22',
+    title: ['File path built with a value from the request', 'Caminho de arquivo montado com valor do pedido'],
+    detail: ['A file is read, written or sent using a path that includes a value read straight from the request, without path.basename or a check of the final folder nearby.', 'Um arquivo é lido, gravado ou enviado usando um caminho que inclui um valor lido direto do pedido, sem path.basename nem conferência da pasta final por perto.'],
+    impact: ['With "../" in the value, whoever sends the request leaves the expected folder and reads (or overwrites) any file of the server, the .env with the keys included.', 'Com "../" no valor, quem manda o pedido sai da pasta esperada e lê (ou sobrescreve) qualquer arquivo do servidor, inclusive o .env com as chaves.'],
+    fix: ['Use only the file name (path.basename(value)) or resolve the path and check that it still starts with the base folder (resolved.startsWith(base + path.sep)).', 'Use só o nome do arquivo (path.basename(valor)) ou resolva o caminho e confira que ele continua começando pela pasta base (resolvido.startsWith(base + path.sep)).'],
+  },
+}
+
+const stmtFinding = (id, index) => ({ rule_id: id, index, ...STATEMENT_TEXT[id] })
+
+// Algum pedaço variável da expressão não é fixo nem foi conferido.
+const hasUnsafePart = (arg, text, scope, opts) => dynamicParts(arg).some((p) => !safePart(p, text, scope, opts))
+
+// A consulta foi montada antes numa variável: const sql = `select … ${id}` (ou sql += … ) e depois query(sql).
+function builtSqlIsUnsafe(name, text, scope) {
+  const n = escapeRe(name)
+  let sqlText = false
+  let unsafe = false
+  for (const m of scope.matchAll(new RegExp(`(?:(?:const|let|var)\\s+${n}\\s*(?::[^=\\n]{1,80})?=|(?<![\\w$.])${n}\\s*\\+?=)\\s*(?!=)`, 'g'))) {
+    const value = exprAt(scope, m.index + m[0].length)
+    // sql`…` (template com etiqueta) é parametrizado pela biblioteca.
+    if (!/^['"`]/.test(value)) continue
+    if (SQL_WORD.test(literalText(value))) sqlText = true
+    if (hasUnsafePart(value, text, scope.slice(0, m.index), { sql: true })) unsafe = true
+  }
+  return sqlText && unsafe
+}
+
+function commandRules(text, out) {
+  for (const m of text.matchAll(/(?<![\w$.])(?:(?:child_process|childProcess|cp)\s*\.\s*)?(exec|execSync|spawn|spawnSync|execFile|execFileSync)\s*\(/g)) {
+    if (inComment(text, m.index)) continue
+    const call = callArgs(text, m.index + m[0].length - 1)
+    if (!call?.args.length) continue
+    const [a0, a1] = call.args
+    const rest = call.args.slice(1).join(',')
+    const scope = scopeBefore(text, m.index)
+    const shell = /^exec(Sync)?$/.test(m[1]) ? !/shell\s*:\s*false/.test(rest) : /shell\s*:\s*true/.test(rest)
+    // exec(req.body.cmd) e exec(cmd) com cmd vindo do pedido.
+    const direct = shell && fromRequest(a0, taintedNames(scope), scope)
+    // Montado com ${…} ou + (a regra de linha só vê quando cabe numa linha).
+    const built = /^(?:exec|execSync|spawn|spawnSync)$/.test(m[1]) && !/shell\s*:\s*false/.test(rest) && /^`|^['"][^'"]*['"]\s*\+|^[A-Za-z_$][\w$.]*\s*\+/.test(a0) && hasUnsafePart(a0, text, scope)
+    // spawn('sh', ['-c', x]): o shell volta pela porta dos fundos.
+    let viaShell = false
+    if (SHELL_NAME.test(a0) && a1?.[0] === '[') {
+      const items = callArgs(a1, 0)?.args ?? []
+      viaShell = SHELL_FLAG.test(items[0] ?? '') && Boolean(items[1]) && hasUnsafePart(items[1], text, scope)
+    }
+    if (direct || built || viaShell) out.push(stmtFinding('command-injection', m.index))
+  }
+}
+
+function sqlRules(text, out) {
+  for (const m of text.matchAll(/(?<![\w$])(query|execute|raw|whereRaw|orderByRaw|havingRaw|\$queryRawUnsafe|\$executeRawUnsafe|unsafe)\s*\(/g)) {
+    if (inComment(text, m.index)) continue
+    const a0 = callArgs(text, m.index + m[0].length - 1)?.args[0]
+    if (!a0) continue
+    const scope = scopeBefore(text, m.index)
+    const inline = /^['"`]/.test(a0) && SQL_WORD.test(literalText(a0)) && hasUnsafePart(a0, text, scope, { sql: true })
+    if (inline || (IDENT.test(a0) && builtSqlIsUnsafe(a0, text, scope))) out.push(stmtFinding('sql-injection', m.index))
+  }
+  // Filtro do PostgREST escrito como texto: .or(`name.ilike.%${q}%`) / .filter(`${col}`, …).
+  for (const m of text.matchAll(/\.\s*(or|filter)\s*\(/g)) {
+    if (inComment(text, m.index)) continue
+    const a0 = callArgs(text, m.index + m[0].length - 1)?.args[0]
+    if (!a0 || !/^['"`]/.test(a0) || !/\.from\s*\(|supabase|postgrest|\.select\s*\(/i.test(text.slice(Math.max(0, m.index - 800), m.index))) continue
+    const scope = scopeBefore(text, m.index)
+    const tainted = taintedNames(scope)
+    const typed = dynamicParts(a0).some((p) => {
+      if (FILTER_ESCAPE.test(p.expr) || isConstantExpr(p.expr, text) || validated(p.expr, scope)) return false
+      if (IDENT.test(p.expr) && new RegExp(`(?<![\\w$.])${escapeRe(p.expr)}\\s*=\\s*[^\\n]{0,200}\\.replace(?:All)?\\(`).test(scope)) return false
+      // Vem do pedido, ou é o texto de uma busca (…ilike.%${q}%).
+      return fromRequest(p.expr, tainted, scope) || p.pre === '%'
+    })
+    if (typed) out.push(stmtFinding('supabase-filter-injection', m.index))
+  }
+}
+
+function requestRules(rel, text, isRoute, out) {
+  const server = (isRoute || SERVER_SIDE.test(text)) && !/^\s*['"]use client['"]/m.test(text)
+  // Chamada HTTP para um endereço que vem do pedido.
+  if (server)
+    for (const m of text.matchAll(/(?<![\w$.])(?:fetch|\$fetch|ofetch|got|ky|axios)(?:\s*\.\s*(?:get|post|put|patch|delete|head|request))?\s*\(|(?<![\w$])https?\s*\.\s*(?:get|request)\s*\(/g)) {
+      if (inComment(text, m.index)) continue
+      const call = callArgs(text, m.index + m[0].length - 1)
+      const a0 = call?.args[0]
+      if (!a0) continue
+      const scope = scopeBefore(text, m.index)
+      const tainted = taintedNames(scope)
+      // O endereço inteiro, ou o começo dele (`${url}/caminho`), vem do pedido.
+      const first = dynamicParts(a0)[0]
+      const whole = fromRequest(a0, tainted, scope) || (isTemplate(a0.trim()) && a0.trim().startsWith('`${') && first && fromRequest(first.expr, tainted, scope))
+      if (whole && !URL_GUARD.test(scope + text.slice(m.index, call.end))) out.push(stmtFinding('ssrf-user-url', m.index))
+    }
+  // Arquivo lido, gravado ou enviado com um caminho que vem do pedido.
+  const FS_CALL =
+    /(?<![\w$])(?:fs|fsp|fsPromises)\s*\.\s*(?:promises\s*\.\s*)?(readFile|readFileSync|createReadStream|createWriteStream|writeFile|writeFileSync|appendFile|appendFileSync|unlink|unlinkSync|rm|rmSync|readdir|readdirSync|open|openSync)\s*\(|(?<![\w$.])(?:readFile|readFileSync|createReadStream|writeFile|writeFileSync|unlink)\s*\(|\b(?:res|reply|response)\s*\.\s*(?:sendFile|download)\s*\(|(?<![\w$])path\s*\.\s*(join|resolve)\s*\(/g
+  for (const m of text.matchAll(FS_CALL)) {
+    if (inComment(text, m.index)) continue
+    const call = callArgs(text, m.index + m[0].length - 1)
+    if (!call?.args.length) continue
+    const scope = scopeBefore(text, m.index)
+    const tainted = taintedNames(scope)
+    // path.join/resolve: qualquer pedaço; nas outras, o caminho é o primeiro argumento.
+    const args = m[2] ? call.args : [call.args[0]]
+    if (!args.some((a) => anyFromRequest(a, tainted, scope))) continue
+    if (PATH_GUARD.test(scope + text.slice(m.index, Math.min(text.length, call.end + 400)))) continue
+    out.push(stmtFinding('path-traversal', m.index))
+  }
+}
+
+// Regras que olham a instrução inteira (JS/TS).
+function statementRules(rel, text, isRoute) {
+  const out = []
+  commandRules(text, out)
+  sqlRules(text, out)
+  requestRules(rel, text, isRoute, out)
+  return out
+}
+
 /** Dockerfile: a imagem final (a do último FROM) roda como root quando nenhum USER troca o usuário depois dele. */
 function dockerRules(rel, text) {
   if (!DOCKERFILE.test(rel)) return []
@@ -404,9 +944,12 @@ export function scanCode(root, files) {
   const out = []
   for (const rel of files) {
     if ((!CODE_FILE.test(rel) && !DOCKERFILE.test(rel)) || /\.(d\.ts|min\.js)$/.test(rel) || TEST_PATH.test(rel)) continue
+    // Arquivos que só definem regras (os do próprio Faundr): o texto das regras casa com as próprias regras.
+    if (isRuleDefinitionPath(rel)) continue
     const text = readText(root, rel)
     if (!text || text.startsWith('// Gerado por')) continue
     const lines = text.split('\n')
+    const found = []
     let offset = 0
     for (const [i, line] of lines.entries()) {
       const trimmed = line.trim()
@@ -414,13 +957,34 @@ export function scanCode(root, files) {
         offset += line.length + 1
         continue
       }
+      // A chamada inteira, quando ela continua nas linhas de baixo (montada só se alguma regra precisar).
+      let joined = null
       for (const r of ALL_LINE_RULES) {
-        if ((r.files && !r.files.test(rel)) || !r.re.test(line) || r.ok?.test(line) || r.fileOk?.test(text)) continue
-        out.push(codeFinding(rel, r.id, r, i + 1, trimmed))
+        if (r.files && !r.files.test(rel)) continue
+        let m = r.re.exec(line)
+        let stmt = line
+        if (!m && r.multiline && parenDepth(line) > 0) {
+          joined ??= joinStatement(lines, i)
+          m = r.re.exec(joined)
+          // Só vale a chamada que começa nesta linha (a de uma linha de baixo é achada quando chegar a vez dela).
+          if (m && m.index >= line.trimEnd().length) m = null
+          stmt = joined
+        }
+        if (!m || r.ok?.test(stmt) || r.fileOk?.test(text)) continue
+        if (r.notInString && insideString(line, m.index)) continue
+        if (r.skip?.({ line, stmt, text, rel, m, at: offset })) continue
+        found.push(codeFinding(rel, r.id, r, i + 1, trimmed))
       }
       offset += line.length + 1
     }
-    for (const f of fileRules(rel, text)) out.push(codeFinding(rel, f.rule_id, f, f.index >= 0 ? lineOf(text, f.index) : null, f.index >= 0 ? lineText(text, f.index).trim() : null))
+    for (const f of fileRules(rel, text)) found.push(codeFinding(rel, f.rule_id, f, f.index >= 0 ? lineOf(text, f.index) : null, f.index >= 0 ? lineText(text, f.index).trim() : null))
+    // A mesma linha achada pela regra de linha e pela de instrução é um achado só.
+    const seen = new Set()
+    for (const f of found) {
+      if (seen.has(f.fingerprint)) continue
+      seen.add(f.fingerprint)
+      out.push(f)
+    }
   }
   return out
 }
@@ -453,5 +1017,7 @@ function codeFinding(rel, ruleId, r, line, snippet) {
 export function maskSecretsIn(text) {
   let out = text
   for (const s of findSecrets(text)) out = out.replace(s.secret, mask(s.secret))
+  // Senha ou segredo em formato comum (password = "…", URL com usuário:senha) também não sai inteiro no trecho.
+  for (const s of findCommonSecrets(out)) out = out.replaceAll(s.secret, maskShort(s.secret))
   return out
 }

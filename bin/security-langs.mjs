@@ -15,7 +15,8 @@ export const LANG_LINE_RULES = [
   {
     id: 'angular-bypass-sanitizer',
     files: /\.ts$/i,
-    re: /\.bypassSecurityTrust(Html|Script|Style|Url|ResourceUrl)\s*\(\s*(?!['"`][^'"`$]*['"`]\s*\))/,
+    // O (?!\s) impede o \s* de devolver um espaço para passar pelo lookahead (bypass…( "texto fixo" )).
+    re: /\.bypassSecurityTrust(Html|Script|Style|Url|ResourceUrl)\s*\(\s*(?!\s)(?!['"`][^'"`$]*['"`]\s*\))/,
     severity: 'high',
     cwe: 'CWE-79',
     title: ["Angular's XSS protection turned off for a variable value", 'Proteção contra XSS do Angular desligada para um valor variável'],

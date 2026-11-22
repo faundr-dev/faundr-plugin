@@ -50,17 +50,19 @@ function readCache() {
   }
 }
 
-// Ecossistemas que o Faundr lê (lockfiles.mjs e lockfiles-langs.mjs), com o nome que o OSV usa.
-const OSV_ECOSYSTEMS = new Set(['npm', 'PyPI', 'crates.io', 'Go', 'Packagist', 'Pub', 'RubyGems', 'NuGet', 'Maven', 'ConanCenter'])
+// Ecossistemas que o Faundr lê (lockfiles.mjs e lockfiles-langs.mjs), com o nome que o OSV usa. O servidor guarda
+// a lista de pacotes com o mesmo nome (espelho em src/lib/security-scope.ts; o teste compara as duas listas).
+export const OSV_ECOSYSTEMS = new Set(['npm', 'PyPI', 'crates.io', 'Go', 'Packagist', 'Pub', 'RubyGems', 'NuGet', 'Maven', 'ConanCenter'])
 
 async function osvDetails(ids, known) {
   const cache = readCache()
   const missing = ids.filter((id) => cache[id]?.modified !== known.get(id))
+  const failed = []
   for (let i = 0; i < missing.length; i += 8) {
     await Promise.all(
       missing.slice(i, i + 8).map(async (id) => {
         const res = await fetch(`${OSV}/vulns/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(15_000) })
-        if (!res.ok) return
+        if (!res.ok) return failed.push(res.status)
         const v = await res.json()
         cache[id] = {
           modified: v.modified,
@@ -84,6 +86,11 @@ async function osvDetails(ids, known) {
   } catch {
     // Sem gravar o cache a checagem sai igual; só busca os detalhes no OSV de novo da próxima vez.
   }
+  // Falha sem detalhe (o OSV recusou: limite de pedidos, erro dele) não vira achado; mandar o resultado assim
+  // fecharia no painel o achado que já existia. A checagem de pacotes falha inteira e a anterior continua valendo.
+  // (O detalhe antigo que estava no cache serve: a falha é a mesma.)
+  const without = ids.filter((id) => !cache[id])
+  if (without.length) throw new Error(`OSV did not return the details of ${without.length} advisory(ies) (status ${[...new Set(failed)].join(', ') || '?'}); try again in a few minutes`)
   return cache
 }
 
@@ -202,9 +209,22 @@ const MANAGER = {
   },
 }
 
-// Pacotes de todos os lockfiles, com o ecossistema, o gerenciador e o lockfile de onde vieram.
+// O lockfile inteiro, sem o teto de 1 MB dos outros arquivos (um package-lock.json passa disso fácil). null: o
+// arquivo sumiu (está no git mas foi apagado da pasta). Qualquer outro erro de leitura sobe para quem chamou.
+function readLockfile(root, rel) {
+  try {
+    return fs.readFileSync(path.join(root, rel), 'utf8')
+  } catch (err) {
+    if (err?.code === 'ENOENT' || err?.code === 'ENOTDIR') return null
+    throw err
+  }
+}
+
+// Pacotes de todos os lockfiles, com o ecossistema, o gerenciador e o lockfile de onde vieram. `errors`: os
+// lockfiles que não deu para ler (ilegível ou corrompido) — com algum, a checagem de pacotes não está completa.
 function lockfileEntries(root, lockfiles) {
   const entries = []
+  const errors = []
   const readManifest = (dir) => {
     try {
       return JSON.parse(readText(root, path.posix.join(dir, 'package.json')) ?? '{}')
@@ -214,41 +234,56 @@ function lockfileEntries(root, lockfiles) {
     }
   }
   for (const lf of lockfiles) {
-    const text = readText(root, lf)
-    if (!text) continue
     let parsed
     try {
+      const text = readLockfile(root, lf)
+      if (text === null) continue
       parsed = LOCKFILE.test(lf) ? parseLockfile(lf, text, readManifest) : parseLangLockfile(lf, text)
-    } catch {
+    } catch (err) {
+      const why = String(err?.message ?? err).slice(0, 120)
+      errors.push(t(`could not read ${lf} (${why})`, `não deu para ler ${lf} (${why})`))
       continue
     }
     if (!parsed) continue
     for (const p of parsed.pkgs) entries.push({ ...p, ecosystem: parsed.ecosystem, manager: parsed.manager, lockfile: lf })
   }
-  return entries
+  return { entries, errors }
 }
 
 const pkgKey = (e) => `${e.ecosystem}:${e.name}@${e.version}`
 
+// Teto de páginas por pacote: um pacote com milhares de falhas não prende a checagem.
+const OSV_MAX_PAGES = 20
+
 // Pergunta ao OSV, em lotes de 1000, quais pacotes têm falha: ids por pacote e quando cada falha mudou.
+// Pacote com falhas demais vem em páginas: o OSV devolve next_page_token e a consulta é repetida só para ele
+// (como a checagem diária do servidor faz); sem isso, as falhas da segunda página em diante ficavam de fora.
 async function osvQuery(unique) {
   const known = new Map()
   const hits = new Map() // name@version → ids
   for (let i = 0; i < unique.length; i += 1000) {
-    const batch = unique.slice(i, i + 1000)
-    const res = await fetch(`${OSV}/querybatch`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ queries: batch.map((e) => ({ package: { name: e.name, ecosystem: e.ecosystem }, version: e.version })) }),
-      signal: AbortSignal.timeout(30_000),
-    })
-    if (!res.ok) throw new Error(`OSV answered ${res.status}`)
-    const { results } = await res.json()
-    results.forEach((r, j) => {
-      if (!r.vulns?.length) return
-      hits.set(pkgKey(batch[j]), r.vulns.map((v) => v.id))
-      for (const v of r.vulns) known.set(v.id, v.modified)
-    })
+    let pending = unique.slice(i, i + 1000).map((e) => ({ e, token: undefined }))
+    for (let page = 0; pending.length; page++) {
+      if (page >= OSV_MAX_PAGES) throw new Error(`OSV has more than ${OSV_MAX_PAGES} pages of advisories for ${pending[0].e.name}`)
+      const res = await fetch(`${OSV}/querybatch`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ queries: pending.map(({ e, token }) => ({ package: { name: e.name, ecosystem: e.ecosystem }, version: e.version, ...(token ? { page_token: token } : {}) })) }),
+        signal: AbortSignal.timeout(30_000),
+      })
+      if (!res.ok) throw new Error(`OSV answered ${res.status}`)
+      const { results } = await res.json()
+      const next = []
+      results.forEach((r, j) => {
+        const { e } = pending[j]
+        if (r.vulns?.length) {
+          hits.set(pkgKey(e), [...(hits.get(pkgKey(e)) ?? []), ...r.vulns.map((v) => v.id)])
+          for (const v of r.vulns) known.set(v.id, v.modified)
+        }
+        if (r.next_page_token) next.push({ e, token: r.next_page_token })
+      })
+      pending = next
+    }
   }
   return { known, hits }
 }
@@ -338,9 +373,9 @@ function dependencyFinding(e, id, v) {
 
 export async function scanDependencies(root, files) {
   const lockfiles = preferLocks(files.filter((f) => LOCKFILE.test(f) || LANG_LOCKFILE.test(f)))
-  const entries = lockfileEntries(root, lockfiles)
+  const { entries, errors } = lockfileEntries(root, lockfiles)
   const unique = [...new Map(entries.map((e) => [pkgKey(e), e])).values()]
-  if (!unique.length) return { findings: [], packages: 0, lockfiles, snapshot: { packages: [], known: [] } }
+  if (!unique.length) return { findings: [], packages: 0, lockfiles, snapshot: { packages: [], known: [] }, errors }
 
   const { known, hits } = await osvQuery(unique)
   const details = await osvDetails([...known.keys()], known)
@@ -356,5 +391,7 @@ export async function scanDependencies(root, files) {
     packages: unique.map((e) => ({ e: e.ecosystem, n: e.name, v: e.version, lf: e.lockfile, dev: !!e.dev, ...(e.via?.length > 1 ? { via: e.via.join(' > ') } : {}) })),
     known: [...known.keys()],
   }
-  return { findings: [...new Map(findings.map((f) => [f.fingerprint, f])).values()], packages: unique.length, lockfiles, snapshot }
+  // errors: lockfiles que não foram lidos. Com algum, quem chama não manda o escopo dos pacotes nem a lista
+  // (fecharia os achados desse lockfile e trocaria a lista guardada por uma incompleta).
+  return { findings: [...new Map(findings.map((f) => [f.fingerprint, f])).values()], packages: unique.length, lockfiles, snapshot, errors }
 }

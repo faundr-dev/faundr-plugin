@@ -10,13 +10,22 @@ const hash = (text) => createHash('sha256').update(text).digest('hex').slice(0, 
 const SEV = ['critical', 'high', 'medium', 'low']
 const bySeverity = (s) => (SEV.includes(String(s).toLowerCase()) ? String(s).toLowerCase() : 'medium')
 
-/** Detecta o formato e devolve { tool, findings }. `maskSecrets(texto)` esconde chaves nos trechos. */
-export function parseImport(json, maskSecrets = (t) => t) {
-  if (Array.isArray(json?.lints)) return supabaseAdvisors(json.lints)
+/**
+ * Detecta o formato e devolve uma lista de { tool, findings }, uma por ferramenta: um SARIF pode trazer várias
+ * execuções (runs), cada uma de uma ferramenta, e cada ferramenta só fecha os próprios achados no painel.
+ * `maskSecrets(texto)` esconde chaves nos trechos.
+ */
+export function parseImports(json, maskSecrets = (t) => t) {
+  if (Array.isArray(json?.lints)) return [supabaseAdvisors(json.lints)]
   if (json?.runs && Array.isArray(json.runs)) return sarif(json, maskSecrets)
   const snyk = Array.isArray(json) ? json : [json]
-  if (snyk.some((p) => Array.isArray(p?.vulnerabilities))) return snykOpenSource(snyk)
+  if (snyk.some((p) => Array.isArray(p?.vulnerabilities))) return [snykOpenSource(snyk)]
   throw new Error('Unrecognized format. Accepted: JSON from "snyk test --json", SARIF (.sarif/.json) and the Supabase Security Advisor result.')
+}
+
+/** O primeiro resultado de `parseImports` (arquivo de uma ferramenta só). */
+export function parseImport(json, maskSecrets = (t) => t) {
+  return parseImports(json, maskSecrets)[0] ?? { tool: 'sarif', findings: [] }
 }
 
 // Dica de correção do Snyk: o caminho de atualização sugerido, a versão corrigida ou nenhuma ainda.
@@ -80,12 +89,15 @@ function sarifSeverity(score, level) {
   return 'medium'
 }
 
+// Uma entrada por ferramenta, na ordem em que aparecem: antes, com várias execuções no arquivo, todos os achados
+// ficavam no nome da última ferramenta (e a importação seguinte de qualquer uma fechava os das outras).
 function sarif(doc, maskSecrets) {
-  const findings = []
-  let tool = 'sarif'
+  const byTool = new Map()
   for (const run of doc.runs) {
     const name = String(run.tool?.driver?.name ?? 'sarif').toLowerCase().replace(/[^a-z0-9]+/g, '-')
-    tool = `sarif-${name}`.slice(0, 60)
+    const tool = `sarif-${name}`.slice(0, 60)
+    if (!byTool.has(tool)) byTool.set(tool, [])
+    const findings = byTool.get(tool)
     const rules = new Map((run.tool?.driver?.rules ?? []).map((r) => [r.id, r]))
     const isSecrets = /gitleaks|betterleaks|trufflehog|secret/.test(name)
     for (const r of run.results ?? []) {
@@ -117,7 +129,7 @@ function sarif(doc, maskSecrets) {
       })
     }
   }
-  return { tool, findings: [...new Map(findings.map((f) => [f.fingerprint, f])).values()] }
+  return [...byTool].map(([tool, findings]) => ({ tool, findings: [...new Map(findings.map((f) => [f.fingerprint, f])).values()] }))
 }
 
 // Security Advisor do Supabase: o mesmo verificador do painel do Supabase, olhando o banco de verdade

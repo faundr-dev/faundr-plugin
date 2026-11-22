@@ -1,5 +1,5 @@
 # CI and dependencies (GitHub Actions, install scripts, packages)
-When to read: the project has `.github/workflows/`, another CI (`.gitlab-ci.yml`, `.circleci/`), a release or publish script, or a package manifest (`package.json`, `requirements.txt`, `pyproject.toml`, `composer.json`, `go.mod`…). Packages with known flaws are already caught by the automatic check; this file covers problems with **how** the code is built and published: who can run code with the project's keys.
+When to read: the project has `.github/workflows/`, another CI (`.gitlab-ci.yml`, `.circleci/`), a release or publish script, or a package manifest (`package.json`, `requirements.txt`, `pyproject.toml`, `composer.json`, `go.mod`…). The automatic check lists packages with published flaws, but it cannot tell whether this project reaches the flawed code: that is yours (see `dep-alcance-do-aviso` below). This file also covers problems with **how** the code is built and published: who can run code with the project's keys.
 
 Golden rule: CI runs with the deploy, database and publishing keys. Code or text coming from an outside pull request, a branch name, an issue title or a new package is untrusted input, and must not run where those keys are.
 
@@ -97,3 +97,13 @@ Golden rule: CI runs with the deploy, database and publishing keys. Code or text
   sh('npm test'); sh('npm run build'); sh('npm publish --provenance')
   ```
 - CWE: CWE-693
+
+## dep-alcance-do-aviso — A package's known flaw that this project actually reaches
+- Typical severity: the advisory's own severity when the flawed code is reached with outside input; a hardening note when it is not reachable.
+- Where to look: the open package findings of high and critical severity listed in the context. For each one, open the advisory (its id and link are in the finding) and find **what** is flawed: which function, option, input or version range.
+- How to confirm by reading the code: grep the imports of that package (including through a wrapper of the project's own) and the calls to the flawed function. Follow the argument back: does outside input (a request, an uploaded file, a URL, text from another user) reach it? Is the package only used at build or test time, never in what ships? Is it a transitive dependency whose flawed part the direct dependency does not call?
+- Ruled out if: nothing in the project imports the flawed entry point; or it is only reached with constant, server-chosen input; or the package is a development-only dependency that never runs with production data or keys. Name which one.
+- Not ruled out by: "we only use a small part of it" without checking which part; the package being transitive (the direct dependency may call the flawed code with your input); the flaw needing "a special input" that a request body can carry.
+- How to fix: update to the fixed version (the finding names it). When that is not possible now, block the input before the call (size, shape, allowlist) and say so; for a development-only package, the update can wait and the finding can be ignored from the dashboard with that reason.
+- What to say: for each one, "reachable" (with the file and the path from the input), "not reachable" (with the reason) or "cannot tell from the code" (with what is missing). The reachable ones go first in the answer.
+- CWE: CWE-1395

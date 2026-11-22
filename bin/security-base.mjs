@@ -44,18 +44,44 @@ function walk(dir, root, out) {
   }
 }
 
+// Arquivos que existem e a checagem não conseguiu ler (acima de 1 MB, binário, sem permissão): o que já foi
+// achado neles não pode fechar como "corrigido" só porque desta vez ninguém olhou.
+const unread = new Set()
+/** Zera a lista de arquivos não lidos (começo de cada checagem). */
+export const startReadLog = () => unread.clear()
+/** Arquivos que a checagem tentou ler e não conseguiu, em ordem. */
+export const unreadFiles = () => [...unread].sort()
+
 export function readText(root, rel) {
   try {
     const abs = path.join(root, rel)
     const st = fs.statSync(abs)
-    if (!st.isFile() || st.size > MAX_FILE) return null
+    if (!st.isFile()) return null
+    if (st.size > MAX_FILE) return skipRead(rel)
     const text = fs.readFileSync(abs, 'utf8')
-    return text.includes('\0') ? null : text
-  } catch {
-    // Arquivo que sumiu, sem permissão ou ilegível: fica fora da checagem, como se não existisse.
-    return null
+    return text.includes('\0') ? skipRead(rel) : text
+  } catch (err) {
+    // Arquivo que sumiu: fica fora da checagem, como se não existisse (o que havia nele sumiu de verdade).
+    // Sem permissão ou ilegível: existe e não foi lido.
+    return err?.code === 'ENOENT' || err?.code === 'ENOTDIR' ? null : skipRead(rel)
   }
 }
+
+function skipRead(rel) {
+  unread.add(rel.split(path.sep).join('/'))
+  return null
+}
+
+/**
+ * O achado pode ser conferido relendo só o arquivo dele? Só chave e código num arquivo. Pacote, banco, configuração
+ * e histórico são do projeto inteiro. Espelho de `fileScoped` em src/lib/security-scope.ts (o servidor fecha pela
+ * mesma regra; o teste compara as duas).
+ */
+export const fileScoped = (f) => (f.source === 'secret' || f.source === 'code') && !!f.file
+
+// .env e variações (.env.local, .env.production…), menos os de exemplo.
+const ENV_FILE = /(^|\/)\.env(\.[\w.-]+)?$/i
+export const isEnvFile = (rel) => ENV_FILE.test(rel) && !EXAMPLE_PATH.test(rel)
 
 export function lineOf(text, index) {
   let line = 1

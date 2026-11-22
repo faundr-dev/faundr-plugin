@@ -9,11 +9,18 @@ import { maskPayload } from './security-secrets.mjs'
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell'])
 const TASK_STATUS = new Set(['pending', 'in_progress', 'completed', 'deleted'])
 
+// A máscara tem regras que ficam lentas num texto enorme (o tempo cresce com o quadrado do tamanho: 200 mil
+// caracteres repetitivos levavam segundos, dentro do hook). Só sai o começo do texto, então só o começo é mascarado.
+const MASK_LIMIT = 50_000
+
 // Texto que sai: chaves mascaradas e no máximo `max` caracteres.
 function text(value, max) {
   if (typeof value !== 'string' || !value) return undefined
-  const masked = maskPayload(value)
-  return masked.length > max ? `${masked.slice(0, max)}…` : masked
+  // Folga de 4 vezes o que sai: a máscara encurta as chaves, e o corte não pode mudar o que cabe na saída.
+  const limit = Math.max(MASK_LIMIT, max * 4)
+  const cut = value.length > limit
+  const masked = maskPayload(cut ? value.slice(0, limit) : value)
+  return cut || masked.length > max ? `${masked.slice(0, max)}…` : masked
 }
 
 // Pedido e resposta podem trazer código colado: o bloco entre ``` não sai.

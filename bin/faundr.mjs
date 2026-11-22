@@ -64,10 +64,13 @@
 //   faundr security-scan [--files a,b]         security check without AI (keys, packages, database); --edited: only what was edited
 //   faundr security-show [S-<n>]               open security issues, or the details of one
 //   faundr security-resolve S-<n>              reruns the check and only closes it if the issue is gone
+//       --verified "<how you checked>"         AI review finding: fixed, or no longer applies
+//       --rotated "<what, where and when>"     key in the git history: already replaced at the provider (it will not reopen)
 //   faundr security-ignore S-<n> --reason …    ignores with a reason (not-an-issue | accepted-risk), for 30 days
 //   faundr security-context [--files a,b]      context for the agent to do the AI review ("security" skill)
 //   faundr security-finding "<title>" …        records an issue found in the AI review (S-n)
 //   faundr security-review-done --areas "…"    records what the review covered
+//       [--clean "…"] [--summary "…"] [--quick] [--files-read <file with one path per line>] [--verified <n>] [--ruled-out <n>]
 //   faundr skill-report "<skill>" --areas … (--file <json> | --none)  records the result of a connected skill (via /name)
 //   faundr security-import <file>              imports Snyk (--json), SARIF from any tool or the Supabase Security Advisor
 //   faundr security-supabase [--ref <ref>]     Supabase Security Advisor through the API (token in SUPABASE_ACCESS_TOKEN)

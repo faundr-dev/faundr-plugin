@@ -1,5 +1,5 @@
 # Logging and monitoring (knowing what happened and noticing the attack)
-When to read: always, in a quick pass, and carefully when the app has money, admins, customer data or several people per organization. Here you are not looking for an open door, but for whether the owner will **notice** and **understand** a problem: who did what, when, and whether someone is trying right now. Logs that leak passwords or personal data are in `data-exposure.md` (`logs-com-segredo-ou-pii`); production errors are Faundr's Errors section (`/faundr:errors-setup`).
+When to read: always, and with extra care when the app has money, admins, customer data or several people per organization. Here you are not looking for an open door, but for whether the owner will **notice** and **understand** a problem: who did what, when, and whether someone is trying right now. Logs that leak passwords or personal data are in `data-exposure.md` (`logs-com-segredo-ou-pii`); production errors are Faundr's Errors section (`/faundr:errors-setup`).
 
 Golden rule: every action that changes money, access or another person's data leaves a record that the user themselves can't delete or forge.
 

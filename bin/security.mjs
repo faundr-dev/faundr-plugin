@@ -10,37 +10,63 @@
 // correção) rebaixa ou suprime o achado, sempre dizendo o motivo, e a impressão digital (sem número de linha)
 // deixa o mesmo problema com o mesmo S-n entre uma checagem e outra.
 import { spawnSync } from 'node:child_process'
+import fs from 'node:fs'
+import path from 'node:path'
 import { LANG_LOCKFILE } from './lockfiles-langs.mjs'
 import { LANG_TECH, langDeps } from './stack-langs.mjs'
 import { LOCKFILE } from './lockfiles.mjs'
 import { allDeps } from './parts.mjs'
 import { remoteDatabaseFindings } from './env-target.mjs'
 import { t } from './i18n.mjs'
-import { lower, hash, BINARY, LOCKFILES, projectFiles, readText, lineText, mask, TEST_PATH, EXAMPLE_PATH, DOC_PATH } from './security-base.mjs'
-import { shownName, keyOf, provider, findSecrets, publicSecretValueFindings, scanSecrets } from './security-secrets.mjs'
-import { scanDatabase } from './security-database.mjs'
+import { lower, hash, BINARY, LOCKFILES, projectFiles, readText, lineText, mask, TEST_PATH, EXAMPLE_PATH, DOC_PATH, isEnvFile, startReadLog, unreadFiles } from './security-base.mjs'
+import { shownName, keyOf, provider, findSecrets, publicSecretValueFindings, scanSecrets, isRuleDefinitionPath } from './security-secrets.mjs'
+import { scanDatabase, splitSql } from './security-database.mjs'
 import { scanDependencies } from './security-deps.mjs'
 import { CODE_FILE, OTHER_CODE, SERVER_ROUTE, scanCode, maskSecretsIn } from './security-code.mjs'
 import { HEADER_FILES, scanConfig } from './security-config.mjs'
-export { projectFiles, mask } from './security-base.mjs'
+export { projectFiles, mask, fileScoped, isEnvFile } from './security-base.mjs'
 export { maskPayload, findSecrets, publicSecretValueFindings, guardContent } from './security-secrets.mjs'
 export { destructiveMigration, splitSql } from './security-database.mjs'
 export { compareVersions, cvss3 } from './security-deps.mjs'
 
 // ---- chaves no histórico do git --------------------------------------------------------------
 
+// As pontas de todas as referências (branches, tags, remotos) e o HEAD: até onde o histórico foi lido.
+function historyTips(root) {
+  const run = (args) => spawnSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true })
+  const refs = run(['for-each-ref', '--format=%(objectname)'])
+  const head = run(['rev-parse', '-q', '--verify', 'HEAD'])
+  const all = [...(refs.status === 0 ? refs.stdout.split('\n') : []), ...(head.status === 0 ? [head.stdout] : [])]
+  return [...new Set(all.map((h) => h.trim()).filter((h) => /^[0-9a-f]{40,64}$/.test(h)))].sort()
+}
+
+function historyLog(root, maxCommits, since) {
+  return spawnSync(
+    'git',
+    ['log', '--all', '-p', '--no-color', '--no-ext-diff', '--unified=0', '--reverse', `--max-count=${maxCommits}`, '--format=%x01%H%x09%ad', '--date=short', ...(since ? ['--stdin'] : [])],
+    { cwd: root, encoding: 'utf8', maxBuffer: 512 * 1024 * 1024, windowsHide: true, ...(since ? { input: `${since.map((h) => `^${h}`).join('\n')}\n` } : {}) },
+  )
+}
+
 /**
  * Procura chaves nas linhas adicionadas dos commits (até `maxCommits`, todas as branches).
  * Chave apagada do código continua no histórico: quem clonar o repositório ainda a encontra.
  * Cada chave aparece uma vez (no commit mais antigo em que entrou).
+ *
+ * `since`: as pontas (`tips`) devolvidas pela leitura anterior — aí só os commits novos são lidos (segundos, em vez
+ * de reler o histórico inteiro). Se alguma não existe mais (histórico reescrito), lê tudo de novo.
+ * Devolve `complete`: o histórico inteiro foi lido nesta chamada (não foi incremental nem bateu no teto de
+ * commits). Só então o que não apareceu mais pode fechar; `truncated`: bateu no teto e o resto ficou sem ler.
  */
-export function scanHistory(root, { maxCommits = 3000 } = {}) {
-  const r = spawnSync(
-    'git',
-    ['log', '--all', '-p', '--no-color', '--no-ext-diff', '--unified=0', '--reverse', `--max-count=${maxCommits}`, '--format=%x01%H%x09%ad', '--date=short'],
-    { cwd: root, encoding: 'utf8', maxBuffer: 512 * 1024 * 1024, windowsHide: true },
-  )
-  if (r.status !== 0) throw new Error(`git log failed: ${(r.stderr || '').trim().slice(0, 200)}`)
+export function scanHistory(root, { maxCommits = 3000, since = null } = {}) {
+  const tips = historyTips(root)
+  let incremental = Array.isArray(since) && since.length > 0
+  let r = historyLog(root, maxCommits, incremental ? since : null)
+  if (incremental && r.status !== 0) {
+    incremental = false
+    r = historyLog(root, maxCommits, null)
+  }
+  if (r.status !== 0) throw new Error(`git log failed: ${(r.stderr || r.error?.message || '').trim().slice(0, 200)}`)
   const current = new Set(projectFiles(root).files)
   const seen = new Map()
   let commit = null
@@ -49,7 +75,8 @@ export function scanHistory(root, { maxCommits = 3000 } = {}) {
   let added = []
   let commits = 0
   const flush = () => {
-    if (!file || !added.length || BINARY.test(file) || LOCKFILES.test(file)) return (added = [])
+    // Os próprios arquivos de regra do Faundr têm padrões de chave como texto: não são segredo, nem no histórico.
+    if (!file || !added.length || BINARY.test(file) || LOCKFILES.test(file) || isRuleDefinitionPath(file)) return (added = [])
     const text = added.join('\n')
     for (const s of findSecrets(text, file)) {
       if (s.confidence === 'low' || seen.has(s.secret)) continue
@@ -103,7 +130,8 @@ export function scanHistory(root, { maxCommits = 3000 } = {}) {
     }
     findings.push(TEST_PATH.test(s.file) || EXAMPLE_PATH.test(s.file) ? { ...f, severity: 'low' } : f)
   }
-  return { findings, commits }
+  const truncated = commits >= maxCommits
+  return { findings, commits, tips, incremental, truncated, complete: !incremental && !truncated }
 }
 
 // ---- mapa do projeto para a revisão com IA ---------------------------------------------------
@@ -200,20 +228,81 @@ export function projectMap(root) {
   const stack = [...new Set([...STACK_SIGNS.filter(([, test]) => test(deps, files)).map(([name]) => name), ...langFrameworks, ...langs])]
   const other = files.filter((f) => OTHER_CODE.test(f) && !TEST_PATH.test(f))
   const code = files.filter((f) => CODE_FILE.test(f) && !TEST_PATH.test(f) && !/\.d\.ts$/.test(f))
-  const pick = (re) => code.filter((f) => re.test(f)).slice(0, 60)
+  const pick = (re) => code.filter((f) => re.test(f))
+  // Sem tetos: a revisão precisa da lista inteira (com 80 rotas de 300, as outras 220 nunca eram lidas e o título
+  // mostrava 80 como se fosse o total). As migrações vêm da mais nova para a mais antiga: a última é a que vale.
   return {
     stack,
     topics: TOPICS.filter(([, when]) => when(stack, files)).map(([t]) => t),
     entry: {
-      'Server routes and functions': code.filter((f) => SERVER_ROUTE.test(f)).slice(0, 80),
-      'Server actions / server functions': code.filter((f) => /^\s*['"]use server['"]|createServerFn\(/m.test(readText(root, f) ?? '')).slice(0, 40),
+      'Server routes and functions': code.filter((f) => SERVER_ROUTE.test(f)),
+      'Server actions / server functions': code.filter((f) => /^\s*['"]use server['"]|createServerFn\(/m.test(readText(root, f) ?? '')),
       'Middleware and route protection': pick(/(^|\/)(middleware|proxy)\.[mc]?[jt]s$|auth[^/]*\.(t|j)sx?$|guard/i),
-      'Routes, controllers and handlers in other languages': other.filter((f) => /(controller|handler|route|router|endpoint|api|server|middleware|auth|main)[^/]*\.\w+$|\/(controllers?|handlers?|routes?|api|endpoints?)\//i.test(f)).slice(0, 80),
-      'Migrations and database rules': files.filter((f) => /(^|\/)supabase\/.*\.sql$|\.rules$|database\.rules\.json$|prisma\/schema\.prisma$|drizzle\/.*\.(sql|ts)$|(^|\/)(migrations?|db\/migrate)\/.*\.(sql|php|rb|py|go|cs|java|kt)$/i.test(f)).slice(0, 60),
-      'CI and automation': files.filter((f) => CI_FILE.test(f)).slice(0, 30),
-      'Containers and server': files.filter((f) => /(^|\/)(Dockerfile[\w.-]*|(docker-)?compose\.ya?ml|nginx\.conf|Caddyfile)$|(^|\/)(k8s|kubernetes|helm)\/.*\.ya?ml$/i.test(f)).slice(0, 30),
-      Configuration: files.filter((f) => HEADER_FILES.test(f) || /(^|\/)(\.env\.example|firebase\.json)$/.test(f)).slice(0, 30),
+      'Routes, controllers and handlers in other languages': other.filter((f) => /(controller|handler|route|router|endpoint|api|server|middleware|auth|main)[^/]*\.\w+$|\/(controllers?|handlers?|routes?|api|endpoints?)\//i.test(f)),
+      'Migrations and database rules': files.filter((f) => /(^|\/)supabase\/.*\.sql$|\.rules$|database\.rules\.json$|prisma\/schema\.prisma$|drizzle\/.*\.(sql|ts)$|(^|\/)(migrations?|db\/migrate)\/.*\.(sql|php|rb|py|go|cs|java|kt)$/i.test(f)).sort().reverse(),
+      'CI and automation': files.filter((f) => CI_FILE.test(f)),
+      'Containers and server': files.filter((f) => /(^|\/)(Dockerfile[\w.-]*|(docker-)?compose\.ya?ml|nginx\.conf|Caddyfile)$|(^|\/)(k8s|kubernetes|helm)\/.*\.ya?ml$/i.test(f)),
+      Configuration: files.filter((f) => HEADER_FILES.test(f) || /(^|\/)(\.env\.example|firebase\.json)$/.test(f)),
     },
+  }
+}
+
+/** Arquivos que a revisão com IA lê: código, migrações e regras de banco; sem testes nem tipos gerados. */
+export function reviewFiles(root) {
+  return projectFiles(root)
+    .files.filter((f) => (CODE_FILE.test(f) || OTHER_CODE.test(f) || /\.(sql|rules)$/i.test(f)) && !TEST_PATH.test(f) && !/\.d\.ts$/.test(f))
+    .sort()
+}
+
+const sqlName = (raw) => raw.replace(/"/g, '').toLowerCase()
+const bare = (raw) => sqlName(raw).replace(/^public\./, '')
+
+/**
+ * O que o banco tem, lido das migrações do Supabase na ordem (a última definição vale): funções "security
+ * definer", políticas por tabela, gatilhos e buckets. É o mapa de onde a revisão com IA precisa olhar; quem
+ * decide se está certo é ela.
+ */
+export function databaseInventory(root, files = projectFiles(root).files) {
+  const definers = new Map() // função → onde
+  const policies = new Map() // tabela → Map(política → { command, where })
+  const triggers = new Map() // "gatilho on tabela" → onde
+  const buckets = new Map() // bucket → { public, where }
+  for (const rel of files.filter((f) => /(^|\/)supabase\/.*\.sql$/i.test(f)).sort()) {
+    const text = readText(root, rel)
+    if (!text) continue
+    for (const stmt of splitSql(text)) {
+      const s = stmt.text.replace(/--[^\n]*/g, ' ').replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\s+/g, ' ').trim()
+      const where = `${rel}:${stmt.line}`
+      let m
+      if ((m = s.match(/^create (?:or replace )?function ([\w."]+)/i))) {
+        // A última definição vale: recriada sem "security definer", sai da lista.
+        if (/\bsecurity definer\b/i.test(s)) definers.set(sqlName(m[1]), where)
+        else definers.delete(sqlName(m[1]))
+      } else if ((m = s.match(/^drop function (?:if exists )?([\w."]+)/i))) definers.delete(sqlName(m[1]))
+      else if ((m = s.match(/^create policy ("[^"]+"|\S+) on ([\w."]+)(.*)$/i))) {
+        const table = bare(m[2])
+        if (!policies.has(table)) policies.set(table, new Map())
+        policies.get(table).set(m[1].replace(/"/g, ''), { command: (m[3].match(/ for (all|select|insert|update|delete)\b/i)?.[1] ?? 'all').toLowerCase(), where })
+      } else if ((m = s.match(/^drop policy (?:if exists )?("[^"]+"|\S+) on ([\w."]+)/i))) policies.get(bare(m[2]))?.delete(m[1].replace(/"/g, ''))
+      else if ((m = s.match(/^drop table (?:if exists )?([\w."]+)/i))) policies.delete(bare(m[1]))
+      else if ((m = s.match(/^create (?:or replace )?(?:constraint )?trigger ("[^"]+"|\S+) .*? on ([\w."]+)/i))) triggers.set(`${m[1].replace(/"/g, '')} on ${bare(m[2])}`, where)
+      else if ((m = s.match(/^drop trigger (?:if exists )?("[^"]+"|\S+) on ([\w."]+)/i))) triggers.delete(`${m[1].replace(/"/g, '')} on ${bare(m[2])}`)
+      else if (/^insert into storage\.buckets/i.test(s)) {
+        const cols = s.match(/buckets ?\(([^)]*)\)/i)?.[1]?.split(',').map((c) => c.trim().toLowerCase()) ?? []
+        // Uma linha de valores por bucket: (…), (…)
+        for (const row of s.slice(s.search(/\bvalues\b/i)).match(/\(([^()]*)\)/g) ?? []) {
+          const values = row.slice(1, -1).split(',').map((v) => v.trim().replace(/^'|'$/g, ''))
+          const name = values[cols.indexOf('id')] ?? values[cols.indexOf('name')]
+          if (name) buckets.set(name, { public: /^true$/i.test(values[cols.indexOf('public')] ?? ''), where })
+        }
+      }
+    }
+  }
+  return {
+    definers: [...definers].map(([name, where]) => ({ name, where })),
+    policies: [...policies].filter(([, list]) => list.size).map(([table, list]) => ({ table, policies: [...list].map(([name, p]) => ({ name, ...p })) })),
+    triggers: [...triggers].map(([name, where]) => ({ name, where })),
+    buckets: [...buckets].map(([name, b]) => ({ name, ...b })),
   }
 }
 
@@ -245,20 +334,29 @@ export function applyNoiseRules(f) {
 
 /**
  * Checagem completa (ou só de alguns arquivos). `scopes` diz ao servidor o que foi olhado, para que só
- * o que foi olhado e não apareceu mais conte como corrigido.
+ * o que foi olhado e não apareceu mais conte como corrigido: cada escopo leva em `skipped` os arquivos que não deu
+ * para ler (acima de 1 MB, binário, sem permissão) e, na parcial, eles saem da lista de lidos.
+ *
+ * `history`: false (não lê o histórico do git) ou { tips, commits } — as pontas e o total da leitura anterior
+ * (tips nulo: lê o histórico inteiro). O resultado traz `history` (o que guardar para a próxima) e `readAt`
+ * (quando a leitura começou: o que foi corrigido depois disso o servidor não reabre).
  */
 export async function scanProject(root, { only = null, deps = true, history = false } = {}) {
   const started = Date.now()
+  const readAt = new Date(started).toISOString()
+  startReadLog()
   const { files: all, tracked } = projectFiles(root)
   const files = only ? all.filter((f) => only.includes(f)) : all
-  const scopes = [
-    { source: 'secret', files: only ? files : null },
-    { source: 'code', files: only ? files : null },
-  ]
-  const findings = [...scanSecrets(root, files, { tracked, envDir: only ? null : root }), ...scanCode(root, files)]
+  // Os escopos de chave e de código (por arquivo) fecham no fim, quando se sabe o que não deu para ler.
+  const scopes = []
+  const secrets = scanSecrets(root, files, { tracked, envDir: only ? null : root })
+    // Variável pública com segredo num .env que não está no git: é do computador desta pessoa.
+    .map((f) => (f.rule_id === 'public-env-secret' && f.file && isEnvFile(f.file) && !tracked?.has(f.file) ? { ...f, local: true } : f))
+  const findings = [...secrets, ...scanCode(root, files)]
   const stats = { files: files.length }
   const errors = []
   let snapshot = null
+  let historyState = null
 
   // O que falta no projeto inteiro (limite de pedidos, cabeçalhos, regras do Firebase): na checagem completa
   // ou quando um arquivo que muda essa resposta foi editado.
@@ -280,10 +378,15 @@ export async function scanProject(root, { only = null, deps = true, history = fa
     try {
       const d = await scanDependencies(root, all)
       findings.push(...d.findings)
-      scopes.push({ source: 'dependency', files: null })
       stats.packages = d.packages
       stats.lockfiles = d.lockfiles.length
-      snapshot = d.snapshot
+      // Lockfile ilegível ou corrompido: os pacotes dele não foram conferidos. Sem o escopo, os achados de pacote
+      // não fecham; sem a lista, a guardada no servidor (checagem diária) não é trocada por uma incompleta.
+      if (d.errors.length) errors.push(...d.errors.map((e) => t(`packages: ${e}`, `pacotes: ${e}`)))
+      else {
+        scopes.push({ source: 'dependency', files: null })
+        snapshot = d.snapshot
+      }
     } catch (err) {
       // Sem internet: os achados de pacotes da checagem anterior continuam valendo.
       errors.push(t(`packages: ${err.message}`, `pacotes: ${err.message}`))
@@ -291,14 +394,36 @@ export async function scanProject(root, { only = null, deps = true, history = fa
   }
   if (history && !only) {
     try {
-      const h = scanHistory(root)
+      const before = history === true ? null : history
+      const h = scanHistory(root, { since: before?.tips ?? null })
       findings.push(...h.findings)
-      scopes.push({ source: 'history', files: null })
-      stats.commits = h.commits
+      // Só a leitura do histórico inteiro cobre o escopo: a incremental (só os commits novos) e a que bateu no
+      // teto de commits acrescentam achados, mas não fecham os que não viram.
+      if (h.complete) scopes.push({ source: 'history', files: null })
+      stats.commits = h.incremental ? (before?.commits ?? 0) + h.commits : h.commits
+      if (h.truncated) stats.history_truncated = true
+      historyState = { tips: h.tips, commits: stats.commits, full: !h.incremental }
     } catch (err) {
       errors.push(t(`git history: ${err.message}`, `histórico do git: ${err.message}`))
     }
   }
   const unique = [...new Map(findings.map((f) => [f.fingerprint, f])).values()].map(applyNoiseRules)
-  return { findings: unique, scopes, stats: { ...stats, ms: Date.now() - started }, errors, snapshot }
+
+  const skipped = unreadFiles()
+  // Parcial: foi lido o que é do projeto, ou o que não existe mais (apagado: o que havia nele sumiu de verdade).
+  // O que existe e não é do projeto (ignorado pelo git) não foi lido aqui.
+  const inProject = new Set(all)
+  const read = only
+    ? [...new Set(only.map((f) => String(f).replace(/\\/g, '/')))].filter((f) => !skipped.includes(f) && (inProject.has(f) || !fs.existsSync(path.join(root, f))))
+    : null
+  const withSkipped = (s) => (skipped.length ? { ...s, skipped } : s)
+  return {
+    findings: unique,
+    scopes: [{ source: 'secret', files: read }, { source: 'code', files: read }, ...scopes].map(withSkipped),
+    stats: { ...stats, ms: Date.now() - started },
+    errors,
+    snapshot,
+    history: historyState,
+    readAt,
+  }
 }
