@@ -491,3 +491,24 @@ test('linguagens: consulta e comando em várias linhas acusam; parametrizados n�
   const all = await findingsOf({ 'app/page.component.ts': 'export const a = (s) => s.bypassSecurityTrustHtml( "<b>fixo</b>" )\n' })
   assert.deepEqual(all.filter((f) => f.rule_id === 'angular-bypass-sanitizer'), [])
 })
+
+test('banco: "alter policy" é relido — abrir a condição acusa, fechar some, e renomear mantém a política', async () => {
+  const OWN = `${NOTES}create policy "upd" on public.notes for update to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);`
+  assert.deepEqual(await db(OWN), [])
+  // Uma migração posterior troca a condição por "está logado": passa a valer a nova.
+  assert.deepEqual(await db(OWN, 'alter policy "upd" on public.notes using (auth.uid() is not null) with check (auth.uid() is not null);'), ['rls-policy-logged-in-only high'])
+  // E o contrário: a política aberta corrigida depois por alter policy deixa de acusar.
+  const OPEN = `${NOTES}create policy "upd" on public.notes for update to authenticated using (true) with check (true);`
+  assert.ok((await db(OPEN)).length > 0)
+  assert.deepEqual(await db(OPEN, 'alter policy "upd" on public.notes using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);'), [])
+  // Renomear não muda a condição: o problema continua, com o nome novo.
+  assert.deepEqual(await db(OWN, 'alter policy "upd" on public.notes using (auth.uid() is not null);', 'alter policy "upd" on public.notes rename to "upd2";'), ['rls-policy-logged-in-only high'])
+  // Trocar só para quem vale mantém a condição de antes.
+  assert.deepEqual(await db(OWN, 'alter policy "upd" on public.notes to authenticated, anon;'), [])
+})
+
+test('banco: update com using de "está logado" acusa mesmo com with check de dono (a conta toma a linha de outra pessoa)', async () => {
+  assert.deepEqual(await db(`${NOTES}create policy "upd" on public.notes for update to authenticated using (auth.uid() is not null) with check ((select auth.uid()) = user_id);`), ['rls-policy-logged-in-only high'])
+  // O contrário (using de dono, with check fraco) não é este problema.
+  assert.deepEqual(await db(`${NOTES}create policy "upd" on public.notes for update to authenticated using ((select auth.uid()) = user_id) with check (auth.uid() is not null);`), [])
+})

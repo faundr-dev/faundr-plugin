@@ -574,6 +574,20 @@ function weakCondition(expr) {
   return null
 }
 
+/**
+ * O texto da política depois de um "alter policy … on t <mudança>": o que a mudança diz (para quem, using, with check)
+ * substitui o que a política tinha; o resto (comando, permissiva ou restritiva) continua. Sem a política original
+ * não há o comando ("for update…"), então devolve null.
+ */
+export function alteredPolicyRest(oldRest, change) {
+  if (oldRest === null) return null
+  const before = policyParts(oldRest)
+  const roles = change.match(/ to ([\w", ]+?)(?: using| with check|$)/i)?.[1]?.toLowerCase() ?? before.roles
+  const using = change.match(/ using (\(.*?\))(?= with check |$)/i)?.[1] ?? before.using
+  const check = change.match(/ with check (\(.*\))$/i)?.[1] ?? before.check
+  return `${before.restrictive ? ' as restrictive' : ''} for ${before.cmd} to ${roles}${using ? ` using ${using}` : ''}${check ? ` with check ${check}` : ''}`
+}
+
 function policyParts(rest) {
   return {
     cmd: (rest.match(/ for (all|select|insert|update|delete)\b/i)?.[1] ?? 'all').toLowerCase(),
@@ -633,8 +647,10 @@ function policyStateFindings(tables, state) {
         continue
       }
 
-      // Escrita só com "está logado": qualquer conta mexe nas linhas de todo mundo.
-      const conditions = { update: [using, check ?? using], delete: [using], all: [using, check ?? using], insert: [check] }[cmd] ?? []
+      // Escrita só com "está logado": qualquer conta mexe nas linhas de todo mundo. Em update (e all) quem decide em
+      // quais linhas a conta mexe é o using: com ele fraco, um "with check" de dono não protege — a conta pega a linha
+      // de outra pessoa e grava com o próprio id (toma a linha para si).
+      const conditions = { update: [using], delete: [using], all: [using], insert: [check] }[cmd] ?? []
       if (!conditions.length || conditions.some((c) => !c || weakCondition(c) !== 'logged')) continue
       if (cmd === 'insert') {
         // Em tabela sem coluna de dono nem de time, "quem está logado insere" costuma ser de propósito (feedback,
@@ -790,11 +806,29 @@ function databaseStatement(stmt, rel, tables, fns, state = newState()) {
     if (t.schema === 'public') tables.get(t.name)?.policies.delete(m[1].replace(/"/g, ''))
     // A política "true" que uma migração posterior apagou não é mais um problema.
     state.immediate.delete(`database|rls-policy-always-true|${t.name}|${m[1].replace(/"/g, '')}`)
-  } else if ((m = s.match(/^alter policy ("[^"]+"|\S+) on ([\w."]+)/i))) {
-    // Política alterada: a condição nova não é lida aqui, então ela fica desconhecida (sem achado).
+  } else if ((m = s.match(/^alter policy ("[^"]+"|\S+) on ([\w."]+)(.*)$/i))) {
+    // Política alterada: a condição nova substitui a antiga e é lida como se a política tivesse sido criada assim.
     const t = tableName(m[2])
-    if (t.schema === 'public') tables.get(t.name)?.policies.delete(m[1].replace(/"/g, ''))
-    state.immediate.delete(`database|rls-policy-always-true|${t.name}|${m[1].replace(/"/g, '')}`)
+    const name = m[1].replace(/"/g, '')
+    state.immediate.delete(`database|rls-policy-always-true|${t.name}|${name}`)
+    const policies = t.schema === 'public' ? tables.get(t.name)?.policies : null
+    const old = policies?.get(name)
+    const renamed = m[3].match(/^\s*rename to ("[^"]+"|\S+)/i)
+    if (renamed) {
+      if (old) {
+        policies.delete(name)
+        policies.set(renamed[1].replace(/"/g, ''), old)
+      }
+      return null
+    }
+    const rest = alteredPolicyRest(old?.rest ?? null, m[3])
+    // Sem a política original (criada fora das migrações) e sem o comando dela, não dá para saber o que vale.
+    if (rest === null) {
+      policies?.delete(name)
+      return null
+    }
+    policies?.set(name, { rest, file: rel, line: stmt.line })
+    return policyFinding([m[0], m[1], m[2], rest], rel, stmt)
   } else if ((m = s.match(/^create (?:or replace )?(?:temp(?:orary)? )?(?:recursive )?view ([\w."]+) ?(?:\([^)]*\) ?)?(?:with ?\(([^)]*)\) ?)?as (.*)$/i))) {
     // "create or replace view" sem "with (security_invoker…)" volta a view para o padrão (poder do dono).
     const v = tableName(m[1])

@@ -19,7 +19,7 @@ import { allDeps } from './parts.mjs'
 import { remoteDatabaseFindings } from './env-target.mjs'
 import { t } from './i18n.mjs'
 import { lower, hash, BINARY, LOCKFILES, projectFiles, readText, lineText, mask, TEST_PATH, EXAMPLE_PATH, DOC_PATH, isEnvFile, startReadLog, unreadFiles } from './security-base.mjs'
-import { shownName, keyOf, provider, findSecrets, publicSecretValueFindings, scanSecrets, isRuleDefinitionPath } from './security-secrets.mjs'
+import { shownName, keyOf, provider, findSecrets, findCommonSecrets, commonSecretText, publicSecretValueFindings, scanSecrets, isRuleDefinitionPath } from './security-secrets.mjs'
 import { scanDatabase, splitSql } from './security-database.mjs'
 import { scanDependencies } from './security-deps.mjs'
 import { CODE_FILE, OTHER_CODE, SERVER_ROUTE, scanCode, maskSecretsIn } from './security-code.mjs'
@@ -78,9 +78,16 @@ export function scanHistory(root, { maxCommits = 3000, since = null } = {}) {
     // Os próprios arquivos de regra do Faundr têm padrões de chave como texto: não são segredo, nem no histórico.
     if (!file || !added.length || BINARY.test(file) || LOCKFILES.test(file) || isRuleDefinitionPath(file)) return (added = [])
     const text = added.join('\n')
-    for (const s of findSecrets(text, file)) {
+    const known = findSecrets(text, file)
+    for (const s of known) {
       if (s.confidence === 'low' || seen.has(s.secret)) continue
       seen.set(s.secret, { ...s, commit, date, file, line: lineText(text, s.index) })
+    }
+    // Senha, segredo, URL com usuário e senha e segredo de webhook escritos por extenso: a regra por provedor não os
+    // conhece, e um .env que já foi para o git é exatamente onde eles moram.
+    for (const s of findCommonSecrets(text, file, known)) {
+      if (seen.has(s.secret)) continue
+      seen.set(s.secret, { ...s, common: true, confidence: 'medium', commit, date, file, line: lineText(text, s.index) })
     }
     added = []
   }
@@ -99,14 +106,18 @@ export function scanHistory(root, { maxCommits = 3000, since = null } = {}) {
 
   const findings = []
   for (const [secret, s] of seen) {
-    const p = provider(s.ruleId)
+    const common = s.common ? commonSecretText(s.ruleId) : null
+    // Formato comum (senha, segredo genérico): não há provedor no nome da regra; o texto diz o que é e onde trocar.
+    const p = common ? { name: t(common.fix[0], common.fix[1].replace(/^no /, '')), url: null } : provider(s.ruleId)
     const stillThere = current.has(s.file) && (readText(root, s.file) ?? '').includes(secret)
     const f = {
       source: 'history',
       rule_id: s.ruleId,
-      severity: s.dangerous ? 'critical' : 'high',
+      severity: common ? common.severity : s.dangerous ? 'critical' : 'high',
       confidence: s.confidence,
-      title: t(`${keyOf(p)} in the git history`, `${keyOf(p)} no histórico do git`),
+      title: common
+        ? t(`${common.title[0].replace(/ (written )?in the code$| written in an Authorization header$/, '')} in the git history`, `${common.title[1].replace(/ (escrit[ao] )?no código$| escrito num cabeçalho Authorization$/, '')} no histórico do git`)
+        : t(`${keyOf(p)} in the git history`, `${keyOf(p)} no histórico do git`),
       detail: t(
         `Commit ${s.commit.slice(0, 8)} (${s.date}) added to ${s.file} what looks like a secret key: ${mask(secret)}. ${stillThere ? 'It is still in the file today.' : 'It was already deleted from the code, but it stays in the history.'}`,
         `O commit ${s.commit.slice(0, 8)} (${s.date}) adicionou em ${s.file} o que parece ser uma chave secreta: ${mask(secret)}. ${stillThere ? 'Ela ainda está no arquivo hoje.' : 'Ela já foi apagada do código, mas continua no histórico.'}`,
@@ -125,7 +136,8 @@ export function scanHistory(root, { maxCommits = 3000, since = null } = {}) {
       ),
       file: s.file,
       line: null,
-      snippet: maskSecretsIn(s.line.trim()).slice(0, 240),
+      // A máscara por provedor não conhece senha por extenso: o próprio segredo achado é trocado pela versão mascarada.
+      snippet: maskSecretsIn(s.line.trim()).replaceAll(secret, mask(secret)).slice(0, 240),
       fingerprint: `history|${s.ruleId}|${hash(secret)}`,
     }
     findings.push(TEST_PATH.test(s.file) || EXAMPLE_PATH.test(s.file) ? { ...f, severity: 'low' } : f)

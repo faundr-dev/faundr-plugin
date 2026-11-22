@@ -288,7 +288,9 @@ export function findCommonSecrets(text, rel = '', known = []) {
   const sample = EXAMPLE_PATH.test(rel) || TEST_PATH.test(rel) || DOC_PATH.test(rel)
   // No Dockerfile a regra docker-secret-in-image já cobre ENV/ARG.
   const generic = !sample && !LOCALE_PATH.test(rel) && !DOCKER_FILE.test(rel)
-  const unquoted = UNQUOTED_ENV.test(rel)
+  // .env: na árvore de trabalho quem cobre é a regra env-in-git (quem chama nem passa o arquivo); no histórico do git
+  // ele é justamente onde a senha por extenso mora.
+  const unquoted = UNQUOTED_ENV.test(rel) || isEnvFile(rel)
   let offset = 0
   for (const line of text.split('\n')) {
     const start = offset
@@ -354,6 +356,9 @@ const COMMON_TEXT = {
     fix: ['the service that issued the token', 'no serviço que emitiu o token'],
   },
 }
+
+/** Textos de um achado de formato comum (senha, segredo, URL com senha, webhook do Stripe), para o histórico do git. */
+export const commonSecretText = (ruleId) => COMMON_TEXT[ruleId] ?? null
 
 function commonSecretFinding(rel, text, s) {
   const c = COMMON_TEXT[s.ruleId]

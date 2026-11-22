@@ -98,9 +98,15 @@ export function lineText(text, index) {
 // ---- chaves e senhas ------------------------------------------------------------------------
 
 /** Mostra só o começo e o fim da chave (ex.: "sk_live_ab…wxyz"). O valor inteiro nunca sai do computador. */
+/**
+ * O segredo como aparece no painel: o começo, para a pessoa reconhecer de qual chave se trata (o prefixo do provedor,
+ * como `sk_live_`), e nunca mais que um quarto dele. Antes, de um token de 16 caracteres saíam 9 (5 + 4), o que
+ * encurta demais um chute.
+ */
 export function mask(secret) {
-  if (secret.length <= 12) return `${secret.slice(0, 3)}…`
-  return `${secret.slice(0, Math.min(12, Math.floor(secret.length / 3)))}…${secret.slice(-4)}`
+  if (secret.length <= 12) return `${secret.slice(0, 2)}…`
+  if (secret.length <= 24) return `${secret.slice(0, 4)}…`
+  return `${secret.slice(0, Math.min(8, Math.floor(secret.length / 5)))}…${secret.slice(-2)}`
 }
 
 export function entropy(s) {

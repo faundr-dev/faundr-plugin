@@ -561,3 +561,35 @@ test('texto enorme no hook é cortado antes de mascarar; texto normal sai igual'
   // Chave depois do corte não sai (nem inteira, nem em parte): só o começo do texto vai para o painel.
   assert.ok(!payload(`${'palavra '.repeat(10_000)}${key}`).prompt.includes('sk-ant'))
 })
+
+// ---- Pendências depois do lançamento ----
+
+test('histórico: senha e URL com senha por extenso num .env que já foi para o git viram achado, com nome claro', () => {
+  const pass = 'Pr0d' + 'Senha!x9Q2'
+  const root = repo({ '.env': `DB_PASSWORD=${pass}\nDATABASE_URL=postgresql://app:${'Xk29Lq' + 'Vm73Tz'}@db.empresa.com/prod\n` })
+  git(root, 'rm', '-q', '--cached', '.env')
+  git(root, 'commit', '-q', '-m', 'tira o .env')
+  const { findings } = security.scanHistory(root)
+  const rules = findings.map((f) => f.rule_id).sort()
+  assert.deepEqual(rules, ['hardcoded-password', 'url-with-credentials'])
+  const password = findings.find((f) => f.rule_id === 'hardcoded-password')
+  assert.equal(password.title, 'Senha no histórico do git')
+  assert.equal(password.severity, 'medium')
+  assert.equal(findings.find((f) => f.rule_id === 'url-with-credentials').severity, 'high')
+  assert.ok(!password.detail.includes(pass) && !password.snippet.includes(pass))
+  assert.ok(!/Hardcoded|Chave do/.test(findings.map((f) => f.title).join(' ')))
+})
+
+test('histórico: leitura de variável e placeholder não viram achado', () => {
+  const root = repo({ 'config.ts': 'export const password = process.env.DB_PASSWORD\nexport const url = "postgresql://user:password@localhost/dev"\n' })
+  assert.deepEqual(security.scanHistory(root).findings, [])
+})
+
+test('máscara: nunca mais que um quarto do segredo, e o prefixo do provedor continua visível', () => {
+  for (const secret of ['abcdefghij', 'abcd1234efgh5678', 'x'.repeat(20) + 'yyyy', STRIPE, GITHUB]) {
+    const shown = base.mask(secret).replace('…', '')
+    assert.ok(shown.length * 4 <= secret.length, `${secret.length} → ${shown.length}`)
+  }
+  // Chave do Stripe de verdade tem mais de 100 caracteres: o prefixo inteiro aparece.
+  assert.ok(base.mask('sk_live_' + 'a1B2c3D4'.repeat(12)).startsWith('sk_live_'))
+})
