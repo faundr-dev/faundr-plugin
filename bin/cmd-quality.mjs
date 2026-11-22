@@ -7,7 +7,11 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { findDesignMd } from './design.mjs'
 import { detectStack } from './stack.mjs'
-import { gapLines, SOURCE_FILE } from './language-support.mjs'
+import { gapLines } from './language-support.mjs'
+import { ruleScope } from './quality-common.mjs'
+import { changedFiles, changedLines, NOT_CODE_CHANGE, projectFileLines, recordedLines } from './quality-context.mjs'
+import { branchInfo } from './quality-git.mjs'
+import { isSafePattern } from './rules.mjs'
 import { AGENT, AGENT_SESSION_ID, firstOf, flag, linkedProject, log, readState, textArg, writeState } from './cli-core.mjs'
 import { editedFile, editedLineCount, sessionEditedFiles } from './hook-stop.mjs'
 import { contentLangNote } from './hook-events.mjs'
@@ -29,7 +33,14 @@ async function qualityApi(body) {
   return data
 }
 
-const QUALITY_SEVERITY_TEXT = { high: 'high', medium: 'medium', low: 'low' }
+/**
+ * Manda o resultado da checagem ao painel. Com ele vão a branch (uma branch de trabalho não fecha o que só existe
+ * na principal) e `readAt`, a hora em que a leitura dos arquivos começou (o que foi corrigido depois não reabre).
+ */
+const sendReport = (root, result, readAt, sid) =>
+  qualityApi({ action: 'report', scopes: result.scopes, findings: result.findings, stats: result.stats, errors: result.errors, agent: AGENT, agentSessionId: sid, ...branchInfo(root), readAt })
+
+const QUALITY_SEVERITY_TEXT ={ high: 'high', medium: 'medium', low: 'low' }
 const QUALITY_KIND_TEXT = {
   failure: 'hidden failure',
   types: 'weak type',
@@ -60,21 +71,26 @@ export async function qualityScan(args) {
     if (!only.length) return
   }
   const { runQuality } = await import('./quality-rules.mjs')
-  const result = await runQuality(root, { only: only ?? null })
-  if (sid) writeState(root, { qualityChecked: { session: sid, lines: editedLines } })
+  const readAt = new Date().toISOString()
+  // Em segundo plano (--quiet, começo de toda sessão) aproveita o que o tsc e o ESLint acharam se o código não
+  // mudou; pedida pela pessoa, roda as ferramentas de verdade e renova o que está guardado.
+  const result = await runQuality(root, { only: only ?? null, fresh: !args.includes('--quiet') })
   if (args.includes('--json')) return console.log(JSON.stringify(result, null, 2))
 
-  const sent = args.includes('--no-send')
-    ? null
-    : await qualityApi({ action: 'report', scopes: result.scopes, findings: result.findings, stats: result.stats, errors: result.errors, agent: AGENT, agentSessionId: sid })
+  const sent = args.includes('--no-send') ? null : await sendReport(root, result, readAt, sid)
+  // Só depois de o painel receber: se o envio falhar (sem rede, servidor fora), a próxima checagem olha de novo
+  // os mesmos arquivos em vez de dá-los por conferidos.
+  if (sent && sid) writeState(root, { qualityChecked: { session: sid, lines: editedLines } })
+  if (sent?.truncated) console.log('Warning: more than 3000 findings; the dashboard kept the first 3000 and did not close any finding in this check.')
   if (sent && args.includes('--edited')) await sendSessionSize(root, sid).catch((err) => log(`quality: session size: ${err.message}`))
   if (args.includes('--quiet'))
     return log(`quality: ${result.findings.length} finding(s) in ${result.stats.files} files, ${result.stats.ms} ms${result.errors.length ? `; ${result.errors.length} error(s)` : ''}`)
   console.log(`Quality check: ${result.stats.files} files, ${result.stats.lines} lines of code in ${(result.stats.ms / 1000).toFixed(1)} s.`)
   for (const e of result.errors.slice(0, 5)) console.log(`Warning: ${e}`)
   if (sent) console.log(`Dashboard: ${sent.added} new, ${sent.fixed} fixed, ${sent.reopened} reopened.`)
+  if (sent?.branchHeld?.length) console.log(`${sent.branchHeld.length} finding(s) from another branch were not found here; they stay open on the dashboard until the check runs on the main branch.`)
   const gaps = printGaps(root, 'qualidade', '/faundr:quality --full')
-  if (!result.findings.length) return console.log(gaps ? 'No problems in the parts the automatic check reads.' : 'Lean. No problems found by the automatic check.')
+  if (!result.findings.length) return console.log(gaps ? 'No problems in the parts the automatic check reads.' : 'No problems found by the automatic check. It only matches known patterns: for logic bugs, parts that no longer agree and weak tests, run the AI review (/faundr:quality, or /faundr:quality --full for the whole project).')
   const sorted = [...result.findings].sort((a, b) => QUALITY_ORDER.indexOf(a.severity) - QUALITY_ORDER.indexOf(b.severity))
   console.log(`\nProblems (${sorted.length}):`)
   for (const f of sorted.slice(0, 40)) console.log(`  ${qualityLine(f)}`)
@@ -86,6 +102,7 @@ function printQualityFinding(f) {
   console.log(`Q-${f.ref} [${QUALITY_SEVERITY_TEXT[f.severity]}] ${f.title}`)
   console.log(`Kind: ${QUALITY_KIND_TEXT[f.kind] ?? f.kind} · rule: ${f.rule_id} · status: ${{ open: 'open', fixed: 'fixed', ignored: 'ignored' }[f.status]}`)
   if (f.origin === 'audit') console.log(`AI review · confidence ${f.confidence}${f.label ? ` · label ${f.label}` : ''}${f.saves ? ` · ${f.saves === 1 ? '1 line would go' : `${f.saves} lines would go`}` : ''}`)
+  if (f.needs_check) console.log(`To confirm (not counted as a problem yet). Missing fact: ${f.needs_check}`)
   if (f.file) console.log(`File: ${f.file}${f.line ? `:${f.line}` : ''}`)
   if (f.detail) console.log(`\nWhat it is: ${f.detail}`)
   if (f.impact) console.log(`Why it matters: ${f.impact}`)
@@ -96,12 +113,19 @@ function printQualityFinding(f) {
 export async function qualityShow(args) {
   const text = textArg(args)
   if (/^Q?-?\d+$/i.test(text ?? '')) return printQualityFinding(await qualityApi({ action: 'get', query: text }))
-  const { quality, findings } = await qualityApi({ action: 'list' })
+  const { quality, findings: all } = await qualityApi({ action: 'list' })
+  const bySeverity = (list) => [...list].sort((a, b) => QUALITY_ORDER.indexOf(a.severity) - QUALITY_ORDER.indexOf(b.severity) || a.ref - b.ref)
+  // "A confirmar" (revisão com IA): falta um fato para ser problema; fica à parte e fora da contagem.
+  const findings = all.filter((f) => !f.needs_check)
+  const toConfirm = all.filter((f) => f.needs_check)
   if (!findings.length) console.log('No open quality problems.')
-  for (const f of [...findings].sort((a, b) => QUALITY_ORDER.indexOf(a.severity) - QUALITY_ORDER.indexOf(b.severity) || a.ref - b.ref))
-    console.log(`Q-${f.ref} ${qualityLine(f)}`)
+  for (const f of bySeverity(findings)) console.log(`Q-${f.ref} ${qualityLine(f)}`)
+  if (toConfirm.length) {
+    console.log(`\nTo confirm (${toConfirm.length}) — the AI review needs one fact before these count as problems:`)
+    for (const f of bySeverity(toConfirm)) console.log(`Q-${f.ref} ${qualityLine(f)}\n    Missing fact: ${f.needs_check}`)
+  }
   if (quality) console.log(`\nLast check: ${quality.checked_at}`)
-  if (findings.length) console.log('Details: faundr quality-show Q-<n>')
+  if (all.length) console.log('Details: faundr quality-show Q-<n>')
 }
 
 export async function qualityResolve(args) {
@@ -116,13 +140,29 @@ export async function qualityResolve(args) {
     const r = await qualityApi({ action: 'verify', query: text, note })
     return console.log(`Q-${r.ref} fixed (verified: ${note}).`)
   }
+  // Achado de uma skill conectada: a checagem do Faundr não olha por ele, então nunca diria "corrigido".
+  if (f.origin === 'skill')
+    return console.log(
+      `Q-${f.ref} came from a connected skill (${String(f.rule_id).replace(/^skill:/, '')}): the automatic check does not look at it. It closes when that skill runs again and no longer reports it (faundr skill-report). Keep the fix; do not undo it.`,
+    )
   const { runQuality } = await import('./quality-rules.mjs')
-  // Regra por arquivo: refaz só o arquivo; regra do projeto (pacotes, CLAUDE.md, TODOs): refaz tudo.
-  const projectWide = /^(demais\/dependencia-|instrucoes\/|limpeza\/todo-antigo)/.test(f.rule_id)
-  const result = await runQuality(root, { only: projectWide || !f.file ? null : [f.file] })
-  await qualityApi({ action: 'report', scopes: result.scopes, findings: result.findings, stats: result.stats, errors: result.errors, agent: AGENT, agentSessionId: AGENT_SESSION_ID ?? null })
+  // Regra por arquivo: refaz só o arquivo. Regra do projeto inteiro (pacotes, código sem uso, duplicados,
+  // CLAUDE.md, TODOs, desempenho no banco, Dockerfile, CSS) ou das ferramentas (tsc, ESLint): só a checagem
+  // completa olha, e o servidor só fecha com ela — a mesma regra dos dois lados (ruleScope).
+  const readAt = new Date().toISOString()
+  const result = await runQuality(root, { only: ruleScope(f.rule_id) !== 'code' || !f.file ? null : [f.file], fresh: true })
+  const sent = await sendReport(root, result, readAt, AGENT_SESSION_ID ?? null)
   const after = await qualityApi({ action: 'get', query: text })
   if (after.status === 'fixed') return console.log(`Q-${after.ref} fixed: the check no longer finds the problem.`)
+  if (after.status === 'ignored') return console.log(`Q-${after.ref} is ignored on the dashboard (${after.ignore_reason}); nothing to close.`)
+  const stillThere = result.findings.some((x) => x.rule_id === f.rule_id && (x.file ?? null) === (f.file ?? null))
+  if (!stillThere) {
+    // O achado é de outra branch (em geral a principal): aqui o problema sumiu, lá ainda existe até isto chegar.
+    if (sent.branchHeld?.includes(after.ref)) return console.log(`Q-${after.ref} fixed on this branch; it closes on the dashboard when this reaches the main branch. Keep the fix.`)
+    // A checagem não achou mais o problema, mas não pôde olhar ali (ferramenta que não rodou, arquivo pulado).
+    const why = result.errors.length ? ` Check warnings: ${result.errors.slice(0, 3).join('; ')}.` : ''
+    return console.log(`Q-${after.ref} was not found by the check this time, but the check could not look at it again (the tool did not run, or the file was skipped), so it stays open.${why} Keep the fix; do not undo it.`)
+  }
   console.log(`Q-${after.ref} still shows up in the check. Review the fix:\n`)
   printQualityFinding(after)
 }
@@ -136,12 +176,11 @@ export async function qualityIgnore(args) {
   console.log(`Q-${done.ref} ignored${done.ignore_until ? ` until ${done.ignore_until.slice(0, 10)} (then it shows up again)` : ''}: ${done.title}`)
 }
 
-// Arquivos mudados que ainda não foram commitados (git) somados aos que esta sessão editou.
-function changedCodeFiles(root, sid) {
-  const git = (a) => spawnSync('git', a, { cwd: root, encoding: 'utf8', windowsHide: true }).stdout?.split('\n').filter(Boolean) ?? []
-  const fromGit = [...git(['diff', '--name-only', 'HEAD']), ...git(['ls-files', '--others', '--exclude-standard'])]
+// O que mudou desde o commit em que a sessão começou (commitado ou não), somado ao que esta sessão editou.
+function changedInSession(root, sid) {
+  const base = readState(root).qualityBase
   const fromSession = sid ? sessionEditedFiles(sid).map((f) => path.relative(root, path.resolve(root, f)).split(path.sep).join('/')) : []
-  return [...new Set([...fromGit, ...fromSession])].filter((f) => !f.startsWith('..') && SOURCE_FILE.test(f) && fs.existsSync(path.join(root, f)))
+  return changedFiles(root, sid && base?.session === sid ? base.head : null, fromSession)
 }
 
 // Pacote de contexto da revisão com IA (skill "quality"): o que revisar, o catálogo, as regras do projeto e o que já está aberto.
@@ -150,10 +189,11 @@ export async function qualityContext(args) {
   const sid = AGENT_SESSION_ID ?? null
   const onlyFiles = flag(args, '--files')?.split(',').map((f) => f.trim()).filter(Boolean)
   const full = args.includes('--full')
-  const files = onlyFiles ?? (full ? null : changedCodeFiles(root, sid))
+  const changed = onlyFiles ? { files: onlyFiles, deleted: [] } : full ? null : changedInSession(root, sid)
+  const files = changed?.files ?? null
   const catalog = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'skills', 'quality', 'catalog.md')
   const mode = firstOf([[full, 'projeto'], [onlyFiles, 'arquivos']], 'sessao')
-  const modeText = { projeto: () => 'whole project (inventory per theme)', arquivos: () => `only ${files.join(', ')}`, sessao: () => 'what changed (session and uncommitted changes)' }[mode]()
+  const modeText = { projeto: () => 'whole project (inventory per theme)', arquivos: () => `only ${files.join(', ')}`, sessao: () => 'what changed (since this session started, committed or not)' }[mode]()
   const out = ['# Quality review context', await contentLangNote(root), `Mode: ${modeText}`, '']
   out.push(`Catalog (read it first, with the Read tool): ${catalog}`, '')
   const designMd = findDesignMd(root)
@@ -162,8 +202,11 @@ export async function qualityContext(args) {
   // Linguagens em que a checagem automática (complexidade, duplicação, código sem uso) não roda: o Claude cobre lendo.
   const gaps = gapLines(detectStack(root).stack, 'qualidade')
   if (gaps.length) out.push('## Languages without a complete automatic check (the review is all yours there)', ...gaps, '- In them, look yourself for: long functions or ones with many paths, deep nesting, repeated code, unused code and swallowed errors.', '')
-  if (files) {
-    out.push(`## Files to review (${files.length})`, ...(files.length ? files.map((f) => `- ${f}`) : ['- Nothing changed since the last commit. Tell the user and offer the project review: /faundr:quality --full']), '')
+  if (changed) out.push(...changedLines(changed))
+  else {
+    // Projeto inteiro: a lista completa, por pasta (os mais complexos, abaixo, são só por onde começar).
+    const { qualityFiles } = await import('./quality-rules.mjs')
+    out.push(...projectFileLines(root, qualityFiles(root)))
   }
   try {
     const { quality, findings } = await qualityApi({ action: 'list' })
@@ -175,10 +218,7 @@ export async function qualityContext(args) {
     }
     const review = quality?.review
     out.push('## Last AI review', review ? `${review.at} (${review.mode}). Covered: ${review.areas.join('; ') || '-'}.` : 'None yet.', '')
-    const relevant = files ? findings.filter((f) => !f.file || files.includes(f.file)) : findings
-    out.push(`## Already recorded and open (${relevant.length}) — do not record them again`)
-    for (const f of relevant.slice(0, 80)) out.push(`- Q-${f.ref} ${qualityLine(f)}`)
-    if (relevant.length > 80) out.push(`- … and ${relevant.length - 80} more`)
+    out.push(...recordedLines(findings, { files, full, line: qualityLine }))
   } catch (err) {
     out.push(`(could not read the findings already recorded: ${err.message})`)
   }
@@ -190,9 +230,18 @@ export async function qualityFinding(args) {
   const title = textArg(args)
   const severity = flag(args, '--severity')
   const confidence = Number(flag(args, '--confidence'))
+  // --needs-check: o achado fica "a confirmar" (falta um fato que o código não mostra); aí a confiança vale de 50 a 100.
+  const needsCheck = flag(args, '--needs-check')?.trim() || null
   if (!title || !['high', 'medium', 'low'].includes(severity) || !flag(args, '--theme') || !Number.isFinite(confidence))
     throw new Error(
-      'usage: faundr quality-finding "<title>" --theme demais|falha|desempenho|tipos|complexidade|comentarios|testes|arquitetura|instrucoes [--label apagar|stdlib|nativo|yagni|encurtar] --severity high|medium|low --confidence 80-100 --file <path> [--line n] --detail "..." --impact "..." --fix "<concrete replacement>" [--saves <lines removed>]',
+      'usage: faundr quality-finding "<title>" --theme logica|contratos|falha|desempenho|tipos|demais|complexidade|comentarios|testes|arquitetura|instrucoes [--label apagar|stdlib|nativo|yagni|encurtar] --severity high|medium|low --confidence 80-100 --file <path> [--line n] --detail "..." --impact "..." --fix "<concrete replacement>" [--saves <lines removed>] [--needs-check "<the exact missing fact>": records it as "to confirm", not counted as a problem yet; with it the accepted confidence is 50-100]',
+    )
+  const floor = needsCheck ? 50 : 80
+  if (confidence < floor || confidence > 100)
+    throw new Error(
+      needsCheck
+        ? 'Confidence must be 50-100 with --needs-check: below 50, do not record it.'
+        : 'Confidence must be 80-100. If one exact fact is missing to confirm the problem, record it as "to confirm": --needs-check "<the exact missing fact>" (confidence 50-100). Otherwise do not record it.',
     )
   const line = Number(flag(args, '--line'))
   const saves = Number(flag(args, '--saves'))
@@ -212,9 +261,10 @@ export async function qualityFinding(args) {
       impact: flag(args, '--impact'),
       fix: flag(args, '--fix'),
       saves: Number.isInteger(saves) && saves >= 0 ? saves : null,
+      needs_check: needsCheck,
     },
   })
-  console.log(`Quality finding Q-${r.ref} recorded${r.status === 'ignored' ? ' (already ignored by the user)' : ''}: ${r.title}`)
+  console.log(`Quality finding Q-${r.ref} recorded${r.needs_check ? ' as "to confirm"' : ''}${r.status === 'ignored' ? ' (already ignored by the user)' : ''}: ${r.title}`)
 }
 
 export async function qualityReviewDone(args) {
@@ -240,6 +290,8 @@ export async function qualityRule(args) {
   } catch (err) {
     throw new Error(`Invalid pattern: ${err.message}`)
   }
+  // A checagem deixa de fora o padrão que pode travá-la; melhor avisar agora do que a regra nunca valer.
+  if (!isSafePattern(pattern)) throw new Error('Pattern too slow or too long: no repeated group with a repetition inside, like (a+)+ or (a|aa)*, no back-references, at most 200 characters.')
   const slug = name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60)
   const dir = path.join(root, '.faundr-regras')
   fs.mkdirSync(dir, { recursive: true })
@@ -257,7 +309,6 @@ export async function qualityLadder(args) {
 }
 
 // Tamanho da mudança da sessão: tudo o que mudou desde o commit em que ela começou (commits + não commitado).
-const NOT_CODE_CHANGE = /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|routeTree\.gen\.ts)$|(^|\/)(dist|build|out|\.output|node_modules)\/|\.(min\.js|map|svg|png|jpe?g|webp|ico|wasm)$/
 const TEST_FILE = /(^|\/)(__tests__|tests?|e2e|spec)\/|\.(test|spec)\.[cm]?[jt]sx?$/
 
 function codeChange(root, base) {

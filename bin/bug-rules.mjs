@@ -15,6 +15,9 @@ const BACKEND_PATH = /(^|\/)(server|api|functions|workers?|cron|jobs|hooks?|bin|
 // Código que roda na página ou no programa de outra pessoa: SDK, pacote publicado, script servido pelo site.
 const THIRD_PARTY_RUNTIME = /(^|\/)(sdk|packages\/[^/]+\/(src|lib)?)\/|(^|\/)public\/.*\.[cm]?js$/
 
+// As regras daqui leem JavaScript e TypeScript (e o <script> de Vue, Svelte, Astro e HTML).
+const JS_FILE = /\.([cm]?[jt]sx?|vue|svelte|astro|html?)$/i
+
 /** Comando até a primeira linha em branco ou o primeiro ";" (no máximo `max` caracteres). */
 function statementAt(text, index, max = 700) {
   const rest = text.slice(index, index + max)
@@ -177,6 +180,15 @@ function insideAsyncFunction(text, index) {
   return false
 }
 
+// A chamada que roda o programa: no topo do arquivo (fora de qualquer bloco) e, ou a função tem nome de entrada
+// (main, run, start, cli…), ou é o último comando do arquivo.
+function isScriptEntryCall(text, start, end, name) {
+  const before = text.slice(0, start)
+  if ((before.match(/\{/g)?.length ?? 0) !== (before.match(/\}/g)?.length ?? 0)) return false
+  if (/^(main|run|start|cli|bootstrap|init)$/i.test(name)) return true
+  return /^[\s;]*$/.test(text.slice(end + 1).replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, ''))
+}
+
 export function floatingAsyncCall(rel, text) {
   if (UI_FILE.test(rel) || !NODE_CODE.test(text)) return []
   const risky = new Set()
@@ -200,6 +212,8 @@ export function floatingAsyncCall(rel, text) {
     if (/^\s*(\.|\{)/.test(next)) continue
     // Dentro de uma função async quem esquece o await é outro defeito; aqui só função comum ou o topo do arquivo.
     if (insideAsyncFunction(text, m.index)) continue
+    // O `main()` que fecha um script: a rejeição encerra o programa com o erro na tela, que é o esperado ali.
+    if (isScriptEntryCall(text, m.index, end, m[1])) continue
     out.push({ line: lineAt(text, m.index), name: m[1] })
   }
   return out
@@ -312,6 +326,8 @@ export const BUG_RULES = {
 
 /** Todas as regras num arquivo: [{ rule, line, ...ctx }]. */
 export function bugFindings(rel, text) {
+  // Só JS/TS: no PHP, $stmt->fetch() e Model::fetch() são leitura do banco, não chamada à rede sem prazo.
+  if (!JS_FILE.test(rel)) return []
   const code = withoutCommentLines(text)
   const out = []
   for (const [rule, fn] of Object.entries(BUG_RULES)) for (const hit of fn(rel, code)) out.push({ rule, ...hit })

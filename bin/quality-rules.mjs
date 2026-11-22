@@ -4,17 +4,21 @@
 // (tree-sitter, em dist/graph.mjs); aqui ficam a lista de arquivos, as regras do projeto inteiro e os textos.
 //
 // Um achado por arquivo por regra (com as linhas no detalhe) ou um por projeto. Exceção no código: comentário
-// `faundr-ignore <regra>: motivo` na linha ou na anterior; `faundr-ignore-file <regra>` vale para o arquivo.
+// `faundr-ignore <regra>: motivo` na linha ou na anterior; `faundr-ignore-file <regra>` vale para o arquivo. Vale
+// também para o que o tsc e o ESLint acusam, para a chave estrangeira sem índice (comentário no SQL) e para as
+// instruções da IA (comentário no próprio .md). Pacotes: no package.json, "faundr": { "ignore": { "<regra>": ["pacote"] } }.
 
-import { spawnSync } from 'node:child_process'
+import path from 'node:path'
 import { analyzeQuality, qualityGrammar, unusedCode } from '../dist/graph.mjs'
 import { ignoreSet } from './design-rules.mjs'
 import { projectFiles } from './security.mjs'
 import { functionList, houseText, lineList, TEXT } from './quality-texts.mjs'
-import { TEST_PATH, GENERATED, read } from './quality-common.mjs'
-import { entryPoints, duplicates, projectTools, dockerfileRules, styleRules, projectRules, oldTodos, performanceRules } from './quality-project.mjs'
+import { TEST_PATH, TEST_SUPPORT, GENERATED, exists, read } from './quality-common.mjs'
+import { entryPoints, duplicates, projectTools, toolsCovered, dockerfileRules, styleRules, projectRules, oldTodos, performanceRules } from './quality-project.mjs'
+import { blameLines, insideGit } from './quality-git.mjs'
 import { memoryRules, houseRules, shortcutsIn } from './quality-house.mjs'
 import { bugFindings } from './bug-rules.mjs'
+import { faundrIgnore, ignoredBy } from './parts.mjs'
 export { memoryRules, houseRules, shortcutsIn } from './quality-house.mjs'
 
 // Linha só de comentário, por linguagem (não conta como linha de código).
@@ -110,14 +114,17 @@ function makeCollector() {
 export function qualityFiles(root) {
   const { files } = projectFiles(root)
   // Templates Blade (.blade.php) são HTML com diretivas, não código PHP para medir.
-  return files.filter((f) => qualityGrammar(f) && !GENERATED.test(f) && !/\.blade\.php$/.test(f))
+  // O que o dono tirou do Faundr no .faundrignore (exemplos, código de terceiros copiado) também fica fora da checagem.
+  const ignored = faundrIgnore(root)
+  return files.filter((f) => qualityGrammar(f) && !GENERATED.test(f) && !/\.blade\.php$/.test(f) && !ignoredBy(ignored, f))
 }
 
 /**
  * Roda as regras. `only`: só esses arquivos (checagem parcial: as regras do projeto inteiro, o código sem uso,
- * os duplicados e as ferramentas do projeto ficam de fora). `tools`: roda o tsc e o ESLint do projeto.
+ * os duplicados e as ferramentas do projeto ficam de fora). `tools`: roda o tsc e o ESLint do projeto. `fresh`: não
+ * aproveita o resultado guardado das ferramentas (a checagem que a pessoa pediu roda de verdade e renova o cache).
  */
-export async function runQuality(root, { only = null, history = true, tools = true } = {}) {
+export async function runQuality(root, { only = null, history = true, tools = true, fresh = false } = {}) {
   const started = Date.now()
   const all = qualityFiles(root)
   const files = only ? all.filter((f) => only.includes(f)) : all
@@ -125,28 +132,46 @@ export async function runQuality(root, { only = null, history = true, tools = tr
   const errors = []
   const parsed = await analyzeFiles(root, files, c, errors)
 
-  const scopes = [{ kind: 'code', files: only ? files : null }]
+  // O escopo diz ao servidor o que foi olhado: o que estava aberto ali e não apareceu mais fecha como corrigido.
+  // Arquivo pulado (grande demais, binário, erro de leitura) não foi olhado: fica de fora, e os achados dele ficam.
+  const skipped = parsed.skipped.length ? { skipped: parsed.skipped } : {}
+  const scopes = [{ kind: 'code', files: only ? partialScope(root, only, files, parsed.skipped) : null, ...(only ? {} : skipped) }]
   const stats = { files: files.length, lines: parsed.lines, ignored: parsed.ignored }
   if (!only) {
-    wholeProject(root, all, parsed, c, { history, errors })
-    scopes.push({ kind: 'project', files: null })
+    const unchecked = wholeProject(root, all, parsed, c, { history, errors })
+    scopes.push({ kind: 'project', files: null, ...skipped, ...(unchecked.length ? { unchecked } : {}) })
     stats.ranking = ranking(parsed.metrics)
     stats.shortcuts = withBlame(root, parsed.shortcuts)
     if (tools) {
-      const ran = projectTools(root, c, errors)
-      if (ran.length) scopes.push({ kind: 'tool', files: null, tools: ran })
+      const failed = []
+      const ran = projectTools(root, c, errors, failed, { fresh })
+      // Só as ferramentas que rodaram de fato: com o tsc sozinho, os achados do ESLint não fecham.
+      const covered = toolsCovered(ran, failed)
+      if (covered.length) scopes.push({ kind: 'tool', files: null, tools: covered })
       stats.tools = ran
     }
   }
   return { findings: toFindings(c), scopes, stats: { ...stats, ignored: stats.ignored + c.ignored, ms: Date.now() - started }, errors }
 }
 
+/**
+ * Escopo da checagem parcial: os arquivos lidos e os pedidos que não existem mais (apagados ou renomeados: os
+ * achados deles fecham). Os pulados ficam de fora.
+ */
+function partialScope(root, only, files, skipped) {
+  const inside = (f) => !path.isAbsolute(f) && !f.split('/').includes('..')
+  const gone = only.filter((f) => f && inside(f) && !exists(root, f))
+  return [...new Set([...files.filter((f) => !skipped.includes(f)), ...gone])]
+}
+
 /** Lê cada arquivo pela árvore de sintaxe: achados por arquivo, medidas das funções e o que importa/exporta. */
 async function analyzeFiles(root, files, c, errors) {
-  const out = { lines: 0, ignored: 0, metrics: new Map(), modules: new Map(), texts: new Map(), shortcuts: [] }
+  const out = { lines: 0, ignored: 0, metrics: new Map(), modules: new Map(), texts: new Map(), shortcuts: [], skipped: [] }
   const house = [...houseRules(root), ...memoryRules(root)]
   for (const rel of files) {
     const text = read(root, rel)
+    // Não deu para ler e o arquivo existe (acima de 400 KB, binário, sem permissão): pulado, não corrigido.
+    if (text === null && exists(root, rel)) out.skipped.push(rel)
     if (!text || GENERATED_HEADER.test(text.slice(0, 300))) continue
     const ign = ignoreSet(text)
     const add = (rule, line, ctx) => (ign.ignored(rule, line) ? out.ignored++ : c.add(rule, rel, line, ctx))
@@ -156,6 +181,7 @@ async function analyzeFiles(root, files, c, errors) {
       result = await analyzeQuality(rel, text, { test })
     } catch (err) {
       errors.push(`${rel}: ${err.message}`)
+      out.skipped.push(rel)
       continue
     }
     for (const h of result.hits) if (keepHit(h, rel)) add(h.rule, h.line, h.ctx)
@@ -186,6 +212,8 @@ function keepHit(h, rel) {
   if (h.rule === 'limpeza/console-log' && (!UI_FILE.test(rel) || SERVER_PATH.test(rel))) return false
   // Dart: print é esquecimento no app (lib/); em bin/ e tool/ é a saída normal do programa.
   if (h.rule === 'limpeza/print-esquecido' && rel.endsWith('.dart') && !/(^|\/)lib\//.test(rel)) return false
+  // Histórias do Storybook e preparação dos testes (vitest.setup.ts, .storybook/) importam mock de propósito.
+  if (h.rule === 'falha/mock-em-producao' && TEST_SUPPORT.test(rel)) return false
   return true
 }
 
@@ -196,26 +224,34 @@ function realClockRule(text, add) {
     add('testes/hora-real', text.slice(0, clock).split('\n').length, {})
 }
 
-/** O que só dá para ver olhando o projeto inteiro: pacotes, instruções da IA, TODOs, código sem uso, duplicados. */
+/**
+ * O que só dá para ver olhando o projeto inteiro: pacotes, instruções da IA, TODOs, código sem uso, duplicados.
+ * Devolve as regras que não rodaram (os achados antigos delas não fecham).
+ */
 function wholeProject(root, all, parsed, c, { history, errors }) {
+  const unchecked = []
   projectRules(root, all, c)
   // O Dockerfile e as folhas de estilo não são código para a árvore de sintaxe: vêm da lista completa do projeto.
   const everything = projectFiles(root).files
   dockerfileRules(root, everything, c)
   styleRules(root, everything, c)
   performanceRules(root, parsed.texts, c)
+  // Sem o histórico (ou com o git sem responder) os TODOs antigos não foram conferidos.
+  let todosChecked = false
   if (history) {
     try {
-      oldTodos(root, c)
+      todosChecked = oldTodos(root, c)
     } catch (err) {
       errors.push(`TODOs: ${err.message}`)
     }
   }
+  if (!todosChecked) unchecked.push('limpeza/todo-antigo')
   const entry = entryPoints(root)
   const { orphans, exports } = unusedCode(root, parsed.modules, parsed.texts, (rel) => entry(rel) || TEST_PATH.test(rel))
   for (const rel of orphans) c.add('morto/arquivo-orfao', rel, null, {}, parsed.texts.get(rel))
   for (const e of exports) c.add('morto/export-sem-uso', e.file, e.line, { name: e.name }, parsed.texts.get(e.file))
   for (const d of duplicates(parsed.texts)) c.add('demais/duplicado', d.file, d.line, d, parsed.texts.get(d.file))
+  return unchecked
 }
 
 // Os 10 arquivos com mais caminhos possíveis somados (onde mexer dá mais trabalho e mais risco).
@@ -264,14 +300,18 @@ function toFindings(c) {
   return findings
 }
 
-// Dono e idade de cada atalho pelo git blame (até 100 atalhos).
+// Dono e idade de cada atalho pelo git blame (até 100 atalhos): um blame por arquivo, não um por atalho.
 function withBlame(root, shortcuts) {
   const now = Date.now() / 1000
   // faundr: só os 100 primeiros atalhos ganham dono e idade, paginar quando algum projeto passar disso
-  return shortcuts.slice(0, 100).map((s) => {
-    const blame = spawnSync('git', ['blame', '--porcelain', '-L', `${s.line},${s.line}`, '--', s.file], { cwd: root, encoding: 'utf8', windowsHide: true })
-    const time = Number(blame.stdout?.match(/^author-time (\d+)/m)?.[1])
-    const author = blame.stdout?.match(/^author (.+)$/m)?.[1]
+  const listed = shortcuts.slice(0, 100)
+  const byFile = new Map()
+  // Sem git ninguém tem dono nem idade (e não vale abrir um processo por arquivo para descobrir isso).
+  if (listed.length && insideGit(root)) {
+    for (const file of new Set(listed.map((s) => s.file))) byFile.set(file, blameLines(root, file, listed.filter((s) => s.file === file).map((s) => s.line)))
+  }
+  return listed.map((s) => {
+    const { author, time } = byFile.get(s.file)?.get(s.line) ?? {}
     return { ...s, author: author && author !== 'Not Committed Yet' ? author : null, days: time ? Math.max(0, Math.floor((now - time) / 86400)) : 0 }
   })
 }

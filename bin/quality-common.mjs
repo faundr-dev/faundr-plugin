@@ -9,6 +9,25 @@ export const TEST_PATH = /(^|\/)(__tests__|__mocks__|tests?|e2e|spec|integration
 // a do Cargo (target/) e a do CMake (cmake-build-*/), e .pb.h/.pb.cc do protobuf.
 export const GENERATED = /\.(d\.ts|min\.js)$|\.gen\.[jt]sx?$|(^|\/)(dist|build|out|vendor|generated|\.output)\/|\.pb\.go$|_gen\.go$|\.(Designer|g|g\.i)\.cs$|(^|\/)(bin|obj)\/.*\.cs$|(^|\/)target\/.*\.rs$|(^|\/)cmake-build-[^/]+\/|\.pb\.(h|cc)$/
 
+// Histórias do Storybook e arquivos de preparação dos testes: importar mock neles é o esperado (contam como teste
+// para falha/mock-em-producao).
+export const TEST_SUPPORT = /\.stories\.[cm]?[jt]sx?$|(^|\/)\.storybook\/|(^|\/)(vitest|jest|playwright|karma|cypress)\.setup\.[cm]?[jt]sx?$|(^|\/)(setup-?tests?|test-?setup)\.[cm]?[jt]sx?$/i
+
+// Que checagem olha cada regra: as ferramentas do projeto (tsc, ESLint), a do projeto inteiro (só a checagem
+// completa) ou a por arquivo. Espelho de src/lib/quality-scope.ts, que é quem decide no servidor o que fecha (o
+// plugin é publicado à parte e não importa do site); plugin/test/quality-audit.test.mjs compara os dois.
+const PROJECT_RULES = /^(demais\/dependencia-|demais\/duplicado|morto\/|instrucoes\/|limpeza\/todo-antigo|desempenho\/(consulta-|fk-)|docker\/|css\/)/
+const TOOL_RULES = /^(ts|eslint)\//
+
+export function ruleScope(ruleId) {
+  if (TOOL_RULES.test(ruleId)) return 'tool'
+  if (PROJECT_RULES.test(ruleId)) return 'project'
+  return 'code'
+}
+
+/** O arquivo existe? (apagado ou renomeado: os achados dele fecham; grande demais ou binário: só não foi olhado) */
+export const exists = (root, rel) => fs.existsSync(path.join(root, rel))
+
 export const read = (root, rel) => {
   try {
     const abs = path.join(root, rel)

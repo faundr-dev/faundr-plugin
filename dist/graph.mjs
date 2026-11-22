@@ -14878,7 +14878,7 @@ function call(node, add) {
   }
   if (/^console\.(log|debug)$/.test(callee2.text)) add("limpeza/console-log", node);
 }
-var CHECKS7 = /\b(expect|assert)\b|\.should\b|\bt\.(is|true|false|deepEqual|throws)\b|toMatch(Inline)?Snapshot/;
+var CHECKS7 = /\b(expect|assert)\b|\b(expect|assert)\w+\s*\(|\.should\b|\bt\.(is|not|true|false|truthy|falsy|deepEqual|notDeepEqual|like|throws|throwsAsync|notThrows|notThrowsAsync|regex|notRegex|snapshot|equal|equals|notEqual|strictEqual|notStrictEqual|deepStrictEqual|same|strictSame|ok|notOk|match|rejects|resolves|pass|fail)\s*\(|(?<![.\w$])(strictEqual|notStrictEqual|deepEqual|notDeepEqual|deepStrictEqual|notDeepStrictEqual|partialDeepStrictEqual|equal|notEqual|ok|throws|doesNotThrow|rejects|doesNotReject|ifError)\s*\(|toMatch(Inline)?Snapshot/;
 function testCall2(node, add) {
   const callee2 = node.childForFieldName("function")?.text ?? "";
   if (/(^|\.)waitForTimeout$/.test(callee2) || callee2 === "setTimeout" && /^\d+$/.test(node.childForFieldName("arguments")?.namedChildren[1]?.text ?? ""))

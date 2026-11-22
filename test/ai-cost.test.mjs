@@ -12,6 +12,10 @@ const overview = AI_ITEMS.find((i) => i.id === 'overview')
 const security = AI_ITEMS.find((i) => i.id === 'security')
 const size = { code: 1_000_000, ui: 200_000 }
 
+test('o essencial do setup: a Visão, a classificação das skills e a revisão de qualidade', () => {
+  assert.deepEqual(AI_ITEMS.filter((i) => i.essential).map((i) => i.id), ['overview', 'skills', 'quality'])
+})
+
 test('sem histórico: conta inicial pelo tamanho do código, com teto', () => {
   assert.deepEqual(estimate(overview, size), { tokens: 90_000, source: 'estimativa inicial (ainda sem medição)' })
   assert.equal(estimate(security, { code: 50_000_000, ui: 0 }).tokens, security.cap)

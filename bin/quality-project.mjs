@@ -11,6 +11,11 @@ import { DOCKERFILE } from './security-langs.mjs'
 import { projectFiles } from './security.mjs'
 import { t } from './i18n.mjs'
 import { MAX_FILE, TEST_PATH, GENERATED, read } from './quality-common.mjs'
+import { blameLines, codeStateKey, readToolsCache, writeToolsCache } from './quality-git.mjs'
+import { PLUGIN_VERSION } from './failures.mjs'
+
+// Conta uma exceção (faundr-ignore) que não passou pelo coletor.
+const countIgnored = (c) => void (c.ignored = (c.ignored ?? 0) + 1)
 
 // Dependências que a linguagem, o Node ou o navegador já resolvem (tabela do Ponytail, docs/platform-native.md).
 // Função: o texto vai para o painel na língua da pessoa, decidida na hora.
@@ -181,45 +186,87 @@ const TOOL_TIMEOUT = 180_000
  * Roda o tsc e o ESLint que o projeto já tem instalados, em cada parte que tem a configuração deles (a raiz e,
  * num projeto dividido, frontend/ etc.). O executável pode estar na parte ou na raiz (monorepo). Devolve quais
  * rodaram ("tsc", "eslint em frontend/"…).
+ *
+ * As duas levam de segundos a minutos e a checagem completa roda no começo de toda sessão: o resultado de cada
+ * ferramenta em cada parte fica guardado em .faundr/cache/ e vale enquanto o código não muda (mesmo commit, mesmos
+ * arquivos alterados, mesma versão do plugin). `fresh`: roda de verdade e renova o que está guardado (a checagem
+ * que a pessoa pediu). Ferramenta que falhou não é guardada.
  */
-export function projectTools(root, c, errors) {
+export function projectTools(root, c, errors, failed = [], { fresh = false } = {}) {
   const ran = []
+  const key = codeStateKey(root, PLUGIN_VERSION)
+  const cached = fresh ? {} : readToolsCache(root, key)
+  const saved = {}
+  let ranForReal = false
+  const texts = new Map()
+  // O texto do arquivo acusado, para o faundr-ignore valer também nos achados das ferramentas.
+  const textOf = (file) => {
+    if (!texts.has(file)) texts.set(file, read(root, file) ?? undefined)
+    return texts.get(file)
+  }
+  const use = (tool, dir, run) => {
+    const id = `${tool}|${dir}`
+    let result = Array.isArray(cached[id]?.hits) ? cached[id] : null
+    if (!result) {
+      result = run()
+      ranForReal = true
+    }
+    if (result.error) {
+      failed.push(tool)
+      return void errors.push(result.error)
+    }
+    saved[id] = { hits: result.hits }
+    ran.push(toolLabel(tool === 'ts' ? 'tsc' : tool, dir))
+    for (const [rule, file, line, ctx] of result.hits) c.add(rule, file, line, ctx, textOf(file))
+  }
   const binIn = (dir, rel) => [path.join(root, dir, 'node_modules', rel), path.join(root, 'node_modules', rel)].find((f) => fs.existsSync(f))
   for (const { dir } of projectParts(root)) {
     const cwd = path.join(root, dir)
     const tsc = binIn(dir, 'typescript/bin/tsc')
-    if (fs.existsSync(path.join(cwd, 'tsconfig.json')) && tsc) runTsc(tsc, { dir, cwd }, c, errors, ran)
+    if (fs.existsSync(path.join(cwd, 'tsconfig.json')) && tsc) use('ts', dir, () => runTsc(tsc, { dir, cwd }))
     const eslint = binIn(dir, 'eslint/bin/eslint.js')
     const hasConfig = fs.readdirSync(cwd).some((f) => /^(eslint\.config\.[cm]?[jt]s|\.eslintrc(\.\w+)?)$/.test(f))
-    if (hasConfig && eslint) runEslint(eslint, { root, dir, cwd }, c, errors, ran)
+    if (hasConfig && eslint) use('eslint', dir, () => runEslint(eslint, { root, dir, cwd }))
   }
+  if (ranForReal) writeToolsCache(root, key, saved)
   return ran
 }
 
 const toolLabel = (tool, dir) => (dir ? `${tool} em ${dir}/` : tool)
 
-// tsc da parte: cada erro de tipo vira achado; se não rodou, vai para `errors`.
-function runTsc(tsc, { dir, cwd }, c, errors, ran) {
+/**
+ * Ferramentas cujos achados esta checagem pode fechar ('ts', 'eslint'): rodou em alguma parte e não falhou em
+ * nenhuma. `ran`: os rótulos de projectTools ("tsc", "eslint em frontend/"); `failed`: as que falharam.
+ */
+export const toolsCovered = (ran, failed) =>
+  ['ts', 'eslint'].filter((tool) => !failed.includes(tool) && ran.some((label) => label.startsWith(tool === 'ts' ? 'tsc' : 'eslint')))
+
+// As duas devolvem { hits: [[regra, arquivo, linha, contexto]] } ou { error } quando a ferramenta não olhou o
+// código (aí os achados antigos dela não fecham).
+
+// tsc da parte: cada erro de tipo vira achado.
+function runTsc(tsc, { dir, cwd }) {
   const r = spawnSync(process.execPath, [tsc, '--noEmit', '--pretty', 'false', '-p', '.'], { cwd, encoding: 'utf8', windowsHide: true, timeout: TOOL_TIMEOUT, maxBuffer: 32 * 1024 * 1024 })
-  if (r.error) return void errors.push(`${toolLabel('tsc', dir)}: ${r.error.message}`)
-  ran.push(toolLabel('tsc', dir))
   // O tsc escreve os caminhos relativos à pasta em que rodou.
-  for (const m of r.stdout.matchAll(/^(.+?)\((\d+),\d+\): error (TS\d+): (.+)$/gm))
-    c.add('ts/erro-de-tipo', [dir, m[1].replace(/\\/g, '/')].filter(Boolean).join('/'), Number(m[2]), { code: m[3], message: m[4] })
+  const found = r.error ? [] : [...r.stdout.matchAll(/^(.+?)\((\d+),\d+\): error (TS\d+): (.+)$/gm)]
+  // Saiu com erro sem apontar nenhum arquivo (tsconfig quebrado, falta de memória): não olhou o código.
+  if (r.error || (r.status !== 0 && !found.length))
+    return { error: `${toolLabel('tsc', dir)}: ${(r.error?.message || r.stdout || r.stderr || 'não rodou').trim().split('\n')[0].slice(0, 200)}` }
+  return { hits: found.map((m) => ['ts/erro-de-tipo', [dir, m[1].replace(/\\/g, '/')].filter(Boolean).join('/'), Number(m[2]), { code: m[3], message: m[4].trim() }]) }
 }
 
-// ESLint da parte (saída JSON): cada mensagem vira erro ou aviso; saída que não é JSON vai para `errors`.
-function runEslint(eslint, { root, dir, cwd }, c, errors, ran) {
+// ESLint da parte (saída JSON): cada mensagem vira erro ou aviso; saída que não é JSON é falha.
+function runEslint(eslint, { root, dir, cwd }) {
   const r = spawnSync(process.execPath, [eslint, '.', '-f', 'json'], { cwd, encoding: 'utf8', windowsHide: true, timeout: TOOL_TIMEOUT, maxBuffer: 64 * 1024 * 1024 })
   try {
+    const hits = []
     for (const file of JSON.parse(r.stdout)) {
       const rel = path.relative(root, file.filePath).split(path.sep).join('/')
-      for (const msg of file.messages ?? [])
-        c.add(msg.severity === 2 ? 'eslint/erro' : 'eslint/aviso', rel, msg.line ?? null, { rule: msg.ruleId, message: msg.message })
+      for (const msg of file.messages ?? []) hits.push([msg.severity === 2 ? 'eslint/erro' : 'eslint/aviso', rel, msg.line ?? null, { rule: msg.ruleId, message: msg.message }])
     }
-    ran.push(toolLabel('eslint', dir))
+    return { hits }
   } catch {
-    errors.push(`${toolLabel('eslint', dir)}: ${(r.stderr || r.error?.message || 'saída inválida').split('\n')[0].slice(0, 200)}`)
+    return { error: `${toolLabel('eslint', dir)}: ${(r.stderr || r.error?.message || 'saída inválida').split('\n')[0].slice(0, 200)}` }
   }
 }
 
@@ -261,16 +308,53 @@ export function styleRules(root, files, c) {
   for (const rel of files.filter((f) => STYLE_FILE.test(f) && !GENERATED.test(f) && !TEST_PATH.test(f) && !/\.min\.css$/.test(f))) {
     const text = read(root, rel)
     if (!text || text.length > MAX_FILE) continue
-    const clean = text.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:])\/\/[^\n]*/g, (m, pre) => pre + ' '.repeat(m.length - pre.length))
+    const clean = withoutCssComments(text)
     const lineAt = (index) => clean.slice(0, index).split('\n').length
     const important = [...clean.matchAll(/!important\b/g)]
     if (important.length > IMPORTANT_LIMIT) c.add('css/important-em-excesso', rel, lineAt(important[0].index), { count: important.length }, text)
-    for (const m of clean.matchAll(/([^{};\s][^{};]*)\{\s*\}/g)) c.add('css/regra-vazia', rel, lineAt(m.index), { selector: m[1].trim().slice(0, 60) }, text)
+    for (const r of emptyRules(clean)) c.add('css/regra-vazia', rel, lineAt(r.index), { selector: r.selector.slice(0, 60) }, text)
     if (/\.(scss|sass|less)$/.test(rel)) {
       const worst = deepestNesting(clean)
       if (worst) c.add('css/aninhamento-fundo', rel, lineAt(worst.index), { depth: worst.depth }, text)
     }
   }
+}
+
+// O CSS com os comentários trocados por espaços (linhas e posições ficam iguais). Uma passada só: a expressão
+// regular de antes procurava o "*/" até o fim do arquivo a cada "/*" sem fechamento (300 KB deles levavam minutos).
+function withoutCssComments(text) {
+  let out = ''
+  let from = 0
+  for (;;) {
+    const open = text.indexOf('/*', from)
+    const close = open === -1 ? -1 : text.indexOf('*/', open + 2)
+    // Sem mais nenhum comentário fechado: o resto fica como está.
+    if (close === -1) break
+    out += text.slice(from, open) + text.slice(open, close + 2).replace(/[^\n]/g, ' ')
+    from = close + 2
+  }
+  return (out + text.slice(from)).replace(/(^|[^:])\/\/[^\n]*/g, (m, pre) => pre + ' '.repeat(m.length - pre.length))
+}
+
+// Regras vazias (seletor { }): [{ index, selector }], o índice no começo do seletor. Varre o texto uma vez só: a
+// expressão regular de antes relia o resto do arquivo a cada posição (80 KB sem { } ; levavam 5 s).
+function emptyRules(clean) {
+  const out = []
+  // Onde começa o seletor atual: depois do último {, } ou ;.
+  let start = 0
+  for (let i = 0; i < clean.length; i++) {
+    const ch = clean[i]
+    if (ch !== '{' && ch !== '}' && ch !== ';') continue
+    if (ch === '{') {
+      let end = i + 1
+      while (end < clean.length && /\s/.test(clean[end])) end++
+      const selector = clean.slice(start, i)
+      const lead = selector.search(/\S/)
+      if (clean[end] === '}' && lead !== -1) out.push({ index: start + lead, selector: selector.trim() })
+    }
+    start = i + 1
+  }
+  return out
 }
 
 // Primeiro seletor aninhado além do limite no Sass/Less ({ index, depth }), ou null.
@@ -312,14 +396,23 @@ export function projectRules(root, files, c) {
     const manifest = [dir, 'package.json'].filter(Boolean).join('/')
     const deps = Object.keys(pkg.dependencies ?? {})
     const native = NATIVE()
+    // O package.json não aceita comentário: a exceção dos pacotes fica numa chave dele,
+    // "faundr": { "ignore": { "demais/dependencia-sem-uso": ["pacote-x"] } }.
+    const excepted = (rule) => {
+      const list = pkg.faundr?.ignore?.[rule]
+      const names = new Set(Array.isArray(list) ? list : [])
+      return (name) => names.has(name) && (countIgnored(c), true)
+    }
+    const keepNative = excepted('demais/dependencia-dispensavel')
     for (const name of [...deps, ...Object.keys(pkg.devDependencies ?? {})])
-      if (native[name]) c.add('demais/dependencia-dispensavel', manifest, null, { pkg: name, native: native[name][0], where: native[name][1] })
+      if (native[name] && !keepNative(name)) c.add('demais/dependencia-dispensavel', manifest, null, { pkg: name, native: native[name][0], where: native[name][1] })
     // Raiz de monorepo (workspaces): os pacotes de verdade estão nas partes.
     if (pkg.workspaces) continue
     // Os arquivos da parte; os da raiz são todos menos os das outras partes.
     const others = parts.filter((p) => p.dir && p.dir !== dir && (!dir || !p.dir.startsWith(`${dir}/`))).map((p) => `${p.dir}/`)
     const own = files.filter((f) => (!dir || f.startsWith(`${dir}/`)) && !others.some((o) => f.startsWith(o)))
-    const unused = unusedDependencies(root, own, deps, pkg, dir)
+    const keepUnused = excepted('demais/dependencia-sem-uso')
+    const unused = unusedDependencies(root, own, deps, pkg, dir).filter((name) => !keepUnused(name))
     if (unused.length) c.add('demais/dependencia-sem-uso', manifest, null, { pkg: unused[0], list: unused.join(', ') })
   }
   const scripts = new Set(parts.flatMap((p) => Object.keys(p.pkg.scripts ?? {})))
@@ -357,7 +450,8 @@ function instructionRules(root, doc, scripts, c) {
     const rel = p.replace(/^\.\//, '')
     if (!fs.existsSync(path.join(root, path.dirname(doc), rel)) && !fs.existsSync(path.join(root, rel))) missing.add(p)
   }
-  if (missing.size) c.add('instrucoes/arquivo-inexistente', doc, null, { doc, list: [...missing].slice(0, 10).join(', ') })
+  // Com o texto: `faundr-ignore-file instrucoes/...` num comentário do próprio arquivo de instruções vale.
+  if (missing.size) c.add('instrucoes/arquivo-inexistente', doc, null, { doc, list: [...missing].slice(0, 10).join(', ') }, text)
   if (!scripts.size) return
   const builtin = new Set(['install', 'i', 'ci', 'test', 'start', 'init', 'add', 'remove', 'uninstall', 'update', 'exec', 'dlx', 'create', 'publish', 'link', 'audit', 'outdated', 'why', 'x'])
   const bad = new Set()
@@ -365,34 +459,51 @@ function instructionRules(root, doc, scripts, c) {
     const s = m[1]
     if (!scripts.has(s) && !builtin.has(s)) bad.add(s)
   }
-  if (bad.size) c.add('instrucoes/script-inexistente', doc, null, { doc, list: [...bad].slice(0, 10).join(', ') })
+  if (bad.size) c.add('instrucoes/script-inexistente', doc, null, { doc, list: [...bad].slice(0, 10).join(', ') }, text)
 }
 
-// TODO/FIXME antigos: data pela autoria da linha no git (git blame), só nas linhas marcadas.
-export function oldTodos(root, c) {
+// TODO/FIXME antigos: data pela autoria da linha no git (git blame), só nas linhas marcadas. Devolve false quando
+// o git não respondeu (pasta sem repositório, git ausente): a regra não rodou e os achados antigos não fecham.
+// Também false quando o blame de algum arquivo falhou: os TODOs dele não foram conferidos (antes eram pulados calados
+// e os achados antigos fechavam como se tivessem sumido). Um blame por arquivo, não um por TODO. `blame`: trocável no teste.
+export function oldTodos(root, c, { blame = blameLines } = {}) {
   const grep = spawnSync('git', ['grep', '-n', '-I', '-E', '(//|/\\*|\\*|#)\\s*(TODO|FIXME|HACK|XXX)\\b', '--', '*.ts', '*.tsx', '*.js', '*.jsx', '*.mjs', '*.cjs', '*.py', '*.dart', '*.php', '*.go', '*.java', '*.kt', '*.cs', '*.rs', '*.c', '*.h', '*.cpp', '*.cc', '*.hpp'], {
     cwd: root,
     encoding: 'utf8',
     windowsHide: true,
+    timeout: 20_000,
     maxBuffer: 16 * 1024 * 1024,
   })
-  if (grep.status !== 0) return
+  // Saída 1 do git grep: procurou e não há nenhum TODO.
+  if (grep.status === 1) return true
+  if (grep.status !== 0) return false
   const now = Date.now() / 1000
+  const byFile = new Map()
   for (const row of grep.stdout.split('\n').filter(Boolean).slice(0, 200)) {
     const m = row.match(/^(.+?):(\d+):/)
     if (!m || GENERATED.test(m[1])) continue
-    const blame = spawnSync('git', ['blame', '--porcelain', '-L', `${m[2]},${m[2]}`, '--', m[1]], { cwd: root, encoding: 'utf8', windowsHide: true })
-    const time = Number(blame.stdout?.match(/^author-time (\d+)/m)?.[1])
-    if (!time) continue
-    const days = Math.floor((now - time) / 86400)
-    if (days < 90) continue
-    const text = read(root, m[1]) ?? ''
-    if (ignoreSet(text).ignored('limpeza/todo-antigo', Number(m[2]))) continue
-    const key = `limpeza/todo-antigo|${m[1]}`
-    const prev = c.hits.get(key)?.ctx?.days ?? 0
-    c.add('limpeza/todo-antigo', m[1], Number(m[2]), { days: Math.max(days, prev) })
-    c.hits.get(key).ctx = { days: Math.max(days, prev) }
+    byFile.set(m[1], [...(byFile.get(m[1]) ?? []), Number(m[2])])
   }
+  let checked = true
+  for (const [file, lines] of byFile) {
+    const authored = blame(root, file, lines)
+    if (!authored) {
+      checked = false
+      continue
+    }
+    const ignores = ignoreSet(read(root, file) ?? '')
+    for (const line of lines) {
+      const time = authored.get(line)?.time
+      if (!time) continue
+      const days = Math.floor((now - time) / 86400)
+      if (days < 90 || ignores.ignored('limpeza/todo-antigo', line)) continue
+      const key = `limpeza/todo-antigo|${file}`
+      const prev = c.hits.get(key)?.ctx?.days ?? 0
+      c.add('limpeza/todo-antigo', file, line, { days: Math.max(days, prev) })
+      c.hits.get(key).ctx = { days: Math.max(days, prev) }
+    }
+  }
+  return checked
 }
 
 // Desempenho: só no código que vai para o ar (CLIs, scripts e ferramentas rodam uma vez, à mão).
@@ -415,5 +526,9 @@ export function performanceRules(root, texts, c) {
     }
     for (const f of names) migrations.push({ file: `${dir}/${f.split(path.sep).join('/')}`, sql: read(root, `${dir}/${f}`) })
   }
-  for (const fk of foreignKeysWithoutIndex(migrations)) c.add('desempenho/fk-sem-indice', fk.file, fk.line, { table: fk.table, column: fk.column })
+  // Migração que não deu para ler (grande demais) fica de fora. Com o texto do SQL, o faundr-ignore num
+  // comentário (-- faundr-ignore desempenho/fk-sem-indice: motivo) vale.
+  const readable = migrations.filter((m) => m.sql !== null)
+  const sqlOf = new Map(readable.map((m) => [m.file, m.sql]))
+  for (const fk of foreignKeysWithoutIndex(readable)) c.add('desempenho/fk-sem-indice', fk.file, fk.line, { table: fk.table, column: fk.column }, sqlOf.get(fk.file))
 }

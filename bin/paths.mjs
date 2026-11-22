@@ -34,6 +34,8 @@ export const FILES = {
   inbox: 'cache/inbox.json',
   // Contexto e janelas de uso que o Claude Code mandou para a barra (vão ao painel no fim da resposta).
   meters: 'cache/meters.json',
+  // O que o tsc e o ESLint do projeto acharam da última vez (vale enquanto o código não muda).
+  qualityTools: 'cache/quality-tools.json',
   // Prints dos pedidos da extensão do Chrome (faundr inbox --print).
   requestShots: 'pedidos',
 }

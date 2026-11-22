@@ -346,7 +346,10 @@ export const TEXT_CODE = {
       'Every package is more code to download, update and watch for security flaws.',
       'Cada pacote é mais código para baixar, atualizar e vigiar contra falhas de segurança.',
     ),
-    t(`Replace it with ${c.native} and remove the package from package.json.`, `Troque por ${c.native} e remova o pacote do package.json.`),
+    t(
+      `Replace it with ${c.native} and remove the package from package.json. To keep it on purpose, list it in package.json under "faundr": { "ignore": { "demais/dependencia-dispensavel": ["${c.pkg}"] } }.`,
+      `Troque por ${c.native} e remova o pacote do package.json. Para manter de propósito, liste o pacote no package.json em "faundr": { "ignore": { "demais/dependencia-dispensavel": ["${c.pkg}"] } }.`,
+    ),
   ],
   'demais/dependencia-sem-uso': (c, n) => [
     n > 1 ? t(`${n} packages no file uses`, `${n} pacotes que nenhum arquivo usa`) : t(`Package no file uses: ${c.pkg}`, `Pacote que nenhum arquivo usa: ${c.pkg}`),
@@ -356,8 +359,8 @@ export const TEXT_CODE = {
     ),
     t('An idle package makes the install bigger and adds to what must be watched for flaws.', 'Pacote parado aumenta a instalação e o que precisa ser vigiado contra falhas.'),
     t(
-      'If it is not used, remove it with npm uninstall <package>. If it is only used during development, move it to devDependencies.',
-      'Se não é usado, remova com npm uninstall <pacote>. Se é usado só no desenvolvimento, mova para devDependencies.',
+      `If it is not used, remove it with npm uninstall <package>. If it is only used during development, move it to devDependencies. If it is used in a way the check cannot see, list it in package.json under "faundr": { "ignore": { "demais/dependencia-sem-uso": ["${c.pkg}"] } }.`,
+      `Se não é usado, remova com npm uninstall <pacote>. Se é usado só no desenvolvimento, mova para devDependencies. Se é usado de um jeito que a checagem não enxerga, liste o pacote no package.json em "faundr": { "ignore": { "demais/dependencia-sem-uso": ["${c.pkg}"] } }.`,
     ),
   ],
   'demais/codigo-comentado': (c, n) => [

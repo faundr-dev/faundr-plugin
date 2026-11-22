@@ -62,7 +62,9 @@ export function queriesInLoops(rel, text) {
 
 // ---- Chave estrangeira sem índice (migrações SQL) -----------------------------------------------------------
 
-const strip = (sql) => sql.replace(/--.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')
+// Os comentários viram espaços (as quebras de linha ficam): as posições continuam as do arquivo, e a linha do
+// achado é a certa mesmo com comentário antes (o faundr-ignore depende dela).
+const strip = (sql) => sql.replace(/--.*$/gm, (m) => ' '.repeat(m.length)).replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
 const ident = (s) => s.replace(/"/g, '').replace(/^public\./, '').toLowerCase()
 
 /**
@@ -81,7 +83,8 @@ export function foreignKeysWithoutIndex(migrations) {
       for (const c of body.matchAll(/^\s*"?(\w+)"?\s+[\w\s()]*?\breferences\b/gim)) {
         const column = c[1].toLowerCase()
         if (['constraint', 'foreign', 'primary', 'unique', 'check'].includes(column)) continue
-        fks.set(`${table}.${column}`, { file, line: lineOfIn(raw, t.index + t[0].indexOf(c[0])), table, column })
+        // A linha da coluna (o trecho casado pode começar em linhas em branco antes dela).
+        fks.set(`${table}.${column}`, { file, line: lineOfIn(raw, t.index + t[0].indexOf(c[0]) + c[0].search(/\S/)), table, column })
         if (new RegExp(`^\\s*"?${column}"?\\s+[^,]*\\b(primary\\s+key|unique)\\b`, 'im').test(c[0] + body.slice(c.index, body.indexOf('\n', c.index + 1)))) indexed.add(`${table}.${column}`)
       }
       for (const k of body.matchAll(/foreign\s+key\s*\(\s*"?(\w+)"?/gi)) fks.set(`${table}.${k[1].toLowerCase()}`, { file, line: lineOfIn(raw, t.index), table, column: k[1].toLowerCase() })

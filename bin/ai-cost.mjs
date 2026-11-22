@@ -21,7 +21,7 @@ export const AI_ITEMS = [
   { id: 'design', skill: 'faundr:design', title: t('design.md and screen audit', 'design.md e auditoria das telas'), essential: false, base: 80_000, per: 0.1, reads: 'ui', cap: 600_000 },
   { id: 'showcase', skill: 'faundr:design-showcase', title: t('Component Showcase', 'Vitrine dos componentes'), essential: false, base: 120_000, per: 0.05, reads: 'ui', cap: 400_000 },
   { id: 'security', skill: 'faundr:security', title: t('Full security review', 'Revisão de segurança completa'), essential: false, base: 200_000, per: 0.6, reads: 'code', cap: 3_000_000 },
-  { id: 'quality', skill: 'faundr:quality', title: t('Full quality review', 'Revisão de qualidade completa'), essential: false, base: 150_000, per: 0.5, reads: 'code', cap: 2_500_000 },
+  { id: 'quality', skill: 'faundr:quality', title: t('Full quality review', 'Revisão de qualidade completa'), essential: true, base: 150_000, per: 0.5, reads: 'code', cap: 2_500_000 },
 ]
 
 const CODE = /\.(m?[jt]sx?|cjs|py|rb|go|php|rs|java|kts?|cs|swift|dart|c|cc|cpp|h|hpp|vue|svelte|astro|sql|prisma)$/i

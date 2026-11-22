@@ -81,7 +81,7 @@
 //   faundr quality-ignore Q-<n> --reason …     ignores with a reason (false-alarm | on-purpose | later: comes back in 30 days)
 //   faundr quality-reopen Q-<n>                reopens an ignored finding
 //   faundr quality-context [--files a,b | --full]  context for the agent to do the AI review ("quality" skill)
-//   faundr quality-finding "<title>" …         records a finding from the AI review (Q-n, confidence 80+)
+//   faundr quality-finding "<title>" …         records a finding from the AI review (Q-n, confidence 80+; --needs-check "<missing fact>": "to confirm", 50+)
 //   faundr quality-review-done --areas "…"     records what the review covered (and the 0-4 score per theme with --scores)
 //   faundr quality-rule "<name>" --pattern …   creates a house rule in .faundr-regras/ (pattern + message)
 //   faundr quality-ladder on|off               turns the quality reminder at session start on/off

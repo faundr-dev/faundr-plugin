@@ -43,11 +43,14 @@ export function memoryRules(root) {
       rule: `memoria/${String(r.id).slice(0, 8)}`,
       files: { test: (rel) => (r.paths ?? []).some((p) => matchesPath(p, rel)) },
       ctx: { memory: true, name: r.title, message: r.body ?? '', pattern: r.forbid, severity: 'medium' },
-      lines: (text) => text.split('\n').flatMap((l, i) => (re.test(l) ? [i + 1] : [])),
+      lines: matchingLines(re),
     })
   }
   return out
 }
+
+// Linhas em que o padrão aparece. O corte tira o \r do Windows (CRLF): com ele, padrão terminado em $ nunca casava.
+const matchingLines = (re) => (text) => text.split(/\r?\n/).flatMap((l, i) => (re.test(l) ? [i + 1] : []))
 
 export function houseRules(root) {
   let names = []
@@ -69,9 +72,12 @@ export function houseRules(root) {
     const pattern = meta.padrao ?? meta.pattern
     const active = meta.ativo ?? meta.active
     if (!pattern || active === 'nao' || active === 'no' || active === 'false') continue
+    const source = pattern.replace(/\\\\/g, '\\')
+    // Padrão que travaria a checagem (ex.: (a+)+): fica de fora, como os da memória.
+    if (!isSafePattern(source)) continue
     let re
     try {
-      re = new RegExp(pattern.replace(/\\\\/g, '\\'))
+      re = new RegExp(source)
     } catch {
       // Padrão inválido: a regra fica de fora (o comando quality-rule avisa ao criar).
       continue
@@ -81,7 +87,7 @@ export function houseRules(root) {
       rule: `casa/${id}`,
       files: globToRegex(meta.arquivos || meta.files || '**/*'),
       ctx: { name: meta.nome || meta.name || id, message: m[2].trim().slice(0, 1500), severity: SEVERITY_PT_IN[(meta.gravidade ?? meta.severity)?.toLowerCase()] ?? 'medium', file: `${HOUSE_DIR}/${name}` },
-      lines: (text2) => text2.split('\n').flatMap((l, i) => (re.test(l) ? [i + 1] : [])),
+      lines: matchingLines(re),
     })
   }
   return out

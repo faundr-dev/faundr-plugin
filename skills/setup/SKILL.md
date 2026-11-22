@@ -26,7 +26,7 @@ The setup above already did on its own what is safe (marked "✓ … feito agora
    - **Errors from the published app**: offer to run `/faundr:errors-setup`; if they do not want it now, `faundr setup --no-ask --skip errors`.
    - Old **Node**: tell them to install Node 20 or newer (https://nodejs.org) and open the terminal again.
 5. **With AI (uses the person's plan).** The "Com IA" part lists what Claude writes (Overview, explained Stack, design.md, inventory, Showcase, full security and quality reviews, classifying skills), each with the estimated cost and where the estimate came from. **None of this runs without the person choosing.** Ask in a single round (question tool), with each option's cost copied from the context:
-   - **Just the essentials** (Recommended: Overview and classifying the skills, the cheapest and most helpful at the start);
+   - **Just the essentials** (Recommended: the items the context marks as essential — Overview, classifying the skills and the full quality review, the deepest look at the code the person will get: logic bugs, parts that no longer agree, weak tests);
    - **Everything missing**;
    - **Choose one by one** (then a second question, multiSelect, with each item and its cost);
    - **Nothing for now** (can be generated later).
