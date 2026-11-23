@@ -372,10 +372,14 @@ function dbErrorToClientRules(text) {
 // SUPABASE_ACCESS_TOKEN= passam sem máscara.
 function secretMaskRules(text) {
   // Só padrão de máscara: procura "nome = valor" e troca por asteriscos ou "redacted".
-  const maskLine = (line) => /\[:=\]|\\s\*[:=]/.test(line) && /\*\*\*|redact|\[hidden\]|\bmask/i.test(line)
-  // Já tem um padrão de máscara que pega o nome no meio de outro (ex.: [A-Za-z0-9_]*(?:PASSWORD|…) ou \w*(?:password…).
-  const wide = /(?:\[A-Za-z0-9_\]|\[A-Z0-9_\]|\[\\w\]|\\w)\*\(\?:[^)]{0,60}(?:password|secret|token)/i
-  if (text.split('\n').some((line) => wide.test(line) && maskLine(line))) return []
+  const maskLine = (line) => /\[:=\]|\\s(?:\*|\{\d*,?\d*\})[:=]/.test(line) && /\*\*\*|redact|\[hidden\]|\bmask/i.test(line)
+  // Já tem um padrão de máscara que pega o nome no meio de outro: [A-Za-z0-9_]*(?:PASSWORD|…), \w*(?:password…,
+  // [A-Z0-9_]{0,64}(?:PASSWORD…, ou o grupo logo no começo da regex, sem âncora antes: /((?:password|…)…/.
+  const wide = [
+    /(?:\[A-Za-z0-9_\]|\[A-Z0-9_\]|\[a-z0-9_\]|\[\\w\]|\\w)(?:\*|\+|\{0,\d*\})\(\?:[^)]{0,60}(?:password|secret|token)/i,
+    /(?:^|[\s,[(=])\/\(*\(\?:(?:[^)|]{0,20}\|){0,8}(?:password|passwd|pwd|secret|token)/i,
+  ]
+  if (text.split('\n').some((line) => wide.some((re) => re.test(line)) && maskLine(line))) return []
   const out = []
   const re = /\\b\(*(?:\?:)?(?:[\w[\]?|-]*\|)?(?:password|passwd|pwd|secret|token|api\[?_)/gi
   for (const m of text.matchAll(re)) {

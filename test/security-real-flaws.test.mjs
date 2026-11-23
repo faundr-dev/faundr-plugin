@@ -328,6 +328,24 @@ test('código: máscara de segredo com \\b antes de password/secret/token (secur
   const rules = ['secret-mask-word-boundary']
   assert.deepEqual(await scan({ 'bin/mask.mjs': MASK_OLD }, rules), ['secret-mask-word-boundary@bin/mask.mjs'])
   assert.deepEqual(await scan({ 'bin/mask.mjs': MASK_FIXED }, rules), [])
+  // src/lib/redact.ts do Faundr (S-126, falso): a linha com \b fica, mas outras duas cobrem o nome no meio, uma sem
+  // âncora nenhuma antes do grupo e outra com [A-Z0-9_]{0,64} no lugar do *.
+  const MASK_REDACT = MASK_OLD.replace(
+    ']\nconst PUBLIC_ENV',
+    `  [/((?:password|passwd|pwd|secret|token|_key)[A-Za-z0-9_]{0,64}\\s{0,40}=\\s{0,40}["']?)[^\\s"',;&]{4,}/gi, '$1***'],
+  [/(?<![A-Za-z0-9_])([A-Z0-9_]{0,64}(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN|_KEY)[A-Z0-9_]{0,64}\\s{0,40}:\\s{0,40}["']?)[^\\s"',;&]{4,}/g, '$1***'],
+]
+const PUBLIC_ENV`,
+  )
+  assert.deepEqual(await scan({ 'src/lib/redact.ts': MASK_REDACT }, rules), [])
+  // Só a forma {0,64}, sem a outra: também cobre.
+  const MASK_BOUNDED = MASK_OLD.replace(
+    ']\nconst PUBLIC_ENV',
+    `  [/(?<![A-Za-z0-9_])([A-Z0-9_]{0,64}(?:PASSWORD|SECRET|TOKEN)[A-Z0-9_]{0,64}\\s{0,40}=\\s{0,40})\\S+/g, '$1***'],
+]
+const PUBLIC_ENV`,
+  )
+  assert.deepEqual(await scan({ 'src/lib/redact.ts': MASK_BOUNDED }, rules), [])
   // Regex com \b que não esconde nada (só procura o campo) não conta.
   assert.deepEqual(await scan({ 'src/form.ts': "const isPassword = /\\bpassword\\b/i.test(name)\n" }, rules), [])
 })
