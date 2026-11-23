@@ -129,3 +129,19 @@ Golden rule: identity only counts if it was verified on the server in every requ
 - Does not rule out: a screen that asks for the code but the API accepts the `aal1` session; "MFA is optional" for admins; account recovery by email alone that turns off MFA.
 - How to fix: require `aal2` in sensitive policies and routes (`(auth.jwt() ->> 'aal') = 'aal2'`), mandatory MFA for admin, turn off MFA only with the second factor, attempt limit on the code.
 - CWE: CWE-308
+
+## escopo-do-token-no-ponto-de-uso — Scoped API keys or OAuth tokens that are only checked at the route entrance
+- Typical severity: high (a read-only key writes, or a limited token becomes a full session).
+- Where to look: where scopes are checked (`scope`, `canAccess`, scope helpers), and every place that exchanges one credential for another: endpoints that return a collaboration or websocket token, SSO callbacks, passkey or device registration, OAuth `authorize` and client-secret reads, batch endpoints.
+- How to confirm by reading the code: for each exchange, ask "can a read-only key reach this?" and "does the new credential carry the scope?". A collaboration token, session cookie or passkey minted from a scoped key usually carries the full power of the user.
+- Ruled out if: those endpoints require a browser session (not a key), or the minted credential keeps the scope and every use checks it.
+- How to fix: refuse credential exchanges for API keys and OAuth tokens, or carry the scope into the new credential and check it at each use.
+- CWE: CWE-863
+
+## sso-atualiza-email-sem-verificacao — SSO login takes the email from the provider without checking it is verified
+- Typical severity: medium to critical (account takeover across users or tenants).
+- Where to look: the user provisioner on SSO login (`userProvisioner`, `accountProvisioner`, `findOrCreateUser`, OAuth `profile` callbacks): where the email from the provider is saved on an existing user, or used to find a user to link.
+- How to confirm by reading the code: on a repeat login, is the stored email overwritten with the provider's email without `email_verified`? On first login, is a user found by email alone (no provider subject id) and linked? Provider fields that are not proof of ownership (the Azure/Entra `mail` attribute, custom claims) must not count as verified.
+- Ruled out if: linking and updating require a verified email from a provider that guarantees it, and lookups use the provider's stable subject id.
+- How to fix: link by provider subject id; only change or match the email when the provider says it is verified.
+- CWE: CWE-287

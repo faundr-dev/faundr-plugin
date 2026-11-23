@@ -99,3 +99,19 @@ Golden rule: every copy of the data (cache, search index, exported file, signed 
   await admin.from('requests').delete().lt('created_at', cutoff)
   ```
 - CWE: CWE-459
+
+## download-pela-autoria-depois-de-perder-acesso — Exports, files or history still available only because the caller created them
+- Typical severity: medium; high when the export holds a whole private collection.
+- Where to look: policies for file operations, exports, revisions and attachments that allow access when `createdById === user.id`; routes that load deleted objects (`paranoid: false`, `withDeleted`) and then authorize.
+- How to confirm by reading the code: remove the user from the source (collection, project, document) in your head and walk the download route again: does anything check that they can still read the source? For deleted objects: does the policy look at `deletedAt`?
+- Ruled out if: the download re-checks read access on the source at the time of the request, or exports expire and are deleted quickly.
+- How to fix: authorize on the source object, not on authorship; expire exports; treat deleted objects as unreadable for non-admins.
+- CWE: CWE-862
+
+## aviso-sem-reconferir-alcance — Notifications, subscriptions and webhooks send content without re-checking who can read it now
+- Typical severity: medium to high (a share subscriber or a removed member keeps receiving content by email or webhook).
+- Where to look: notification tasks, email templates with document content or diffs, share subscriptions, webhook deliveries, digests. Grep: `NotificationsTask`, `Subscription`, `sendEmail`, `deliver`, `diff`.
+- How to confirm by reading the code: for each recipient, find the check made **at send time**: is it the same check the read route does today (current membership, share still active, object still inside the shared tree, not someone else's draft)? A check made when the subscription was created is not enough.
+- Ruled out if: the task calls the same read policy (or the same public-share loader) for each recipient right before sending.
+- How to fix: re-authorize each recipient at send time with the same code the read route uses.
+- CWE: CWE-863

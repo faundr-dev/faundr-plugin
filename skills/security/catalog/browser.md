@@ -85,3 +85,19 @@ Golden rule: another tab, another site or an iframe can send messages to, open a
   const id = () => globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)
   ```
 - CWE: CWE-754
+
+## url-do-usuario-em-embed-ou-clique — User-controlled URL rendered into embed, iframe or object src, or clicked by code
+- Typical severity: high (stored XSS on the app's origin).
+- Where to look: editor nodes and components that render attachments, PDFs, videos or embeds (`<embed src`, `<iframe src`, `<object data`, `window.open(`, `link.click()`, `location.href =`) with a value that comes from the document or from the real-time collaboration channel.
+- How to confirm by reading the code: follow the URL from where the user sets it (including the collaboration channel, which skips the REST validation) to the element; look for a scheme allowlist (`https:`, relative paths) before rendering. Sanitizing only on save through the REST API does not cover collaborative edits.
+- Ruled out if: a shared URL sanitizer or allowlist runs in the component itself, or the CSP blocks `javascript:` and `data:` for that element type.
+- How to fix: allowlist the scheme at render time, in the component.
+- CWE: CWE-79
+
+## csrf-token-sem-sessao — CSRF token not tied to the session, or cookie set on the parent domain
+- Typical severity: medium.
+- Where to look: the CSRF middleware (double-submit), where the token cookie is set (its `domain` option) and how it is verified.
+- How to confirm by reading the code: double-submit compares the cookie with the header; if the cookie is set on the parent domain (or a sibling subdomain can set it) and the token is not bound to the session (an HMAC with the session id, a `__Host-` cookie), a sibling subdomain can plant both.
+- Ruled out if: the cookie uses the `__Host-` prefix (no domain) and the token is an HMAC of the session.
+- How to fix: a `__Host-` cookie and a token derived from the session.
+- CWE: CWE-352

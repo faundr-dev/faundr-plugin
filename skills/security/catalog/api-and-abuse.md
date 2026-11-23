@@ -197,3 +197,19 @@ Note on rate limiting in serverless (Vercel, Netlify, Cloudflare Workers, Supaba
 - Does not rule out: cap only in the front end.
 - How to fix: cap on the server, batched queries (`in (...)`), depth limit in GraphQL, request limit on the route.
 - CWE: CWE-400
+
+## limitador-pelo-caminho-cru — Rate limit keyed by the raw path while the router matches case-insensitively
+- Typical severity: medium (it multiplies every route limit, including login codes and emails).
+- Where to look: the rate-limit middleware and how it builds its key (`ctx.path`, `req.path`, `req.url`, `request.nextUrl.pathname`) versus how the router matches (`koa-router` and Express are case-insensitive by default and ignore a trailing slash unless strict or sensitive matching is set).
+- How to confirm by reading the code: find the key of the limiter; if it uses the path as sent, `/auth/EMAIL`, `/auth/email/` and `/auth/Email` reach the same handler with three separate buckets. Also check whether the key uses a client-controlled IP (the first entry of `X-Forwarded-For`).
+- Ruled out if: the key uses the matched route name or a lowercased, normalized path, or the router is strict and case-sensitive.
+- How to fix: key the limiter by the route the router matched (or a normalized path), plus a per-account key for login and code checks.
+- CWE: CWE-770
+
+## limite-contado-antes-de-criar — Per-team or per-user limit checked by counting and then creating
+- Typical severity: medium to high (the limit is what protects cost, spam or the plan).
+- Where to look: `count(` or `SELECT count` followed by `create` or `insert` in the same flow, model hooks (`beforeCreate`, `@BeforeCreate`) that count, limits like "at most N webhooks, pins, domains, subscriptions or seats".
+- How to confirm by reading the code: if two requests can both read the count before either inserts, the limit is exceeded. A model hook does not help: it runs in each request separately.
+- Ruled out if: the database enforces it (unique index, a counter column updated atomically), or the count and the insert run under a lock (`SELECT … FOR UPDATE` on the parent row, advisory lock, serializable transaction).
+- How to fix: lock the parent row (team, user) before counting, or keep a counter column updated with a conditional `UPDATE … SET n = n + 1 WHERE n < limit`.
+- CWE: CWE-367

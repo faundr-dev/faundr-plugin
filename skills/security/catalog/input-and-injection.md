@@ -96,3 +96,11 @@ How to work: for each candidate, trace source → transformation → sink. Sourc
 - Does not rule out: `url.includes('meusite.com')` (accepts `meusite.com.evil.io`); `startsWith('https://meusite.com')` (accepts `https://meusite.com.evil.io`).
 - How to fix: accept only relative paths or destination IDs mapped on the server.
 - CWE: CWE-601
+
+## titulo-vira-chave-de-arquivo — A user-chosen name becomes part of a storage key or a path later
+- Typical severity: medium; high when the result lands in a public bucket or overwrites files.
+- Where to look: exports, archives, backups and uploads that build a key or path from a title, name or subject (a template string with the title in the key, `path.join(dir, name)`), often in a background job far from where the name was saved (second order).
+- How to confirm by reading the code: follow the name from the form that saves it to the job that uses it; look for a slug or sanitizer that removes `/`, `\` and `..`, not only spaces. Check which bucket or folder the result goes to and who can read it.
+- Ruled out if: the key uses only generated ids, or the name goes through a sanitizer that keeps only safe characters.
+- How to fix: build keys from ids; keep the human name only in the download filename header.
+- CWE: CWE-22

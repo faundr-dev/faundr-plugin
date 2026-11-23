@@ -151,3 +151,12 @@ Golden rule: every ID that comes from the client (path, query, body, header, uns
            or public.is_admin(project_id));
   ```
 - CWE: CWE-285
+
+## verbo-irmao-com-permissao-mais-fraca — Export, download, duplicate or import authorized with a weaker action than the one it really performs
+- Typical severity: medium; high when the stronger action is gated by an admin setting (viewers cannot export, guests cannot create) or when it writes into a place the caller cannot write.
+- Where to look: every route that does a second thing with an object it already lets you see: `*.export`, `*.download`, `*.duplicate`, `*.import`, `*.copy`, `*.publish`, `*.move`, revision, version and history routes. Grep the authorization call of each one (`authorize(user, "`, `can(`, `policy.`) and compare the action name with what the handler does.
+- How to confirm by reading the code: list the actions the policy file defines for the object (read, listRevisions, download, update, createChild, publish…) and, for each sibling route, write down which action it checks and which effect it has. A route that produces a file, a copy or a new object must check the action that matches the effect (download or export, create in the destination), not the one of the screen that shows the button. For routes that take two ids (parent and destination collection, source and target), check that the action is verified on **each** id that decides where the result goes.
+- Ruled out if: the route checks the same action as its main sibling (the download route and the export route both check `download`), and every destination id is authorized for write.
+- Does not rule out: the button hidden in the interface; the setting enforced only on the main route; checking the parent document when the request also carries a collection id that wins.
+- How to fix: authorize the action of the effect, on every object that decides the result; add a test per sibling route with the setting turned off.
+- CWE: CWE-863

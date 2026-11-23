@@ -124,3 +124,27 @@ Calibration: missing headers, version in a header and source maps are, on their 
 - Not ruled out by: "nobody knows the algorithm"; encryption without authentication (CBC/CTR without HMAC).
 - How to fix: AES-GCM with a random 12-byte iv stored alongside, or libsodium (`crypto_secretbox`); `crypto.randomBytes(32)` for tokens; `timingSafeEqual` to compare.
 - CWE: CWE-327
+
+## sanitizacao-async-sem-await — Redaction or sanitizing step that is async and not awaited
+- Typical severity: medium; high when the redacted data is private (internal ids, comments, emails) and the route is public.
+- Where to look: helpers that remove or replace content before sending it (`removeMarks`, `redact`, `strip`, `sanitize`, `replaceInternalUrls`, `toPublic`) when any step in the chain is `async`. Read every call site of an async helper and look for a missing `await`.
+- How to confirm by reading the code: a Promise passed into the next step is treated as an object with nothing to remove, so the original data goes out. The type checker does not always catch it (functions that accept `any` or a union).
+- Ruled out if: every async step is awaited, or the lint rules `no-floating-promises` and `no-misused-promises` are on and cover that file.
+- How to fix: await the step and add a test that the public response does not contain the private field.
+- CWE: CWE-200
+
+## perfil-de-quem-criou-em-resposta-publica — Public or anonymous responses embed the internal profile of the creator
+- Typical severity: medium.
+- Where to look: presenters and serializers used by public routes (share links, public pages, embeds, invitations): `presentShare`, `presentUser`, `createdBy`, `author`, `owner` nested in the payload.
+- How to confirm by reading the code: follow the public route to its presenter and list every field of nested users: role, email, last active, suspended, time zone, internal id. The same data is often hidden on the main object and leaks through a nested one.
+- Ruled out if: public routes use a separate presenter with only display name and avatar.
+- How to fix: a public presenter with an allowlist of fields, and a test on the anonymous response.
+- CWE: CWE-212
+
+## sugestao-sem-a-politica-da-lista — Autocomplete, mentions or search suggestions that skip the policy of the full list
+- Typical severity: medium (the whole directory of users or groups reaches someone who should not list it, such as a guest).
+- Where to look: `suggestions`, `mention`, `autocomplete` and search routes that query users, groups, documents or projects directly by tenant.
+- How to confirm by reading the code: compare with the main list route (`users.list`, `groups.list`): which policy does it check (`listUsers`, `listGroups`), and does the suggestion route check the same? Also check filters on hidden fields (`LIKE` on an email the caller cannot see) that let someone discover a value one character at a time.
+- Ruled out if: the suggestion route calls the same policy and filters by the same visibility rules.
+- How to fix: authorize with the list policy; never filter on a field the caller cannot see.
+- CWE: CWE-863
