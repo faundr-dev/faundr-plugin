@@ -209,7 +209,7 @@ Note on rate limiting in serverless (Vercel, Netlify, Cloudflare Workers, Supaba
 ## limite-contado-antes-de-criar — Per-team or per-user limit checked by counting and then creating
 - Typical severity: medium to high (the limit is what protects cost, spam or the plan).
 - Where to look: `count(` or `SELECT count` followed by `create` or `insert` in the same flow, model hooks (`beforeCreate`, `@BeforeCreate`) that count, limits like "at most N webhooks, pins, domains, subscriptions or seats".
-- How to confirm by reading the code: if two requests can both read the count before either inserts, the limit is exceeded. A model hook does not help: it runs in each request separately.
+- How to confirm by reading the code: if two requests can both read the count before either inserts, the limit is exceeded. A model hook does not help: it runs in each request separately. Also look at the path that reuses an existing row (`save()`, `update`, `upsert`, "if it already exists, send again"): a limit in a create-only hook (`beforeCreate`) does not run there, so resending to the same row has no limit at all.
 - Ruled out if: the database enforces it (unique index, a counter column updated atomically), or the count and the insert run under a lock (`SELECT … FOR UPDATE` on the parent row, advisory lock, serializable transaction).
 - How to fix: lock the parent row (team, user) before counting, or keep a counter column updated with a conditional `UPDATE … SET n = n + 1 WHERE n < limit`.
 - CWE: CWE-367

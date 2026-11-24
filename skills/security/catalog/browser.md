@@ -90,7 +90,7 @@ Golden rule: another tab, another site or an iframe can send messages to, open a
 - Typical severity: high (stored XSS on the app's origin).
 - Where to look: editor nodes and components that render attachments, PDFs, videos or embeds (`<embed src`, `<iframe src`, `<object data`, `window.open(`, `link.click()`, `location.href =`) with a value that comes from the document or from the real-time collaboration channel.
 - How to confirm by reading the code: follow the URL from where the user sets it (including the collaboration channel, which skips the REST validation) to the element; look for a scheme allowlist (`https:`, relative paths) before rendering. Sanitizing only on save through the REST API does not cover collaborative edits.
-- Ruled out if: a shared URL sanitizer or allowlist runs in the component itself, or the CSP blocks `javascript:` and `data:` for that element type.
+- Ruled out if: a shared URL sanitizer or scheme allowlist runs in the component itself (or on every path that writes the value, the collaboration channel included). The CSP does not rule it out: it can be turned off by configuration and does not cover `data:text/html` in every element, the download path or exports; at most it lowers the severity one level.
 - How to fix: allowlist the scheme at render time, in the component.
 - CWE: CWE-79
 
