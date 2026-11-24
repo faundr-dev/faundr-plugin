@@ -103,6 +103,8 @@ First write the **invariant**, one line each: (1) who attacks and what they alre
 - a control that fails open (error → lets it through);
 - the variable "looking" internal when it comes from a parameter.
 
+**What the actor can already do is not a finding.** Before calling it a leak or an escalation, compare with the power the actor already has: the read policy already lets them see it (compare the recipient of an email, notification or webhook with the real read check, not with the route's gate); the role already does it by design (an admin changing another member's email, suspending, demoting); another route already gives the same access (open the authorization inside the command, not only the gate on the route). An operator secret (a value in `.env`, the sample in `.env.example`) is configuration, not something the attacker holds. And check who really runs the path (a cron, a handler that exists) before blaming the actor.
+
 **Defense in depth is not a problem**: if layer A already blocks the attack, the lack of layer B is a hardening note (tell the user at the end, and keep it for the chains pass), not an S-n. The same for "missing good practice" with nobody harmed. **The CSP is never layer A for an injection**: a user-controlled URL or HTML that reaches a dangerous sink (`href`, `src`, `<embed>`, `<iframe>`, `window.open`, `link.click()`, `innerHTML`, `dangerouslySetInnerHTML`) without a scheme allowlist or sanitizer in the code is the finding. The CSP can be turned off by configuration, does not cover every element, export or email, and has its own bypasses; at most it lowers the severity one level, when you read it and it blocks this exact element in every deployment.
 
 **Variants, for every confirmed finding**: look for the same mistake in other routes and functions of the same kind (same code pattern, same helper, same table, the sibling verb, the bulk and export versions). The same cause in several places is **one** S-n with the places in the detail; independent causes are separate S-n.
@@ -112,6 +114,8 @@ First write the **invariant**, one line each: (1) who attacks and what they alre
 - **high**: completely break an explicit control with real consequences, requiring being logged in (read another organization's data, become admin, XSS that hits other users); or abuse that generates high cost (AI route without a limit);
 - **medium**: real violation with limited reach, unusual condition or only some resources affected (no rate limit on login, open CORS without credentials);
 - **low**: non-secret internal detail, or great effort for minimal gain.
+
+Lower one level when the precondition is already a privileged role (admin, owner of the integration), when it needs a random id the attacker cannot list, or when it only exists in a multi-tenant cloud deployment of a self-hosted product; never two levels for the same reason.
 
 Question that separates high from medium: does the effect **break** the control on an action that matters, or only **weaken** it? If you cannot state the concrete harm, the severity is lower than it looks. Do not inflate: a missing header alone, self-XSS and an isolated open redirect are not critical.
 
