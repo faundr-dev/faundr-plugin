@@ -477,6 +477,21 @@ test('faundr-ignore vale para o que o tsc e o ESLint acusam', async () => {
   assert.ok(result.stats.ignored >= 3, `ignorados: ${result.stats.ignored}`)
 })
 
+test('tsc e ESLint: o que acusam numa pasta do .faundrignore não vira achado', async () => {
+  const { root } = toolProject()
+  write(root, 'node_modules/typescript/bin/tsc', `process.stdout.write('a.ts(4,1): error TS2322: outro\\r\\nexemplos/app/x.ts(1,1): error TS2304: Cannot find name Deno\\r\\nexemplos-reais.ts(1,1): error TS2322: fora da pasta\\r\\n')\nprocess.exitCode = 2\n`)
+  write(root, 'exemplos/app/x.ts', 'Deno.serve()\n')
+  write(root, 'exemplos-reais.ts', 'export const d: number = "4"\n')
+  write(root, '.faundrignore', '# exemplos com defeitos de propósito\nexemplos/\n')
+  const result = await runQuality(root, { history: false })
+  assert.deepEqual(result.errors, [])
+  // Só a pasta exemplos/ sai; um arquivo com nome parecido, fora dela, continua.
+  assert.deepEqual(
+    toolFindings(result).filter(([rule]) => rule === 'ts/erro-de-tipo'),
+    [['ts/erro-de-tipo', 'a.ts', [4]], ['ts/erro-de-tipo', 'exemplos-reais.ts', [1]]],
+  )
+})
+
 test('tsc e ESLint: com o código igual, a checagem em segundo plano aproveita o resultado guardado; a pedida roda de novo', async () => {
   const { root, runs } = toolProject()
   oldRepo(root)

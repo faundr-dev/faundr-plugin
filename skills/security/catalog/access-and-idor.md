@@ -36,6 +36,7 @@ Golden rule: every ID that comes from the client (path, query, body, header, uns
 - How to confirm by reading the code: verify that the `where` of every listing includes the session's owner/tenant and whether the client can override that filter (e.g.: `where: { ...req.query }` or `{ userId: req.query.userId ?? user.id }`).
 - Ruled out if: the owner/tenant filter is applied by the server and the client's value is ignored or validated against the session; or the read goes through the user's Supabase client with correct RLS.
 - Does not rule out: a filter that uses the client's value when present (`req.query.userId ?? user.id`); a text search that filters by owner only on the first page; `include`/`expand`/`select` coming from the client that pull relations from other owners.
+- **Call it with an empty body.** When every filter of a list route is optional in the schema (`documentId`, `parentId`, `reverseDocumentId`, `collectionId` all `.optional()`), read what the route does with `{}`: often it lists the whole table (or the whole team) and the per-row check only looks at the side of the relation the client usually sends. For relation tables (links, backlinks, memberships, pins, relationships), check that **both** ends of each row are authorized before any id goes out; a returned id of a private object is already a leak (a title search or a share by id follows).
 - How to fix: build the `where` on the server and never spread the client's query inside it; accept from the client only filters from an allowlist.
 - CWE: CWE-639
 

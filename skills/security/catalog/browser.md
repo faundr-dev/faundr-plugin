@@ -90,6 +90,7 @@ Golden rule: another tab, another site or an iframe can send messages to, open a
 - Typical severity: high (stored XSS on the app's origin).
 - Where to look: editor nodes and components that render attachments, PDFs, videos or embeds (`<embed src`, `<iframe src`, `<object data`, `window.open(`, `link.click()`, `location.href =`) with a value that comes from the document or from the real-time collaboration channel.
 - How to confirm by reading the code: follow the URL from where the user sets it (including the collaboration channel, which skips the REST validation) to the element; look for a scheme allowlist (`https:`, relative paths) before rendering. Sanitizing only on save through the REST API does not cover collaborative edits.
+- This is decided in the code, never parked as "needs check": `link.click()` (or `location.href =`) on a `javascript:` URL runs the script, and `data:text/html` in `<embed>`, `<iframe>` or `<object>` renders a page; how browsers treat these is known, not a fact about the deployment.
 - Ruled out if: a shared URL sanitizer or scheme allowlist runs in the component itself (or on every path that writes the value, the collaboration channel included). The CSP does not rule it out: it can be turned off by configuration and does not cover `data:text/html` in every element, the download path or exports; at most it lowers the severity one level.
 - How to fix: allowlist the scheme at render time, in the component.
 - CWE: CWE-79
@@ -98,6 +99,8 @@ Golden rule: another tab, another site or an iframe can send messages to, open a
 - Typical severity: medium.
 - Where to look: the CSRF middleware (double-submit), where the token cookie is set (its `domain` option) and how it is verified.
 - How to confirm by reading the code: double-submit compares the cookie with the header; if the cookie is set on the parent domain (or a sibling subdomain can set it) and the token is not bound to the session (an HMAC with the session id, a `__Host-` cookie), a sibling subdomain can plant both.
+- Check it whenever the app has its own CSRF middleware, even when nobody suspected CSRF: open where the token is created (random, or derived from the session?) and the cookie's `domain` option (a `getCookieDomain`, `.example.com` or a cloud setting that shares the parent domain between teams).
 - Ruled out if: the cookie uses the `__Host-` prefix (no domain) and the token is an HMAC of the session.
+- Does not rule out: `SameSite=Lax` or `Strict` (a sibling subdomain is the same site, so the browser sends the cookie); POST-only or JSON-only routes (the attacker's page on the sibling sends the header too).
 - How to fix: a `__Host-` cookie and a token derived from the session.
 - CWE: CWE-352

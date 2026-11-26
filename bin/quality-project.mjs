@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { ignoreSet } from './design-rules.mjs'
-import { projectParts } from './parts.mjs'
+import { faundrIgnore, ignoredBy, projectParts } from './parts.mjs'
 import { foreignKeysWithoutIndex, queriesInLoops, unboundedQueries } from './perf-rules.mjs'
 import { DOCKERFILE } from './security-langs.mjs'
 import { projectFiles } from './security.mjs'
@@ -199,6 +199,9 @@ export function projectTools(root, c, errors, failed = [], { fresh = false } = {
   const saved = {}
   let ranForReal = false
   const texts = new Map()
+  // O tsc e o ESLint olham o que a configuração deles manda, não o que o dono tirou do Faundr no .faundrignore:
+  // os erros dessas pastas (exemplos, código de terceiros copiado) não viram achado.
+  const ignored = faundrIgnore(root)
   // O texto do arquivo acusado, para o faundr-ignore valer também nos achados das ferramentas.
   const textOf = (file) => {
     if (!texts.has(file)) texts.set(file, read(root, file) ?? undefined)
@@ -217,7 +220,7 @@ export function projectTools(root, c, errors, failed = [], { fresh = false } = {
     }
     saved[id] = { hits: result.hits }
     ran.push(toolLabel(tool === 'ts' ? 'tsc' : tool, dir))
-    for (const [rule, file, line, ctx] of result.hits) c.add(rule, file, line, ctx, textOf(file))
+    for (const [rule, file, line, ctx] of result.hits) if (!ignoredBy(ignored, file)) c.add(rule, file, line, ctx, textOf(file))
   }
   const binIn = (dir, rel) => [path.join(root, dir, 'node_modules', rel), path.join(root, 'node_modules', rel)].find((f) => fs.existsSync(f))
   for (const { dir } of projectParts(root)) {

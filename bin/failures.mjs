@@ -60,7 +60,8 @@ export function pluginFrames(stack) {
   const out = []
   for (const line of stack.split('\n').slice(1)) {
     const m = line.match(/^\s*at (?:async )?(?:(.+?) \()?(.+?):(\d+):\d+\)?$/)
-    if (!m) continue
+    // Linhas internas do Node (node:internal/…) não são arquivo: lidas como caminho, cairiam na pasta atual.
+    if (!m || m[2].startsWith('node:')) continue
     let file
     try {
       file = m[2].startsWith('file:') ? fileURLToPath(m[2]) : path.resolve(m[2])

@@ -27,6 +27,7 @@ import { codexLauncher, syncCodexRules } from './codex-rules.mjs'
 import { isCodexRollout, rolloutMeters } from './codex-transcript.mjs'
 import { AGENT, CONFIG_DIR, CONFIG_FILE, CONTEXT_EVENTS, CONTEXT_MAX, fitContext, currentFeature, DESIGN_GUIDANCE, EDIT_TOOLS, findUp, flag, gitBranch, gitHead, GRAPH_GUIDANCE, LINK_FILE, linkedProject, loadConfig, log, LOG_FILE, NO_DESIGN_GUIDANCE, pinSessionFeature, readJson, readState, readStdin, setCurrentFeature, spawnBackground, WORK_GUIDANCE, writeState } from './cli-core.mjs'
 import { editedFile, markSessionEdited } from './hook-stop.mjs'
+import { looksLikeProject, setupHint } from './setup-hint.mjs'
 import { captureErrors } from './cmd-dev-errors.mjs'
 import { checkPending } from './cmd-security.mjs'
 import { takeDesignDirty } from './cmd-design.mjs'
@@ -116,10 +117,14 @@ export async function hook(agent) {
   if (event === 'SessionStart') rotateLog()
   if (agent === 'codex' && event === 'SessionStart') syncCodexOnStart()
   const linkFile = findUp(cwd, LINK_FILE)
-  // Pasta não ligada a nenhum projeto. No Codex, o setup e o link ainda precisam saber como rodar o Faundr.
+  // Pasta não ligada a nenhum projeto. No Codex, o setup e o link ainda precisam saber como rodar o Faundr. Nos dois,
+  // o aviso de começo diz o que falta (no máximo uma vez a cada 7 dias por pasta).
   if (!linkFile) {
-    if (agent === 'codex' && event === 'SessionStart')
-      process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: CODEX_GUIDANCE() } }))
+    if (event === 'SessionStart') {
+      const hint = startHint(agent, cwd, false)
+      const parts = [agent === 'codex' ? CODEX_GUIDANCE() : null, hint].filter(Boolean)
+      if (parts.length) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: parts.join('\n\n') } }))
+    }
     return
   }
   const root = path.dirname(linkFile)
@@ -127,7 +132,12 @@ export async function hook(agent) {
   if (event === 'SessionStart') organizeFaundrDir(root)
   const { projectId } = readJson(linkFile) ?? {}
   const { token, apiUrl } = loadConfig()
-  if (!projectId || !token) return log(`ignored ${event}: no projectId or token`)
+  if (!projectId || !token) {
+    // Pasta ligada sem login: o aviso de começo pede o /faundr:login (nada desta sessão chega ao painel sem ele).
+    const hint = event === 'SessionStart' && projectId ? startHint(agent, cwd, true) : null
+    if (hint) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: hint } }))
+    return log(`ignored ${event}: no projectId or token`)
+  }
 
   // Grafo do projeto: marca "sujo" quando o agente edita arquivos e, ao fim da resposta,
   // refaz o grafo num processo destacado (o hook responde na hora).
@@ -428,7 +438,8 @@ const CODEX_GUIDANCE = () => {
 - "faundr <args>" means: ${cli} <args> (the faundr command is not on the PATH). In Faundr's skills, node "\${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" <args> means the same command.
 - Elsewhere in Faundr's skills, \${CLAUDE_PLUGIN_ROOT} is ${PLUGIN_ROOT}; a line like !\`command\` is a command to run first with the shell, using its output as the text that would be there; $ARGUMENTS is what the user wrote after the skill name (empty if nothing).
 - A skill name with a slash in front (as Claude Code writes it, inside the SKILL.md files) is the Faundr skill faundr:<name>: open its SKILL.md and follow it. When you tell the user to run a skill, write it the Codex way: $faundr:<name>. "AskUserQuestion" means asking the user in chat, with numbered options and the recommended one first.
-- Faundr's commands talk to the dashboard over the network: if one fails for lack of network in the sandbox, ask to run it again with network access.`
+- Faundr's commands talk to the dashboard over the network: if one fails for lack of network in the sandbox, ask to run it again with network access.${process.platform === 'win32' ? `
+- On Windows, Codex runs commands in PowerShell. Where Faundr says "the Bash tool", use your normal shell: Faundr only needs Node, never Git Bash, so do not install Git Bash or WSL for it. Keep the quotes around paths with spaces.` : ''}`
 }
 
 // Com design.md: a orientação de seguir o guia; sem ele, mas com telas: a sugestão de criar um.
@@ -499,4 +510,29 @@ export async function usageSync(args) {
   for (const sid of sent) delete pending[sid]
   writeState(root, { usageTranscripts: pending })
   if (!args.includes('--quiet')) console.log(`Usage resent: ${sent.length} session(s).`)
+}
+
+/** Aviso de começo (setup-hint.mjs): lê e grava em ~/.faundr quando cada pasta foi avisada. Nunca quebra o hook. */
+function startHint(agent, cwd, linked) {
+  try {
+    const file = path.join(CONFIG_DIR, 'setup-hints.json')
+    const seen = readJson(file) ?? {}
+    const { text, seen: next } = setupHint({
+      linked,
+      hasToken: Boolean(loadConfig().token),
+      isProject: looksLikeProject(cwd),
+      cwd,
+      now: Date.now(),
+      seen,
+      skill: (name) => `${agent === 'codex' ? '$' : '/'}faundr:${name}`,
+    })
+    if (next !== seen) {
+      fs.mkdirSync(CONFIG_DIR, { recursive: true })
+      fs.writeFileSync(file, JSON.stringify(next))
+    }
+    return text
+  } catch (err) {
+    log(`setup hint failed: ${err.message}`)
+    return null
+  }
 }

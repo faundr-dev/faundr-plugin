@@ -109,7 +109,7 @@ Note on rate limiting in serverless (Vercel, Netlify, Cloudflare Workers, Supaba
 - Where to look: cookie sessions (Auth.js, Lucia, custom session, `express-session`, Supabase SSR cookie) + routes that change state with POST/PUT/DELETE, or a GET that changes state (`/api/delete?id=`, `/logout` via GET is low); cookie with `SameSite=None`.
 - How to confirm by reading the code: see the session cookie's `SameSite` (the modern default `Lax` blocks cross-site POST, but not navigation GET), whether write routes accept GET, whether they accept `application/x-www-form-urlencoded`/`text/plain` (a form on another site can send without a preflight), and whether there is a CSRF token or an `Origin` check.
 - Ruled out if: Next Server Actions (they compare `Origin` with `Host` and only accept POST); Auth.js on its own routes (its own CSRF token); cookie `SameSite=Lax/Strict` and no writes via GET; or an `Origin` check against an allowlist; or authentication only through the `Authorization` header.
-- Does not rule out: `SameSite=None` "so it works in the iframe"; a route that changes state via GET; `serverActions.allowedOrigins` with a broad wildcard.
+- Does not rule out: `SameSite=None` "so it works in the iframe"; a route that changes state via GET; `serverActions.allowedOrigins` with a broad wildcard; `SameSite` when the app lives on subdomains of a shared domain (team subdomains, a cloud with custom subdomains, other apps on the same parent domain): an attack from a sibling subdomain is same-site, so read `csrf-token-sem-sessao` in browser.md.
 - How to fix: writes only via POST/PUT/DELETE, cookie `SameSite=Lax`, and check `Origin` on your own API routes that use cookies.
 - CWE: CWE-352
 
@@ -210,6 +210,7 @@ Note on rate limiting in serverless (Vercel, Netlify, Cloudflare Workers, Supaba
 - Typical severity: medium to high (the limit is what protects cost, spam or the plan).
 - Where to look: `count(` or `SELECT count` followed by `create` or `insert` in the same flow, model hooks (`beforeCreate`, `@BeforeCreate`) that count, limits like "at most N webhooks, pins, domains, subscriptions or seats".
 - How to confirm by reading the code: if two requests can both read the count before either inserts, the limit is exceeded. A model hook does not help: it runs in each request separately. Also look at the path that reuses an existing row (`save()`, `update`, `upsert`, "if it already exists, send again"): a limit in a create-only hook (`beforeCreate`) does not run there, so resending to the same row has no limit at all.
+- It is a finding, not a hardening note: parallel requests need no special condition, so keep the typical severity (medium when the limit only protects against spam of the actor's own team; high when it protects cost, a plan or other people). Name every limit with the same shape in the detail (one S-n).
 - Ruled out if: the database enforces it (unique index, a counter column updated atomically), or the count and the insert run under a lock (`SELECT … FOR UPDATE` on the parent row, advisory lock, serializable transaction).
 - How to fix: lock the parent row (team, user) before counting, or keep a counter column updated with a conditional `UPDATE … SET n = n + 1 WHERE n < limit`.
 - CWE: CWE-367

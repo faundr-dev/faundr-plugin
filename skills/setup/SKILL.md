@@ -4,6 +4,8 @@ argument-hint: '[--refresh]  (redoes the map and the checks)'
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *)
 ---
 
+**In Codex** (nothing below gets filled in for you): the plugin folder is two levels above this SKILL.md (`<folder of this file>/../..`). Run every Faundr command as `node "<plugin folder>/bin/faundr.mjs" <args>`, with the path in double quotes: the `faundr` command is not on the PATH, and `${CLAUDE_PLUGIN_ROOT}` is that same plugin folder. A line like !`command` is a command to run first, using its output as the text that would be there; `$ARGUMENTS` is what the user wrote after the skill name. On Windows, Codex runs the commands in PowerShell and they work as they are: Git Bash is not needed, never install it for Faundr. If `node` is not recognized, stop and tell the user to install Node.js 20 or newer (`winget install OpenJS.NodeJS.LTS`, or https://nodejs.org), then close and reopen the terminal and Codex.
+
 ## Current state
 
 !`node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" setup --no-ask $ARGUMENTS`
