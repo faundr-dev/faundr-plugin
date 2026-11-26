@@ -31,6 +31,7 @@ import { looksLikeProject, setupHint } from './setup-hint.mjs'
 import { captureErrors } from './cmd-dev-errors.mjs'
 import { checkPending } from './cmd-security.mjs'
 import { takeDesignDirty } from './cmd-design.mjs'
+import { addPending, hasPending, queueableEvent, takePendingReport } from './pending.mjs'
 
 // ---- Gatilhos por evento ----------------------------------------------------------------------------------------
 // O hook depois de cada comando (em segundo plano) guarda o evento; o fim da resposta pede as skills e os workflows
@@ -147,32 +148,43 @@ export async function hook(agent) {
   await bashEvents(event, payload, root, projectId, { token, apiUrl })
   saveCodexMeters(agent, event, payload, root)
   const usage = event === 'Stop' || event === 'SessionEnd' ? sessionUsage(payload, root) : null
+  const body = {
+    agent,
+    projectId,
+    git: { branch: gitBranch(cwd) },
+    machine: machineName(readJson(CONFIG_FILE)),
+    at: startedAt,
+    ack: takeAcks(root, payload.session_id),
+    currentFeatureId: currentFeature(root, payload.session_id),
+    // Assinatura da cópia local da memória: o servidor só manda a memória de novo quando ela mudou.
+    memoryStamp: readState(root).memoryStamp ?? null,
+    // Assinatura da cópia local das skills: só manda quando a cópia existe, senão o servidor nunca reenviaria.
+    skillsStamp: fs.existsSync(faundrPath(root, 'skills')) ? (readState(root).skillsStamp ?? null) : null,
+    // Só os campos que o servidor lê: conteúdo de arquivo e saída das ferramentas ficam aqui (ver hook-payload.mjs).
+    payload: hookPayload(payload),
+    usage,
+    // Checagens do plugin que quebraram ou travaram desde o último evento (ver failures.mjs).
+    failures: takeFailures(projectId),
+  }
   const request = fetch(`${apiUrl}/api/hooks/event`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-    body: JSON.stringify({
-      agent,
-      projectId,
-      git: { branch: gitBranch(cwd) },
-      machine: machineName(readJson(CONFIG_FILE)),
-      at: startedAt,
-      ack: takeAcks(root, payload.session_id),
-      currentFeatureId: currentFeature(root, payload.session_id),
-      // Assinatura da cópia local da memória: o servidor só manda a memória de novo quando ela mudou.
-      memoryStamp: readState(root).memoryStamp ?? null,
-      // Assinatura da cópia local das skills: só manda quando a cópia existe, senão o servidor nunca reenviaria.
-      skillsStamp: fs.existsSync(faundrPath(root, 'skills')) ? (readState(root).skillsStamp ?? null) : null,
-      // Só os campos que o servidor lê: conteúdo de arquivo e saída das ferramentas ficam aqui (ver hook-payload.mjs).
-      payload: hookPayload(payload),
-      usage,
-      // Checagens do plugin que quebraram ou travaram desde o último evento (ver failures.mjs).
-      failures: takeFailures(projectId),
-    }),
+    body: JSON.stringify(body),
     signal: AbortSignal.timeout(hookTimeout(event)),
   })
   // As checagens em segundo plano nascem enquanto o servidor responde (abrir um processo leva ~1 s no Windows).
   if (background.length) spawnBackground(background, root)
-  const res = await request
+  let res
+  try {
+    res = await request
+  } catch (err) {
+    // Rede ruim do lado da pessoa (passou do prazo ou nem conectou): o evento fica guardado e vai depois, em segundo
+    // plano, com o horário de quando aconteceu. Ninguém espera por isso.
+    if (queueableEvent(event)) addPending({ kind: 'event', projectId, body })
+    throw err
+  }
+  // Rede de volta: o que ficou guardado (eventos que não chegaram e, no Codex, comandos sem rede) vai agora.
+  if (hasPending()) spawnBackground([['pending-send', '--quiet']], root)
   if (!res.ok) return log(`${event}: HTTP ${res.status} ${await res.text()}`)
 
   const answer = await res.json()
@@ -423,9 +435,16 @@ function sessionStartContext(answer, root, sid, additionalContext, contentLang) 
   // As orientações do plugin ficam inteiras; o que passar do teto sai do fim do texto do painel (os alertas), nunca as
   // regras, que vêm no começo dele.
   const extras = [languageGuidance(contentLang), WORK_GUIDANCE, hasGraph && GRAPH_GUIDANCE, designNote(root), inventoryNote(root)].filter(Boolean)
-  const codex = AGENT === 'codex' ? CODEX_GUIDANCE() : ''
+  const codex = AGENT === 'codex' ? [CODEX_GUIDANCE(), pendingReportNote()].filter(Boolean).join('\n') : ''
   const room = CONTEXT_MAX - [codex, ...extras].reduce((n, t) => n + t.length + 2, 0)
   return [codex, additionalContext && fitContext(additionalContext, room), ...extras].filter(Boolean).join('\n\n')
+}
+
+// Comandos guardados sem rede que o painel recusou quando foram mandados: o agente da sessão seguinte fica sabendo.
+function pendingReportNote() {
+  const failed = takePendingReport()
+  if (!failed.length) return null
+  return `- Faundr commands saved without network that could not be recorded later (redo them if they still matter): ${failed.map((f) => `\`faundr ${f.command}\` (${f.reason})`).join('; ')}.`
 }
 
 // As skills e os avisos do Faundr foram escritos para o Claude Code: no Codex, o comando faundr não está no PATH e
@@ -438,7 +457,9 @@ const CODEX_GUIDANCE = () => {
 - "faundr <args>" means: ${cli} <args> (the faundr command is not on the PATH). In Faundr's skills, node "\${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" <args> means the same command.
 - Elsewhere in Faundr's skills, \${CLAUDE_PLUGIN_ROOT} is ${PLUGIN_ROOT}; a line like !\`command\` is a command to run first with the shell, using its output as the text that would be there; $ARGUMENTS is what the user wrote after the skill name (empty if nothing).
 - A skill name with a slash in front (as Claude Code writes it, inside the SKILL.md files) is the Faundr skill faundr:<name>: open its SKILL.md and follow it. When you tell the user to run a skill, write it the Codex way: $faundr:<name>. "AskUserQuestion" means asking the user in chat, with numbered options and the recommended one first.
-- Faundr's commands talk to the dashboard over the network: if one fails for lack of network in the sandbox, ask to run it again with network access.${process.platform === 'win32' ? `
+- Without network in the sandbox, Faundr commands that record (feature, task, done, handoff, overview-save, stack-save…) answer "Saved": Faundr sends them to the dashboard by itself at the next step, so do not run them again and do not keep a separate log of them. Commands that only read (board, resume, *-context) need network: ask to run them again with network access.
+- Other commands that need the internet fail the same way in the sandbox: pip with WinError 10013 or "No matching distribution", npm with ENOTFOUND/EAI_AGAIN, curl or git that cannot connect. That is the sandbox, not a missing package or a broken project: ask the user to run the same command again with network access before drawing any conclusion.
+- What can only be checked somewhere else (a test on the production server, real accounts, a step that needs the internet the user did not allow) goes to the board as a review task: faundr task "<what to check and where>" --review. Do not keep a separate list of pending problems in a file.${process.platform === 'win32' ? `
 - On Windows, Codex runs commands in PowerShell. Where Faundr says "the Bash tool", use your normal shell: Faundr only needs Node, never Git Bash, so do not install Git Bash or WSL for it. Keep the quotes around paths with spaces.` : ''}`
 }
 

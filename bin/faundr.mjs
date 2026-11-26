@@ -137,6 +137,7 @@ const graph = lazy('./cmd-graph.mjs', 'graph')
 const graphCommand = lazy('./cmd-graph.mjs', 'graphCommand')
 const mapCommand = lazy('./cmd-graph.mjs', 'mapCommand')
 const runBackground = lazy('./cmd-graph.mjs', 'runBackground')
+const pendingSend = lazy('./cmd-pending.mjs', 'pendingSend')
 const subagentStart = lazy('./cmd-graph.mjs', 'subagentStart')
 const memoryEdit = lazy('./cmd-features.mjs', 'memoryEdit')
 const refreshStatus = lazy('./cmd-features.mjs', 'refreshStatus')
@@ -236,7 +237,7 @@ const statuslineInstall = lazy('./cmd-setup.mjs', 'statuslineInstall')
 const RENAMED = { fila: 'inbox', recado: 'msg', escutar: 'listen', mapa: 'map', lgpd: 'privacy', pegar: 'claim', soltar: 'release', dono: 'own', 'soltar-dono': 'disown' }
 const RENAMED_FLAGS = { '--feito': '--done', '--para': '--to' }
 // Checagens que rodam em segundo plano (--quiet): o erro vai para o log, não para a tela.
-const QUIET_CHECKS = ['skills', 'graph', 'design-lint', 'security-scan', 'quality-scan', 'tests-scan', 'stack-scan', 'env-check', 'usage-sync', 'checkpoints-sync', 'architecture-check']
+const QUIET_CHECKS = ['pending-send', 'skills', 'graph', 'design-lint', 'security-scan', 'quality-scan', 'tests-scan', 'stack-scan', 'env-check', 'usage-sync', 'checkpoints-sync', 'architecture-check']
 // Acima disto o hook já atrasa o agente (o do início da sessão tem 10 s no total).
 const SLOW_HOOK_MS = 5000
 const [typed, ...typedArgs] = process.argv.slice(2)
@@ -254,6 +255,7 @@ if (command === 'statusline') {
   }
 } else if (command === 'hook' || command === 'gate' || command === 'guard' || command === 'subagent-start') {
   const startedAt = Date.now()
+  let offline = null
   try {
     if (command === 'gate') await gate()
     else if (command === 'guard') await guard()
@@ -261,17 +263,25 @@ if (command === 'statusline') {
     else await hook(args[0] === 'codex' ? 'codex' : 'claude')
   } catch (err) {
     log(`error (${command}): ${err?.stack ?? err}`)
-    if (!isNetworkError(err)) recordFailure(command, 'crash', err)
+    if (isNetworkError(err)) offline = err
+    else recordFailure(command, 'crash', err)
   }
   const ms = Date.now() - startedAt
-  if (ms > SLOW_HOOK_MS) recordFailure(command, 'slow', null, ms)
+  // Lento por causa da rede (o painel não respondeu a tempo): o tipo do erro vai junto, para separar rede ruim de
+  // lentidão do próprio plugin. O evento já ficou guardado para ir depois (ver pending.mjs).
+  if (ms > SLOW_HOOK_MS) recordFailure(command, 'slow', offline, ms)
   // Sair sozinho, sem process.exit: no Node 24 do Windows, process.exit depois de duas requisições
   // derruba o processo ("Assertion failed … UV_HANDLE_CLOSING", código 127). A trava abaixo não segura o processo.
   process.exitCode = 0
-  setTimeout(() => {
-    recordFailure(command, 'stuck', null, Date.now() - startedAt)
-    process.exit(0)
-  }, 3000).unref()
+  // Requisição que passou do prazo deixa a conexão aberta e segurava o processo mais 3 s: sai logo, sem anotar de
+  // novo a mesma falha.
+  setTimeout(
+    () => {
+      if (!offline) recordFailure(command, 'stuck', null, Date.now() - startedAt)
+      process.exit(0)
+    },
+    offline ? 300 : 3000,
+  ).unref()
 } else await cli()
 
 async function cli() {
@@ -282,13 +292,15 @@ async function cli() {
       try {
         return await original(...a)
       } catch (err) {
-        throw new Error(
+        const wrapped = new Error(
           `${err.message} — ${t(
             "Codex ran this command without network (sandbox): run the same command again with network access (outside the sandbox, with the user's OK). So it stops asking: faundr setup --no-ask --apply codex-rules",
             'o Codex rodou este comando sem rede (área protegida): rode o mesmo comando de novo com acesso à rede (fora da área protegida, com o OK da pessoa). Para não pedir mais: faundr setup --no-ask --apply codex-rules',
           )}`,
           { cause: err },
         )
+        wrapped.sandboxNetwork = true
+        throw wrapped
       }
     }
   }
@@ -297,6 +309,8 @@ async function cli() {
     if (Object.hasOwn(commands, command)) await commands[command](args)
     else printCommands()
   } catch (err) {
+    // Codex sem rede num comando que só grava: fica guardado e o próximo hook (que tem rede) manda. O agente segue.
+    if (err?.sandboxNetwork && (await queueForHook())) return
     const quiet = QUIET_CHECKS.includes(command) && args.includes('--quiet')
     if (quiet) log(`${command}: ${err.message}`)
     else console.log(err.message)
@@ -305,6 +319,19 @@ async function cli() {
     if (!isNetworkError(err) && (quiet || err?.constructor !== Error || err?.code)) recordFailure(command, 'crash', err)
     process.exit(1)
   }
+}
+
+async function queueForHook() {
+  const { addPending, queueableCommand } = await import('./pending.mjs')
+  const { AGENT_SESSION_ID } = await import('./cli-core.mjs')
+  if (!queueableCommand(command, args) || !addPending({ kind: 'command', cwd: process.cwd(), command, args, sessionId: AGENT_SESSION_ID })) return false
+  console.log(
+    t(
+      `Saved: there is no network here (Codex sandbox), so Faundr kept \`faundr ${command}\` and sends it to the dashboard by itself at Codex's next step (the hook has network). Do not run it again and do not ask for network access for it; go on with the work. Commands that only read (board, resume, *-context) still need network.`,
+      `Salvo: aqui não há rede (área protegida do Codex), então o Faundr guardou \`faundr ${command}\` e manda ao painel sozinho no próximo passo do Codex (o hook tem rede). Não rode de novo nem peça acesso à rede para ele; siga o trabalho. Comandos que só leem (board, resume, *-context) continuam precisando de rede.`,
+    ),
+  )
+  return true
 }
 
 function isNetworkError(err) {
@@ -365,6 +392,7 @@ function cliCommands() {
     weekly: (a) => weekly(a),
     'usage-sync': (a) => usageSync(a),
     background: (a) => runBackground(a),
+    'pending-send': () => pendingSend(),
     'stack-context': () => stackContext(),
     'stack-save': (a) => stackSave(a),
     resume: () => resumeCommand(),
