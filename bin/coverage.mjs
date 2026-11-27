@@ -6,6 +6,7 @@
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { relPath } from './paths.mjs'
 
 export const COVERAGE_DIR = path.join(relPath('tests'), 'coverage')
@@ -50,12 +51,12 @@ export function coverageArgs(runner, root, sub = '') {
 }
 
 /** Linhas de cada arquivo: 'c' coberta, 'p' parcial (um caminho do if sem teste), 'u' sem teste. */
-export function readCoverage(root) {
+export function readCoverage(root, runDir = '') {
   const dir = path.join(root, COVERAGE_DIR)
   const istanbul = path.join(dir, 'coverage-final.json')
   if (fs.existsSync(istanbul)) return fromIstanbul(JSON.parse(fs.readFileSync(istanbul, 'utf8')), root)
   const lcov = path.join(dir, 'lcov.info')
-  if (fs.existsSync(lcov)) return fromLcov(fs.readFileSync(lcov, 'utf8'), root)
+  if (fs.existsSync(lcov)) return fromLcov(fs.readFileSync(lcov, 'utf8'), root, path.join(root, runDir))
   const clover = path.join(dir, 'clover.xml')
   if (fs.existsSync(clover)) return fromClover(fs.readFileSync(clover, 'utf8'), root)
   const goProfile = path.join(dir, 'cover.out')
@@ -67,7 +68,12 @@ export function readCoverage(root) {
   return null
 }
 
-const relative = (root, file) => path.relative(root, path.resolve(root, file.replace(/^file:\/\//, ''))).split(path.sep).join('/')
+// Caminho do relatório relativo à raiz. Caminho relativo vem da pasta em que o executor rodou (pytest e flutter numa
+// subpasta: "app/x.py" é "backend/app/x.py"); file:///C:/... vira caminho do Windows de verdade.
+const relative = (root, file, base = root) => {
+  const abs = /^file:\/\//.test(file) ? fileURLToPath(file) : path.resolve(base, file)
+  return path.relative(root, abs).split(path.sep).join('/')
+}
 
 export function fromIstanbul(json, root) {
   const files = new Map()
@@ -92,14 +98,14 @@ export function fromIstanbul(json, root) {
   return files
 }
 
-export function fromLcov(text, root) {
+export function fromLcov(text, root, base = root) {
   const files = new Map()
   let file = null
   let lines = null
   for (const raw of text.split('\n')) {
     const l = raw.trim()
     if (l.startsWith('SF:')) {
-      file = relative(root, l.slice(3))
+      file = relative(root, l.slice(3), base)
       lines = new Map()
     } else if (l.startsWith('DA:') && lines) {
       const [line, count] = l.slice(3).split(',').map(Number)
@@ -201,7 +207,8 @@ export function lostCoverage(root, summary, changed) {
     // Primeira rodada com cobertura: ainda não há com o que comparar.
   }
   fs.mkdirSync(path.dirname(path.join(root, PREV_FILE)), { recursive: true })
-  fs.writeFileSync(path.join(root, PREV_FILE), JSON.stringify(Object.fromEntries(summary.files.map((f) => [f.file, f.covered]))))
+  // Junta com a base dos outros executores (Vitest e pytest no mesmo projeto não apagam a base um do outro).
+  fs.writeFileSync(path.join(root, PREV_FILE), JSON.stringify({ ...(prev ?? {}), ...Object.fromEntries(summary.files.map((f) => [f.file, f.covered])) }))
   if (!prev) return []
   return summary.files
     .filter((f) => !changed.has(f.file) && prev[f.file] !== undefined && f.covered < prev[f.file])

@@ -1,6 +1,7 @@
 // Testes: faundr tests-scan, tests-run, tests-show, tests-context, tests-map, tests-mutation e tests-ignore.
 
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -71,9 +72,11 @@ function coverageReady(runner, info) {
   return true
 }
 
-async function coverageReport(root, runner, dir = '') {
+// Rodada parcial (--changed ou --files): mede só o que carregou. Vale o que mudou na sessão; o total do projeto e a
+// base de "perdeu cobertura" ficam como estavam.
+async function coverageReport(root, runner, dir = '', partial = false) {
   const { changedLines, lostCoverage, readCoverage, sessionCoverage, summarize } = await import('./coverage.mjs')
-  const files = readCoverage(root)
+  const files = readCoverage(root, dir)
   if (!files) return null
   const sid = AGENT_SESSION_ID ?? null
   const baseState = readState(root).qualityBase
@@ -83,7 +86,7 @@ async function coverageReport(root, runner, dir = '') {
   const summary = summarize(files)
   // node --test (e projetos sem src/) só medem os arquivos que algum teste carregou: o painel avisa.
   const onlyLoaded = runner === 'node' || !fs.existsSync(path.join(root, dir, 'src'))
-  return { total: summary.total, files: summary.files.slice(0, 2000), session: sessionCoverage(files, changed), lost: lostCoverage(root, summary, changed), base: base === 'HEAD' ? null : base.slice(0, 12), onlyLoaded }
+  return { total: summary.total, files: summary.files.slice(0, 2000), session: sessionCoverage(files, changed), lost: partial ? [] : lostCoverage(root, summary, changed), base: base === 'HEAD' ? null : base.slice(0, 12), onlyLoaded, partial }
 }
 
 // Inventário sem rodar nada: executores, arquivos e testes, o que já está no disco e o aviso de banco de produção.
@@ -103,6 +106,28 @@ export async function testsScan(args) {
 }
 
 const runnerLabel = (r) => `${r.runner}${r.dir ? ` in ${r.dir}/` : ''}`
+const SUPPORTED = 'Vitest, Jest, Playwright, node --test, Karma, pytest, flutter test, dart test, PHPUnit, Pest, go test, Maven, Gradle, dotnet test, cargo test, CTest or make test'
+
+/**
+ * Estado do código: o commit mais a soma do que ainda não foi commitado. O histórico de instável compara rodadas
+ * pelo estado; só pelo commit, "falhou, corrigi sem commitar, passou" virava instável.
+ */
+export function codeState(root, commit, git) {
+  if (!commit) return null
+  const diff = git(['diff', 'HEAD']) ?? ''
+  const untracked = (git(['ls-files', '--others', '--exclude-standard']) ?? '').split('\n').filter(Boolean).slice(0, 500)
+  if (!diff && !untracked.length) return commit
+  const hash = createHash('sha1').update(diff)
+  for (const f of untracked) {
+    try {
+      const st = fs.statSync(path.join(root, f))
+      hash.update(`${f}:${st.size}:${st.mtimeMs}`)
+    } catch {
+      // Arquivo que sumiu entre o git e a leitura: fica de fora da soma.
+    }
+  }
+  return `${commit.slice(0, 5)}-${hash.digest('hex').slice(0, 6)}`
+}
 const NOT_INSTALLED = {
   pytest: () => 'Python not found: run with --python <path to python>',
   flutter: () => 'Flutter is not in the PATH of this computer',
@@ -135,7 +160,7 @@ export async function testsRun(args) {
   const { runners } = detectRunners(root, { python: readState(root).python })
   const wanted = flag(args, '--runner')
   const chosen = pickRunners(runners, wanted)
-  if (!chosen.length) throw new Error(wanted ? `${wanted} was not found in this project.` : 'No supported test runner (Vitest, Jest, Playwright, node --test, pytest, flutter test, dart test, PHPUnit or Pest) in this project or its subfolders.')
+  if (!chosen.length) throw new Error(wanted ? `${wanted} was not found in this project.` : `No supported test runner (${SUPPORTED}) in this project or its subfolders. To start writing tests: /faundr:tests`)
   const exclude = listArg(args, '--exclude') ?? []
   const signals = productionDbSignals(root, undefined, { exclude })
   if (signals.length && !args.includes('--confirm-db')) return refuseProductionDb(signals)
@@ -146,10 +171,12 @@ export async function testsRun(args) {
     wantCoverage: args.includes('--coverage'),
     minutes: Number(flag(args, '--timeout')),
     exclude,
+    insideDir,
     git,
     // Repositório sem commit: o git devolve o texto "HEAD"; só vale um hash de verdade.
     commit: /^[0-9a-f]{40}$/.test(git(['rev-parse', 'HEAD']) ?? '') ? git(['rev-parse', 'HEAD']) : null,
   }
+  run.state = codeState(root, run.commit, git)
   const results = []
   for (const info of chosen) {
     // --files de outra parte do projeto: este executor não tem o que rodar.
@@ -192,12 +219,15 @@ async function runOneRunner(root, info, run, runTests) {
   console.log(`Running ${runnerLabel(info)}${SCOPE_NOTE[scope](files)}…`)
   const coverage = run.wantCoverage && coverageReady(runner, info)
   const r = runTests(root, runner, { dir, python: info.python, changed, files, exclude, coverage, nodeArgs: info.args, ...(minutes > 0 ? { timeout: minutes * 60_000 } : {}) })
-  const cov = coverage ? await coverageReport(root, runner, dir) : null
+  const cov = coverage ? await coverageReport(root, runner, dir, scope !== 'all') : null
   const sent = await testsApi({
     action: 'run',
     runner,
+    dir: dir ?? '',
     scope,
+    excluded: run.insideDir(dir, exclude).length > 0,
     commit: run.commit,
+    state: run.state,
     branch: run.git(['rev-parse', '--abbrev-ref', 'HEAD']),
     durationMs: r.durationMs ?? null,
     error: r.error ?? null,
@@ -220,7 +250,8 @@ async function runOneRunner(root, info, run, runTests) {
 
 function printCoverage(cov) {
   const s = cov.session
-  console.log(`  Project coverage: ${cov.total.pct ?? '-'}% of lines (${cov.total.covered} of ${cov.total.lines}).`)
+  if (cov.partial) console.log('  Partial run: only what changed counts; the project total on the dashboard stays from the last full run.')
+  else console.log(`  Project coverage: ${cov.total.pct ?? '-'}% of lines (${cov.total.covered} of ${cov.total.lines}).`)
   console.log(s.lines ? `  What changed since the session started: ${s.pct}% covered (${s.covered} of ${s.lines} lines)${s.pct >= (cov.total.pct ?? 0) ? ', not worse.' : ', below the rest of the project.'}` : '  What changed in this session has no lines the tests can run: coverage not affected.')
   for (const l of cov.lost.slice(0, 5)) console.log(`  Lost coverage without being touched: ${l.file} (${l.before} → ${l.now} covered lines)`)
 }
@@ -233,7 +264,7 @@ export async function testsContext(args) {
   const guide = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'skills', 'tests', 'guide.md')
   const { runners, others } = detectRunners(root, { python: readState(root).python })
   const out = ['# Tests context', await contentLangNote(root), `Guide (read it first, with the Read tool): ${guide}`, '']
-  out.push('## Runners', ...(runners.length ? runners.map((r) => `- ${runnerLabel(r)}${r.script ? ` (npm run ${r.script})` : ''}${r.installed ? '' : ` — ${notInstalled(r)}`}${r.runner === 'vitest' && !r.coverage ? ' — without the coverage tool (@vitest/coverage-v8)' : ''}`) : ['- none (Vitest, Jest, Playwright, node --test, pytest, flutter test, dart test, PHPUnit or Pest)']))
+  out.push('## Runners', ...(runners.length ? runners.map((r) => `- ${runnerLabel(r)}${r.script ? ` (npm run ${r.script})` : ''}${r.installed ? '' : ` — ${notInstalled(r)}`}${r.runner === 'vitest' && !r.coverage ? ' — without the coverage tool (@vitest/coverage-v8)' : ''}`) : [`- none (${SUPPORTED})`]))
   if (others.length) out.push(`- also in the project, not read by Faundr: ${others.join(', ')}`)
   for (const s of productionDbSignals(root)) out.push(`- WARNING, production database: ${s}`)
   out.push('')
@@ -312,10 +343,16 @@ export async function testsMutation(args) {
     process.exitCode = 2
     return
   }
-  // Suíte verde: o Stryker não roda com teste falhando (e o resultado não faria sentido).
+  // Suíte verde: o Stryker não roda com teste falhando (e o resultado não faria sentido). Vale a última rodada
+  // completa da raiz; uma parcial que passou não prova que o resto passa.
   const { runs } = await testsApi({ action: 'list' })
-  const last = runs.find((r) => r.runner === runner.runner)
-  if (last?.failed > 0) {
+  const last = runs.find((r) => r.runner === runner.runner && r.scope === 'all' && !r.dir)
+  if (!last || last.error) {
+    console.log(`Did not run: there is no finished full ${runner.runner} run yet. Run faundr tests-run --runner ${runner.runner} first; mutation testing needs the tests passing.`)
+    process.exitCode = 2
+    return
+  }
+  if (last.failed > 0) {
     console.log(`Did not run: the last ${runner.runner} run has ${last.failed} failing test(s). Fix them first ("tests-fix" skill) and run again.`)
     process.exitCode = 2
     return

@@ -456,6 +456,8 @@ export function fromDartJson(stdout, root, cwd = root) {
 export function fromGoJson(stdout, root, cwd = root) {
   const tests = new Map()
   const module = read(path.join(cwd, 'go.mod')).match(/^module\s+(\S+)/m)?.[1] ?? ''
+  const failedPkgs = new Set()
+  const pkgOutput = []
   for (const line of String(stdout ?? '').split('\n')) {
     if (!line.startsWith('{')) continue
     let e
@@ -465,7 +467,12 @@ export function fromGoJson(stdout, root, cwd = root) {
       // Linha cortada no meio (saída truncada): só ela fica de fora.
       continue
     }
-    if (!e.Test) continue
+    if (!e.Test) {
+      // Pacote que não compilou: a falha vem sem teste (e a saída do build, sem pacote, no Go 1.24+).
+      if (e.Action === 'build-output' || e.Action === 'output') pkgOutput.push(String(e.Output ?? '').trimEnd())
+      if (e.Action === 'fail' && e.Package) failedPkgs.add(e.Package)
+      continue
+    }
     const key = `${e.Package}\u0000${e.Test}`
     const t = tests.get(key) ?? { pkg: e.Package, name: e.Test, output: [] }
     tests.set(key, t)
@@ -477,7 +484,7 @@ export function fromGoJson(stdout, root, cwd = root) {
   }
   const parents = new Set([...tests.values()].filter((t) => t.name.includes('/')).map((t) => `${t.pkg}\u0000${t.name.split('/')[0]}`))
   const fileCache = new Map()
-  return [...tests.entries()]
+  const cases = [...tests.entries()]
     .filter(([key, t]) => t.status && !parents.has(key))
     .map(([, t]) => ({
       file: goTestFile(root, cwd, module, t.pkg, t.name.split('/')[0], fileCache),
@@ -486,6 +493,12 @@ export function fromGoJson(stdout, root, cwd = root) {
       durationMs: t.durationMs,
       message: goMessage(t),
     }))
+  // Pacote que falhou sem nenhum teste falhando (não compilou): vira um teste falhando, senão sumia da contagem.
+  const withFailure = new Set([...tests.values()].filter((t) => t.status === 'failed').map((t) => t.pkg))
+  const output = pkgOutput.filter((l) => l && !/^(FAIL|ok|PASS)(\s|$)/.test(l)).join('\n').slice(0, 2000)
+  for (const pkg of failedPkgs)
+    if (!withFailure.has(pkg)) cases.push({ file: null, name: `${pkg} › ${tr('(did not compile)', '(não compilou)')}`, status: 'failed', durationMs: null, message: output || tr('the package did not compile', 'o pacote não compilou') })
+  return cases
 }
 
 /** O que o teste escreveu: o motivo da falha, ou o do t.Skip. */

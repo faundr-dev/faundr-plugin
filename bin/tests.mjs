@@ -264,13 +264,20 @@ export function passiveResults(root) {
 
 // ---------- rodar ----------
 
-function commandFor(runner, out, { changed, files, nodeArgs, exclude = [] }) {
+/** Executores que sabem deixar arquivos de fora (--exclude); nos outros, a rodada com --exclude é recusada. */
+export const CAN_EXCLUDE = ['vitest', 'jest', 'pytest']
+const regexText = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+export function commandFor(runner, out, { changed, files, nodeArgs, exclude = [] }) {
   const extra = files?.length ? files : []
+  // Jest: um --testPathIgnorePatterns=<padrão> por arquivo (a forma sem "=" engolia os arquivos de --files) e o
+  // node_modules de volta, porque passar a opção troca o padrão do Jest.
+  const jestIgnore = exclude.length ? ['/node_modules/', ...exclude.map(regexText)].map((e) => `--testPathIgnorePatterns=${e}`) : []
   // pytest: relatório JUnit no formato antigo (xunit1), o único que diz o arquivo de cada teste.
   if (runner === 'pytest') return ['-m', 'pytest', `--junitxml=${out}`, '-o', 'junit_family=xunit1', '-q', '--color=no', ...exclude.map((e) => `--ignore=${e}`), ...extra]
   if (runner === 'node') return ['--test', '--test-reporter=junit', `--test-reporter-destination=${out}`, ...(extra.length ? extra : nodeArgs ?? [])]
   if (runner === 'vitest') return ['run', '--reporter=json', `--outputFile.json=${out}`, '--passWithNoTests', ...(changed ? ['--changed'] : []), ...exclude.map((e) => `--exclude=${e}`), ...extra]
-  if (runner === 'jest') return ['--ci', '--json', `--outputFile=${out}`, '--passWithNoTests', ...(changed ? ['--onlyChanged'] : []), ...(exclude.length ? ['--testPathIgnorePatterns', ...exclude] : []), ...extra]
+  if (runner === 'jest') return ['--ci', '--json', `--outputFile=${out}`, '--passWithNoTests', ...(changed ? ['--onlyChanged'] : []), ...jestIgnore, ...extra]
   return ['test', '--reporter=json', '--pass-with-no-tests', ...(changed ? ['--only-changed'] : []), ...extra]
 }
 
@@ -288,6 +295,18 @@ export function runTests(root, runner, { dir = '', python = null, changed = fals
   const bin = RUNNERS[runner] ? binFor(root, dir, runner) : null
   const missing = missingRunner(runner, bin, dir, python)
   if (missing) return { runner, error: missing }
+  projectRoot = root
+  // --exclude existe para deixar de fora o teste que mexe no banco de produção: executor que não sabe excluir não roda
+  // (rodaria o arquivo mesmo assim, contra o banco real).
+  const skip = insideDir(dir, exclude)
+  if (skip.length && !CAN_EXCLUDE.includes(runner))
+    return {
+      runner,
+      error: tr(
+        `${runner} can't leave files out (--exclude): it didn't run so it wouldn't touch ${skip.join(', ')}. Point the tests to a test database (.env.test) or run with --confirm-db with the user's OK.`,
+        `o ${runner} não sabe deixar arquivos de fora (--exclude): não rodou para não mexer em ${skip.join(', ')}. Aponte os testes para um banco de teste (.env.test) ou rode com --confirm-db com o OK do usuário.`,
+      ),
+    }
   fs.mkdirSync(path.join(root, OUT_DIR), { recursive: true })
   const tag = dir ? `-${dir.replace(/\//g, '_')}` : ''
   const out = path.join(root, OUT_DIR, `${runner}${tag}.${runner === 'node' || runner === 'pytest' ? 'xml' : 'json'}`).split(path.sep).join('/')
@@ -341,7 +360,7 @@ function runLangRunner(root, runner, { dir, local, out, timeout, covArgs }) {
   const xmlOut = out.replace(/\.json$/, '.xml')
   const r = runLangTests(root, runner, { dir, files: local, out: xmlOut, timeout, coverageArgs: covArgs })
   if (r.junit) return { runner, durationMs: r.durationMs, cases: junitCaseFiles(runner, fromJUnit(r.junit, root), root, dir), error: null }
-  return { ...r, cases: r.cases ? r.cases.map((c) => ({ ...c, message: c.message ? clean(c.message) : null })) : r.cases }
+  return { ...r, error: r.error ? clean(r.error) : r.error, cases: r.cases ? r.cases.map((c) => ({ ...c, message: c.message ? clean(c.message) : null })) : r.cases }
 }
 
 // node --test: os reporters vêm em pares com o destino; os arquivos ficam no fim.
@@ -368,10 +387,24 @@ function xmlReport(root, runner, dir, out, r, durationMs) {
 /** Relatório JSON (Vitest, Jest e Playwright). */
 function jsonReport(root, runner, out, r, durationMs) {
   const json = readJson(out, '')
-  if (!json) return { runner, durationMs, error: firstLine(r.stderr || r.stdout) || tr(`${runner} finished without a report (code ${r.status})`, `o ${runner} terminou sem relatório (código ${r.status})`) }
+  if (!json) return { runner, durationMs, error: clean(firstLine(r.stderr || r.stdout)) || tr(`${runner} finished without a report (code ${r.status})`, `o ${runner} terminou sem relatório (código ${r.status})`) }
   const cases = runner === 'playwright' ? fromPlaywright(json, root) : fromJestLike(json, root)
-  const fileErrors = runner === 'playwright' ? (json.errors ?? []).map((e) => clean(e.message)) : (json.testResults ?? []).filter((t) => t.message).map((t) => `${rel(root, t.name)}: ${clean(t.message)}`)
-  return { runner, durationMs, cases, error: fileErrors.length && !cases.length ? fileErrors[0].slice(0, 1000) : null }
+  const broken = brokenFiles(json, root, runner)
+  const fileErrors = broken.map((b) => (b.file ? `${b.file}: ${b.message}` : b.message))
+  // Arquivo que nem carregou (import ou sintaxe quebrada) vira um teste falhando: antes sumia da contagem e a rodada
+  // dizia "N passaram".
+  return { runner, durationMs, cases: [...cases, ...broken], error: fileErrors.length && !cases.length ? fileErrors[0].slice(0, 1000) : null }
+}
+
+/** Arquivos de teste que falharam sem nenhum teste falhando dentro (não carregaram) e erros fora dos testes (Playwright). */
+export function brokenFiles(json, root, runner) {
+  projectRoot = root
+  const notLoaded = tr('(file did not load)', '(o arquivo não carregou)')
+  if (runner === 'playwright')
+    return (json.errors ?? []).map((e) => ({ file: rel(root, e.location?.file), name: tr('(error outside the tests)', '(erro fora dos testes)'), status: 'failed', durationMs: null, message: clean(e.message) }))
+  return (json.testResults ?? [])
+    .filter((t) => t.message && !(t.assertionResults ?? []).some((a) => a.status === 'failed'))
+    .map((t) => ({ file: rel(root, t.name), name: notLoaded, status: 'failed', durationMs: null, message: clean(t.message) }))
 }
 
 const rel = (root, file) => (file ? path.relative(root, path.resolve(root, file)).split(path.sep).join('/') : null)
