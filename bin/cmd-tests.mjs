@@ -260,7 +260,7 @@ function printCoverage(cov) {
 // cobertura, funcionalidades e o mapa testes × funcionalidades.
 export async function testsContext(args) {
   const { root } = linkedProject()
-  const { detectRunners, productionDbSignals } = await import('./tests.mjs')
+  const { detectRunners, productionDbSignals, testFileList } = await import('./tests.mjs')
   const guide = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'skills', 'tests', 'guide.md')
   const { runners, others } = detectRunners(root, { python: readState(root).python })
   const out = ['# Tests context', await contentLangNote(root), `Guide (read it first, with the Read tool): ${guide}`, '']
@@ -290,6 +290,8 @@ export async function testsContext(args) {
     out.push("## Project features (for the map and to ask what can't break)", ...(titles.length ? titles.map((title) => `- ${title}`) : ['- (none recorded)']), '')
     const map = tests?.features ?? []
     out.push('## Tests × features map already recorded', ...(map.length ? map.map((m) => `- ${m.feature}: ${m.status}${m.critical ? " (can't break)" : ''}${m.tests?.length ? ` — ${m.tests.join(', ')}` : ''}`) : ['- empty']), '')
+    const missing = missingExplanations(testFileList(root), tests?.explanations)
+    out.push(`## What each test file is for (shown in the dashboard): ${missing.length} test file(s) without an explanation${missing.length ? ' (list: faundr tests-explain --missing)' : ''}`, '')
   } catch (err) {
     out.push(`(could not read the dashboard data: ${err.message})`)
   }
@@ -410,4 +412,53 @@ export async function testsShow(args = []) {
   for (const r of runs.slice(0, 3))
     console.log(`${r.created_at} ${r.runner}${r.scope !== 'all' ? ` (${r.scope === 'changed' ? 'only what changed' : 'files'})` : ''}: ${r.passed} passed, ${r.failed} failed, ${r.skipped} skipped${r.error ? ` · ${r.error}` : ''}`)
   for (const c of cases) console.log(`${c.status === 'failed' ? 'FAILING' : 'FLAKY'} ${c.name}${c.file ? ` (${c.file})` : ''}`)
+}
+
+// ---- Para que serve cada arquivo de teste (o drawer do teste no painel mostra) ----------------
+
+/** Arquivos de teste do projeto que ainda não têm explicação no painel. */
+export function missingExplanations(files, explanations) {
+  const have = new Set(Object.keys(explanations ?? {}))
+  return files.filter((f) => !have.has(f))
+}
+
+// Caminho do arquivo como o painel guarda: barras normais, sem "./" no começo.
+const fileKey = (file) => String(file).trim().split('\\').join('/').replace(/^\.\//, '')
+
+/** Lê o arquivo de --json: uma lista [{ "file": "...", "text": "..." }]. */
+export function readExplanationsJson(text) {
+  let list
+  try {
+    list = JSON.parse(text)
+  } catch {
+    throw new Error('The --json file is not valid JSON: use [{ "file": "src/a.test.ts", "text": "..." }].')
+  }
+  if (!Array.isArray(list)) throw new Error('The --json file must be a list: [{ "file": "src/a.test.ts", "text": "..." }].')
+  return list.filter((i) => i && typeof i.file === 'string' && typeof i.text === 'string' && i.file.trim() && i.text.trim()).map((i) => ({ file: fileKey(i.file), text: i.text.trim() }))
+}
+
+export async function testsExplain(args) {
+  const { root } = linkedProject()
+  if (args.includes('--missing')) {
+    const { testFileList } = await import('./tests.mjs')
+    const { tests } = await testsApi({ action: 'list' })
+    const missing = missingExplanations(testFileList(root), tests?.explanations)
+    if (!missing.length) return console.log('Every test file already has an explanation on the dashboard.')
+    console.log(`${missing.length} test file(s) without an explanation:`)
+    for (const f of missing) console.log(`- ${f}`)
+    return
+  }
+  const jsonPath = flag(args, '--json')
+  const items = jsonPath
+    ? readExplanationsJson(fs.readFileSync(path.resolve(process.cwd(), jsonPath), 'utf8'))
+    : [{ file: fileKey(flag(args, '--file') ?? ''), text: (flag(args, '--text') ?? '').trim() }].filter((i) => i.file && i.text)
+  if (!items.length) throw new Error('usage: faundr tests-explain --file "<test file>" --text "<what it checks and what would break for the user>"\n  or: faundr tests-explain --json <file with [{ "file", "text" }]>\n  or: faundr tests-explain --missing   (test files without an explanation)')
+  let saved = 0
+  let total = 0
+  for (let i = 0; i < items.length; i += 300) {
+    const r = await testsApi({ action: 'explain', items: items.slice(i, i + 300) })
+    saved += r.saved
+    total = r.total
+  }
+  console.log(`Saved ${saved} explanation(s); ${total} test file(s) explained on the dashboard.`)
 }

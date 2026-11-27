@@ -86,3 +86,13 @@ test('lcov de executor em subpasta: caminho relativo vem da pasta em que rodou; 
   const url = pathToFileURL(path.join(root, 'lib', 'a.mjs')).href
   assert.deepEqual([...fromLcov(`SF:${url}\nDA:1,1\nend_of_record\n`, root).keys()], ['lib/a.mjs'])
 })
+
+test('explicações: lista dos arquivos sem explicação e leitura do --json', async () => {
+  const { missingExplanations, readExplanationsJson } = await import('../bin/cmd-tests.mjs')
+  assert.deepEqual(missingExplanations(['a.test.ts', 'b.test.ts'], { 'a.test.ts': { text: 'x' } }), ['b.test.ts'])
+  assert.deepEqual(missingExplanations(['a.test.ts'], null), ['a.test.ts'])
+  const items = readExplanationsJson(JSON.stringify([{ file: '.\\src\\a.test.ts', text: ' confere ' }, { file: 'b.test.ts', text: '' }, { nope: 1 }]))
+  assert.deepEqual(items, [{ file: 'src/a.test.ts', text: 'confere' }])
+  assert.throws(() => readExplanationsJson('{nope'), /not valid JSON/)
+  assert.throws(() => readExplanationsJson('{"a":1}'), /must be a list/)
+})

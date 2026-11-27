@@ -23,6 +23,7 @@ Read the **guide**'s sections on fixing a failing test and fixing a flaky test (
    - you cannot tell which is right → **ask the owner** what the expected behavior is, with the two options.
 4. **Never**: delete the test, `.skip`, `.only`, loosen the `expect`, change the expected value without explaining, raise the timeout as a "solution".
 5. Run the file again and, at the end, all of them (`faundr tests-run`): the fix cannot break another test. A test that passes again closes its error in the Errors section on its own.
+6. If the context says some test files have no explanation, check whether this one is among them (`faundr tests-explain --missing`) and, if so, write it: `faundr tests-explain --file "<test file>" --text "<what the file checks and what would break for the user, up to 400 characters, no code terms>"`. It shows in the test's drawer on the dashboard.
 
 ## Flaky test (passes and fails without the code changing)
 

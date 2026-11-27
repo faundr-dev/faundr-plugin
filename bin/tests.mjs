@@ -165,11 +165,16 @@ function nodeTestArgs(cmd) {
 // Um teste por chamada it(...)/test(...) com nome (estimativa sem rodar nada).
 const CASE_CALL = /\b(?:it|test)(?:\.(only|skip|todo|fixme|fail|concurrent|each\s*\([^)]*\)))?\s*\(\s*['"`]/g
 
-/** Inventário: arquivos de teste, estimativa de testes, quais são de ponta a ponta (navegador). */
-export function inventory(root, files = projectFiles(root).files) {
+/** Os arquivos de teste do projeto (caminhos relativos à raiz). */
+export function testFileList(root, files = projectFiles(root).files) {
   // Rust: o teste de unidade fica no próprio arquivo (#[test]), então o .rs entra se tiver um.
   const isTest = (f) => LANG_TEST_FILES.some((re) => re.test(f)) || (f.endsWith('.rs') && RUST_INLINE_TEST.test(read(root, f) ?? ''))
-  const testFiles = files.filter((f) => !NOT_PROJECT.test(f) && !/(^|\/)(vendor|target)\//.test(f) && isTest(f))
+  return files.filter((f) => !NOT_PROJECT.test(f) && !/(^|\/)(vendor|target)\//.test(f) && isTest(f))
+}
+
+/** Inventário: arquivos de teste, estimativa de testes, quais são de ponta a ponta (navegador). */
+export function inventory(root, files = projectFiles(root).files) {
+  const testFiles = testFileList(root, files)
   let cases = 0
   let skipped = 0
   let e2eFiles = 0

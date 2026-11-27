@@ -93,6 +93,7 @@
 //   faundr tests-show                          last run, failing and flaky tests
 //   faundr tests-context [--fix]               context for the agent to write or fix tests ("tests" and "tests-fix" skills)
 //   faundr tests-map "<feature>" …             tests × features map (--status, --tests, --critical)
+//   faundr tests-explain --file f --text "…"   what a test file is for, shown in its dashboard drawer (--json, --missing)
 //   faundr tests-mutation [--files a:10-20] [--budget 5]  mutation testing (Stryker) on what the session changed; defects that escape become T-n
 //   faundr tests-ignore T-<n> --reason …       ignores a defect with a reason (equivalent | false-alarm | later)
 //   faundr errors [--all | --resolved]         open errors in commands (E-n); they close by themselves when the command passes
@@ -195,6 +196,7 @@ const qualityShow = lazy('./cmd-quality.mjs', 'qualityShow')
 const testsContext = lazy('./cmd-tests.mjs', 'testsContext')
 const testsIgnore = lazy('./cmd-tests.mjs', 'testsIgnore')
 const testsMap = lazy('./cmd-tests.mjs', 'testsMap')
+const testsExplain = lazy('./cmd-tests.mjs', 'testsExplain')
 const testsMutation = lazy('./cmd-tests.mjs', 'testsMutation')
 const testsRun = lazy('./cmd-tests.mjs', 'testsRun')
 const testsScan = lazy('./cmd-tests.mjs', 'testsScan')
@@ -341,7 +343,7 @@ function isNetworkError(err) {
 
 function printCommands() {
   console.log(
-    'commands: setup | login | logout | link | status | config | browse | browse-key | checkpoint | checkpoints | restore | team | inbox | msg | map | graph | graph-query | graph-path | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | memory-edit | workflow | skills | concern | resolve | start | done | task-remove | task-review | focus | board | feature-discard | feature-restore | feature-done | criteria | criteria-check | handoff | handover | weekly | resume | diagram-save | architecture-check | stack-scan | env-check | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | skill-report | security-import | security-supabase | db-test | launch-check | privacy | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-recipe | error-archive | parallel | error-reopen | errors-dsn | errors-sdk | errors-uptime | errors-import-sentry | hook',
+    'commands: setup | login | logout | link | status | config | browse | browse-key | checkpoint | checkpoints | restore | team | inbox | msg | map | graph | graph-query | graph-path | graph-callers | graph-skeleton | graph-grep | statusline-install | agents-md | usage --debug | feature | task | decision | rule | memory-edit | workflow | skills | concern | resolve | start | done | task-remove | task-review | focus | board | feature-discard | feature-restore | feature-done | criteria | criteria-check | handoff | handover | weekly | resume | diagram-save | architecture-check | stack-scan | env-check | stack-context | stack-save | design-lint | design-context | design-finding | design-show | design-resolve | security-scan | security-show | security-resolve | security-ignore | security-context | security-finding | security-review-done | skill-report | security-import | security-supabase | db-test | launch-check | privacy | security-report | quality-scan | quality-show | quality-resolve | quality-ignore | quality-reopen | quality-context | quality-finding | quality-review-done | quality-rule | quality-ladder | tests-scan | tests-run | tests-show | tests-context | tests-map | tests-explain | tests-mutation | tests-ignore | errors | error-show | error-resolve | error-recipe | error-archive | parallel | error-reopen | errors-dsn | errors-sdk | errors-uptime | errors-import-sentry | hook',
   )
 }
 
@@ -441,6 +443,7 @@ function cliCommands() {
     'tests-show': (a) => testsShow(a),
     'tests-context': (a) => testsContext(a),
     'tests-map': (a) => testsMap(a),
+    'tests-explain': (a) => testsExplain(a),
     'tests-mutation': (a) => testsMutation(a),
     'tests-ignore': (a) => testsIgnore(a),
     errors: (a) => errorsList(a),

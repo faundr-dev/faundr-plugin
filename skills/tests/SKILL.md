@@ -1,6 +1,6 @@
 ---
 description: AI tests in the project linked to Faundr — asks the owner what can't break, links each feature to the tests that protect it (tests × features map on the dashboard) and writes the missing tests following Faundr's guide (front door, hand-written expected value, empty/error/edge cases, see the test fail first), running them with faundr tests-run. Use when the user asks for tests, asks whether the app is protected, or when coverage of what changed falls below the rest of the project.
-argument-hint: '[feature or file]  (no argument: starts with what can''t break)'
+argument-hint: '[feature or file | explain]  (no argument: starts with what can''t break; explain: writes what each test file is for)'
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/bin/faundr.mjs" *) Bash(faundr *) Bash(npm test*) Bash(npm run *) Bash(npx vitest *) Bash(npx jest *) Bash(npx playwright *) Read Grep Glob Edit Write
 ---
 
@@ -41,6 +41,19 @@ Start with the critical feature that is `sem-testes` or `parcial`. Then, before 
 - For each new test of code that already exists, **see it fail once**: break the line on purpose, run, check the red and **undo the break**. Tell the owner you did this.
 - Follow the guide's 12 rules. No recomputing the expected value the way the code computes it; no mocking the project's own modules.
 - If you find a real bug while testing (the correct test fails), **don't change the test to make it pass**: stop, explain to the owner what you found and ask whether to fix it.
+- **Explain each test file you create or change** for the dashboard (the test's drawer shows it as "what it is for"): `faundr tests-explain --file "<test file>" --text "<explanation>"`. Follow "How to write the explanation" below.
+
+## How to write the explanation (what a test file is for)
+
+Up to 400 characters, in the project's content language, for someone who doesn't program. Two parts: **what the tests in this file check**, in product words, and **what would break for the person using the app** if they started failing. No function, variable or file names, no "asserts", "mocks" or "renders". Example: "Confere o total do carrinho: soma dos itens, cupom de desconto e frete grátis a partir de R$ 100. Se falhar, o cliente pode pagar o valor errado na compra." Read the file before writing: describe what it really checks, not what its name suggests.
+
+## Explain mode (argument `explain` or `explicar`)
+
+Fills in what each existing test file is for, all at once, without asking between files:
+1. `faundr tests-explain --missing` lists the test files without an explanation.
+2. Read each one (the test names and what they check are enough; skim long files) and write its explanation following the rules above.
+3. Save them in a JSON file in a temporary folder, `[{ "file": "<path as listed>", "text": "<explanation>" }, …]`, and send with `faundr tests-explain --json <that file>` (every 30 files or so, so nothing is lost if the conversation is summarized; run `--missing` again to see what's left).
+4. Answer in one line: how many files were explained and that the explanations show in each test's drawer on the dashboard. Don't run the tests in this mode.
 
 At the end, run everything once with coverage (if the tool exists): `faundr tests-run --coverage`. Update the map (`--status coberta` where it became covered).
 
